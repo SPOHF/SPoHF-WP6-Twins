@@ -78,28 +78,44 @@ class SyncOrchestrator:
     async def _sync_endpoint(self, endpoint: str) -> int:
         """Sync a single API endpoint.
 
+        Uses windowed fetching to get all historical data when doing initial sync,
+        or regular pagination for incremental syncs.
+
         Returns:
             Number of records synced
         """
         async with self.neo4j.session() as session:
             state = SyncStateManager(session, endpoint)
-            since = await state.get_last_timestamp(self.settings.sync_lookback_hours)
+            since, is_initial = await state.get_last_timestamp_with_status(
+                self.settings.sync_lookback_hours
+            )
 
             logger.info(
                 "sync_starting",
                 endpoint=endpoint,
                 since=since.isoformat(),
+                mode="windowed" if is_initial else "incremental",
             )
 
             batch: list[dict] = []
             latest_timestamp = since
             total_count = 0
 
-            async for reading in self.client.fetch_all_since(
-                endpoint,
-                since,
-                self.settings.sync_max_pages,
-            ):
+            # Use windowed fetch for initial sync, regular for incremental
+            if is_initial:
+                fetch_iter = self.client.fetch_all_windowed(
+                    endpoint,
+                    since,
+                    max_windows=50,
+                )
+            else:
+                fetch_iter = self.client.fetch_all_since(
+                    endpoint,
+                    since,
+                    self.settings.sync_max_pages,
+                )
+
+            async for reading in fetch_iter:
                 batch.append(self._reading_to_params(reading))
 
                 # Track the latest timestamp we've seen

@@ -1,0 +1,56 @@
+# WP6 Data Sync - Helm Values
+# Syncs sensor data from SPoHF/Yookr API to Neo4j
+
+image:
+  repository: ""  # Required: e.g., ghcr.io/yourorg/wp6-data
+  pullPolicy: Always
+  tag: "latest"
+
+# Neo4j (deployed alongside)
+neo4j:
+  enabled: true
+  auth:
+    password: ""  # Set via secret
+
+# Dashboard
+dashboard:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  ingress:
+    enabled: true
+    host: ""  # Required: e.g., wp6.example.com
+
+# Sync CronJob
+sync:
+  enabled: true
+  schedule: "*/15 * * * *"  # Every 15 minutes
+  lookbackHours: 24
+  pageSize: 1000
+  maxPages: 1000
+  endpoints: "yookr-data"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# SPoHF API
+api:
+  baseUrl: "https://backoffice.spohf.com"
+  # token set via secret
+
+# Secrets (referenced from ExternalSecret or direct)
+secrets:
+  create: false  # Set to true to create secret from values, false to use existing
+  existingSecret: ""  # Name of existing secret (default: <release>-secrets)
+  apiToken: ""
+  neo4jPassword: ""

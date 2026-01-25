@@ -24,6 +24,7 @@ WORKDIR /home/appuser/app
 # Copy virtual environment and source from builder
 COPY --from=builder --chown=appuser:appuser /app/.venv /home/appuser/app/.venv
 COPY --from=builder --chown=appuser:appuser /app/src /home/appuser/app/src
+COPY --chown=appuser:appuser static/ /home/appuser/app/static/
 
 # Set path to use venv and add src to PYTHONPATH
 ENV PATH="/home/appuser/app/.venv/bin:$PATH"

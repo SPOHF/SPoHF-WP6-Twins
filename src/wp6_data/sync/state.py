@@ -22,6 +22,17 @@ class SyncStateManager:
         Returns the stored timestamp, or (now - lookback_hours) if no
         previous sync exists.
         """
+        ts, _ = await self.get_last_timestamp_with_status(default_lookback_hours)
+        return ts
+
+    async def get_last_timestamp_with_status(
+        self, default_lookback_hours: int = 24
+    ) -> tuple[datetime, bool]:
+        """Get last successful sync timestamp and whether this is initial sync.
+
+        Returns:
+            Tuple of (timestamp, is_initial_sync)
+        """
         result = await self._session.run(
             """
             MATCH (m:SyncMetadata {endpoint: $endpoint})
@@ -34,10 +45,10 @@ class SyncStateManager:
         if record and record["ts"]:
             # Neo4j returns neo4j.time.DateTime, convert to Python datetime
             neo4j_dt = record["ts"]
-            return neo4j_dt.to_native()
+            return neo4j_dt.to_native(), False
 
-        # Default: look back N hours from now
-        return datetime.now(timezone.utc) - timedelta(hours=default_lookback_hours)
+        # Default: look back N hours from now (initial sync)
+        return datetime.now(timezone.utc) - timedelta(hours=default_lookback_hours), True
 
     async def update_timestamp(
         self,

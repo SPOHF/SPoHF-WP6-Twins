@@ -1,16 +1,27 @@
 """Simple dashboard for sensor data visualization."""
 
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+load_dotenv()
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from neo4j import GraphDatabase
 from plotly.subplots import make_subplots
 
 app = FastAPI(title="WP6 Sensor Dashboard")
+
+# Serve static files (logo, etc.) from project root
+# __file__ is src/wp6_data/dashboard.py, so .parent.parent.parent gets to wp6-data/
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+if (PROJECT_ROOT / "static").exists():
+    app.mount("/static", StaticFiles(directory=PROJECT_ROOT / "static"), name="static")
 
 # Neo4j connection from environment
 NEO4J_URI = os.getenv("WP6_NEO4J_URI", "bolt://localhost:7687")
@@ -92,14 +103,23 @@ async def home():
             ul {{ line-height: 1.8; }}
             a {{ color: #0066cc; text-decoration: none; }}
             a:hover {{ text-decoration: underline; }}
+            .logo {{ margin-bottom: 20px; }}
+            .logo img {{ max-height: 80px; }}
+            footer {{ margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; }}
         </style>
     </head>
     <body>
+        <div class="logo">
+            <img src="/static/interreg.png" alt="Interreg Logo">
+        </div>
         <h1>WP6 Sensor Dashboard</h1>
         <h2>Available Sensors</h2>
         <ul>{sensor_list}</ul>
         <h2>Compare Sensors</h2>
         <p><a href="/chart/soilConductivity,temperature?dual=true">soilConductivity vs temperature (dual axis)</a></p>
+        <footer>
+            <img src="/static/interreg.png" alt="Interreg - Funded by the European Union" style="max-height: 60px;">
+        </footer>
     </body>
     </html>
     """

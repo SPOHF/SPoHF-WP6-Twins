@@ -12,6 +12,7 @@ dependencies = [
     "plotly>=6.5.2",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
+    "python-dateutil>=2.9.0.post0",
     "structlog>=25.1",
     "tenacity>=9.0",
     "uvicorn>=0.40.0",

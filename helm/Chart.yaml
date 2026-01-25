@@ -1,0 +1,6 @@
+apiVersion: v2
+name: wp6-data
+description: WP6 Sensor Data - Sync job and Dashboard
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
