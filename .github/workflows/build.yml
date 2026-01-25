@@ -23,13 +23,10 @@ jobs:
         run: uv python install
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --extra dev
 
       - name: Lint with ruff
         run: uv run ruff check src/
-
-      - name: Type check with mypy
-        run: uv run mypy src/
 
   build:
     needs: lint

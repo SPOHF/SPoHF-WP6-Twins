@@ -1,7 +1,7 @@
 """SPoHF API client with pagination and retry logic."""
 
 from collections.abc import AsyncIterator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import structlog
@@ -51,8 +51,8 @@ class SpoHFClient:
         url = f"{self.base_url}/api/v1/data/{endpoint}"
         params = {
             "timestamp": timestamp.isoformat(),
-            "size": self.page_size,
-            "from": offset,
+            "size": str(int(self.page_size)),
+            "from": str(int(offset)),
         }
 
         logger.debug("fetching_page", endpoint=endpoint, offset=offset)
@@ -145,10 +145,10 @@ class SpoHFClient:
         """
         async with httpx.AsyncClient() as client:
             # Always start from 2024-01-01 for windowed fetch to get all historical data
-            current_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+            current_ts = datetime(2024, 1, 1, tzinfo=UTC)
 
             # End at tomorrow to catch all data
-            end_ts = datetime.now(timezone.utc) + timedelta(days=1)
+            end_ts = datetime.now(UTC) + timedelta(days=1)
 
             window_count = 0
             total_yielded = 0

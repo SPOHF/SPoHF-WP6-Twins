@@ -1,20 +1,21 @@
 """Main sync orchestration logic."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-
-def ensure_utc(dt: datetime) -> datetime:
-    """Ensure datetime is timezone-aware UTC."""
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
 
 from wp6_data.api import SensorReading, SpoHFClient
 from wp6_data.config import Settings
 from wp6_data.graph import CONSTRAINTS, Neo4jConnection, batch_upsert_readings
 from wp6_data.sync.state import SyncStateManager
+
+
+def ensure_utc(dt: datetime) -> datetime:
+    """Ensure datetime is timezone-aware UTC."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
 
 logger = structlog.get_logger()
 
@@ -44,7 +45,7 @@ class SyncOrchestrator:
         Returns:
             Stats dict with endpoints, total_records, errors, duration_seconds
         """
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         stats: dict[str, Any] = {
             "endpoints": {},
             "total_records": 0,
@@ -66,7 +67,7 @@ class SyncOrchestrator:
                     stats["errors"].append(f"{endpoint}: {e}")
 
             stats["duration_seconds"] = (
-                datetime.now(timezone.utc) - start_time
+                datetime.now(UTC) - start_time
             ).total_seconds()
             logger.info("sync_completed", **stats)
 
@@ -97,7 +98,7 @@ class SyncOrchestrator:
                 mode="windowed" if is_initial else "incremental",
             )
 
-            batch: list[dict] = []
+            batch: list[dict[str, Any]] = []
             latest_timestamp = since
             total_count = 0
 
@@ -147,7 +148,7 @@ class SyncOrchestrator:
             )
             return total_count
 
-    def _reading_to_params(self, reading: SensorReading) -> dict:
+    def _reading_to_params(self, reading: SensorReading) -> dict[str, Any]:
         """Convert SensorReading to Neo4j query parameters."""
         return {
             "sensor_id": reading.sensor_id,

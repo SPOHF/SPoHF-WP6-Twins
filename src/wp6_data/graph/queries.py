@@ -1,3 +1,7 @@
+from typing import Any
+
+from neo4j import AsyncSession
+
 """Cypher queries for Neo4j operations."""
 
 # Schema constraints and indexes (run once on startup)
@@ -53,8 +57,8 @@ RETURN count(reading) AS upserted_count
 
 
 async def batch_upsert_readings(
-    session,  # AsyncSession
-    readings: list[dict],
+    session: AsyncSession,
+    readings: list[dict[str, Any]],
 ) -> int:
     """Upsert a batch of readings to Neo4j.
 

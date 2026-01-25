@@ -18,7 +18,7 @@ class SensorReading(BaseModel):
     device_name: str = "unknown"  # Optional - some records don't have it
     sensor_tag: str  # Measurement type: solarRadiation, soilMoisture, etc.
     value: str  # Coerced to string
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None
     datetime_measure: datetime  # When measurement was taken
     timestamp: datetime  # When ingested into API
 

@@ -2,7 +2,9 @@
 
 import asyncio
 import logging
+import os
 import sys
+from typing import Any
 
 import structlog
 
@@ -12,7 +14,7 @@ from wp6_data.sync import SyncOrchestrator
 
 def configure_logging(settings: Settings) -> None:
     """Configure structlog for JSON or console output."""
-    processors: list = [
+    processors: list[Any] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
@@ -39,12 +41,19 @@ def configure_logging(settings: Settings) -> None:
 
 def main() -> int:
     """Main entry point for sync job."""
-    try:
-        settings = Settings()
-    except Exception as e:
-        print(f"Configuration error: {e}", file=sys.stderr)
-        print("Required environment variables: WP6_API_TOKEN, WP6_NEO4J_URI, WP6_NEO4J_PASSWORD")
-        return 1
+    api_token = os.environ.get("WP6_API_TOKEN")
+    neo4j_uri = os.environ.get("WP6_NEO4J_URI")
+    neo4j_password = os.environ.get("WP6_NEO4J_PASSWORD")
+
+    if api_token is None or neo4j_uri is None or neo4j_password is None:
+        raise ValueError("Missing one or more required environment variables: "\
+                         "WP6_API_TOKEN, WP6_NEO4J_URI, WP6_NEO4J_PASSWORD")
+
+    settings = Settings(
+        api_token=api_token,
+        neo4j_uri=neo4j_uri,
+        neo4j_password=neo4j_password,
+    )
 
     configure_logging(settings)
     logger = structlog.get_logger()

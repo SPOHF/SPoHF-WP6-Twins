@@ -1,6 +1,6 @@
 """Sync state management stored in Neo4j."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from neo4j import AsyncSession
 
@@ -48,7 +48,7 @@ class SyncStateManager:
             return neo4j_dt.to_native(), False
 
         # Default: look back N hours from now (initial sync)
-        return datetime.now(timezone.utc) - timedelta(hours=default_lookback_hours), True
+        return datetime.now(UTC) - timedelta(hours=default_lookback_hours), True
 
     async def update_timestamp(
         self,

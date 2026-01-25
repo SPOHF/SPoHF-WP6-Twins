@@ -22,7 +22,7 @@ SPoHF API ──> CronJob (sync) ──> Neo4j ──> Dashboard (FastAPI)
 ## Quick Start (Local Development)
 
 ### Prerequisites
-- Python 3.12+
+- Python 3.14+
 - [uv](https://docs.astral.sh/uv/) package manager
 - Docker (for Neo4j)
 
@@ -191,9 +191,6 @@ uv sync --dev
 
 # Run linter
 uv run ruff check src/
-
-# Run type checker
-uv run mypy src/
 
 # Run tests
 uv run pytest

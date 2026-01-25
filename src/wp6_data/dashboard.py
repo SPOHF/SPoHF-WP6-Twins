@@ -2,18 +2,20 @@
 
 import os
 from pathlib import Path
-
-from dotenv import load_dotenv
-load_dotenv()
+from typing import Any
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from neo4j import GraphDatabase
 from plotly.subplots import make_subplots
+
+load_dotenv()
+
 
 app = FastAPI(title="WP6 Sensor Dashboard")
 
@@ -29,16 +31,15 @@ NEO4J_USER = os.getenv("WP6_NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("WP6_NEO4J_PASSWORD", "localdevpassword")
 
 
-def get_driver():
+def get_driver() -> GraphDatabase.driver.__class__:
     return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
 
 def fetch_data(sensor_tags: list[str] | None = None, limit: int = 50000) -> pd.DataFrame:
     """Fetch sensor readings from Neo4j."""
-    with get_driver() as driver:
-        with driver.session() as session:
-            tag_filter = "WHERE s.tag IN $tags" if sensor_tags else ""
-            query = f"""
+    with get_driver() as driver, driver.session() as session:
+        tag_filter = "WHERE s.tag IN $tags" if sensor_tags else ""
+        query = f"""
             MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
             {tag_filter}
             RETURN d.device_name AS device, s.tag AS sensor,
@@ -46,13 +47,13 @@ def fetch_data(sensor_tags: list[str] | None = None, limit: int = 50000) -> pd.D
             ORDER BY r.datetime_measure
             LIMIT $limit
             """
-            result = session.run(query, tags=sensor_tags, limit=limit)
-            records = []
-            for r in result:
-                rec = dict(r)
-                if rec.get("time"):
-                    rec["time"] = rec["time"].to_native()
-                records.append(rec)
+        result = session.run(query, tags=sensor_tags, limit=limit)
+        records = []
+        for r in result:
+            rec = dict(r)
+            if rec.get("time"):
+                rec["time"] = rec["time"].to_native()
+            records.append(rec)
 
     df = pd.DataFrame(records)
     if not df.empty:
@@ -61,21 +62,19 @@ def fetch_data(sensor_tags: list[str] | None = None, limit: int = 50000) -> pd.D
         df = df.sort_values("time")
     return df
 
-
-def fetch_available_sensors() -> list[dict]:
+def fetch_available_sensors() -> list[dict[str, Any]]:
     """Get list of sensors with reading counts."""
-    with get_driver() as driver:
-        with driver.session() as session:
-            result = session.run("""
+    with get_driver() as driver, driver.session() as session:
+        result = session.run("""
                 MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
                 RETURN d.device_name AS device, s.tag AS sensor, count(r) AS readings
                 ORDER BY readings DESC
             """)
-            return [dict(r) for r in result]
+        return [dict(r) for r in result]
 
 
 @app.get("/", response_class=HTMLResponse)
-async def home():
+async def home() -> str:
     """Dashboard home page."""
     sensors = fetch_available_sensors()
 
@@ -116,9 +115,12 @@ async def home():
         <h2>Available Sensors</h2>
         <ul>{sensor_list}</ul>
         <h2>Compare Sensors</h2>
-        <p><a href="/chart/soilConductivity,temperature?dual=true">soilConductivity vs temperature (dual axis)</a></p>
+        <p>
+            <a href="/chart/soilConductivity,temperature?dual=true">EC vs temp (dual axis)
+            </a>
+        </p>
         <footer>
-            <img src="/static/interreg.png" alt="Interreg - Funded by the European Union" style="max-height: 60px;">
+            <img src="/static/interreg.png" alt="Interreg" style="max-height: 60px;">
         </footer>
     </body>
     </html>
@@ -129,7 +131,7 @@ async def home():
 async def chart(
     sensors: str,
     dual: bool = Query(False, description="Use dual y-axis for 2 sensors"),
-):
+) -> str:
     """Render chart for specified sensors."""
     sensor_list = [s.strip() for s in sensors.split(",")]
     df = fetch_data(sensor_tags=sensor_list)

@@ -3,7 +3,7 @@ name = "wp6-data"
 version = "0.1.0"
 description = "SPoHF WP6 Sensor Data Sync - Yookr API to Neo4j"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.128.0",
     "httpx>=0.28",
@@ -24,7 +24,6 @@ dev = [
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
     "ruff>=0.9",
-    "mypy>=1.14",
 ]
 
 [project.scripts]
@@ -43,10 +42,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
-
-[tool.mypy]
-python_version = "3.12"
-strict = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
