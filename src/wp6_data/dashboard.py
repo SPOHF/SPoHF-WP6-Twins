@@ -73,6 +73,12 @@ def fetch_available_sensors() -> list[dict[str, Any]]:
         return [dict(r) for r in result]
 
 
+@app.get("/health")
+async def health() -> dict[str, str]:
+    """Health check endpoint for k8s probes (doesn't hit Neo4j)."""
+    return {"status": "ok"}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def home() -> str:
     """Dashboard home page."""
