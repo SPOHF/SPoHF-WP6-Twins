@@ -69,10 +69,27 @@ All configuration via `WP6_*` environment variables:
 | `WP6_NEO4J_DATABASE` | Neo4j database name | `neo4j` |
 | `WP6_SYNC_LOOKBACK_HOURS` | Hours to look back on first sync | `24` |
 | `WP6_SYNC_PAGE_SIZE` | Records per API page | `100` |
-| `WP6_SYNC_MAX_PAGES` | Max pages per sync run | `100` |
+| `WP6_SYNC_MAX_PAGES` | Max pages/windows per sync run | `100` |
+| `WP6_SYNC_MODE` | Sync mode: `auto`, `windowed`, or `incremental` | `auto` |
 | `WP6_ENDPOINTS` | Comma-separated API endpoints | `yookr-data` |
 | `WP6_LOG_LEVEL` | Log level (DEBUG, INFO, WARN, ERROR) | `INFO` |
 | `WP6_LOG_FORMAT` | Log format (`json` or `console`) | `json` |
+
+### Sync Modes
+
+The sync job supports three modes via `WP6_SYNC_MODE`:
+
+| Mode | Behavior |
+|------|----------|
+| `auto` | (default) Uses windowed mode on first run, incremental after |
+| `windowed` | Full historical fetch using daily time windows from 2024-01-01 |
+| `incremental` | Only fetch new data since last sync timestamp |
+
+**Windowed mode** iterates through daily time windows to fetch all historical data. Use this to backfill data or re-sync after the API provider fixes data.
+
+**Incremental mode** fetches only new records since the last successful sync, using the stored sync state.
+
+Data is upserted using MERGE queries - running windowed sync multiple times will update existing records (if values changed) without creating duplicates.
 
 ### Available Endpoints
 
@@ -136,6 +153,7 @@ sync:
   enabled: true
   schedule: "*/15 * * * *"
   lookbackHours: 24
+  mode: "auto"  # or "windowed" for full re-sync
 
 neo4j:
   enabled: true  # Set false to use external Neo4j
@@ -155,6 +173,21 @@ helm install wp6-data ./helm \
   --set image.repository=ghcr.io/yourorg/wp6-data \
   --set dashboard.ingress.host=wp6.example.com \
   --set secrets.existingSecret=wp6-data-secrets
+```
+
+### Running a Full Re-sync
+
+To trigger a full historical sync (windowed mode) in Kubernetes:
+
+```bash
+# Create a one-off job with windowed mode
+kubectl create job wp6-sync-full --from=cronjob/wp6-data-sync -n spohf-system
+kubectl set env job/wp6-sync-full -n spohf-system WP6_SYNC_MODE=windowed
+
+# Or update the helm release temporarily
+helm upgrade wp6-data ./helm --set sync.mode=windowed
+# Then revert after sync completes
+helm upgrade wp6-data ./helm --set sync.mode=auto
 ```
 
 ### Required Secret

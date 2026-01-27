@@ -39,7 +39,7 @@ MERGE (s:Sensor {device_id: r.sensor_id, tag: r.sensor_tag})
 ON CREATE SET s.created_at = datetime()
 MERGE (d)-[:HAS_SENSOR]->(s)
 
-// Create Reading (unique by sensor + datetime_measure to avoid duplicates)
+// Create or update Reading (unique by sensor + datetime_measure)
 MERGE (reading:Reading {
     sensor_id: r.sensor_id,
     tag: r.sensor_tag,
@@ -50,6 +50,11 @@ ON CREATE SET
     reading.raw_value = r.value,
     reading.api_timestamp = datetime(r.api_timestamp),
     reading.synced_at = datetime()
+ON MATCH SET
+    reading.value = toFloat(r.value),
+    reading.raw_value = r.value,
+    reading.api_timestamp = datetime(r.api_timestamp),
+    reading.updated_at = datetime()
 MERGE (s)-[:RECORDED]->(reading)
 
 RETURN count(reading) AS upserted_count

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     sync_lookback_hours: int = 24  # How far back on first run
     sync_page_size: int = 100
     sync_max_pages: int = 100  # Safety limit
+    sync_mode: str = "auto"  # "auto", "windowed", or "incremental"
 
     # Endpoints to sync (comma-separated)
     endpoints: str = "yookr-data"

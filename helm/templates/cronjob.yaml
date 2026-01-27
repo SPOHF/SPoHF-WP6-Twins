@@ -51,6 +51,8 @@ spec:
                   value: {{ .Values.sync.maxPages | quote }}
                 - name: WP6_ENDPOINTS
                   value: {{ .Values.sync.endpoints | quote }}
+                - name: WP6_SYNC_MODE
+                  value: {{ .Values.sync.mode | quote }}
                 - name: WP6_LOG_LEVEL
                   value: "INFO"
                 - name: WP6_LOG_FORMAT

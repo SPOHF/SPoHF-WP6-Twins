@@ -35,6 +35,7 @@ sync:
   pageSize: 1000
   maxPages: 1000
   endpoints: "yookr-data"
+  mode: "auto"  # "auto", "windowed" (full historical), or "incremental"
   resources:
     requests:
       cpu: 100m

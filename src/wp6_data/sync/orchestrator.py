@@ -19,7 +19,7 @@ def ensure_utc(dt: datetime) -> datetime:
 
 logger = structlog.get_logger()
 
-BATCH_SIZE = 100  # Records per Neo4j transaction
+BATCH_SIZE = 1000  # Records per Neo4j transaction
 
 
 class SyncOrchestrator:
@@ -91,23 +91,33 @@ class SyncOrchestrator:
                 self.settings.sync_lookback_hours
             )
 
+            # Determine sync mode: auto (based on state), windowed, or incremental
+            sync_mode = self.settings.sync_mode.lower()
+            if sync_mode == "windowed":
+                use_windowed = True
+            elif sync_mode == "incremental":
+                use_windowed = False
+            else:  # auto
+                use_windowed = is_initial
+
             logger.info(
                 "sync_starting",
                 endpoint=endpoint,
                 since=since.isoformat(),
-                mode="windowed" if is_initial else "incremental",
+                mode="windowed" if use_windowed else "incremental",
+                forced=sync_mode != "auto",
             )
 
             batch: list[dict[str, Any]] = []
             latest_timestamp = since
             total_count = 0
 
-            # Use windowed fetch for initial sync, regular for incremental
-            if is_initial:
+            # Use windowed fetch for full historical sync, regular for incremental
+            if use_windowed:
                 fetch_iter = self.client.fetch_all_windowed(
                     endpoint,
                     since,
-                    max_windows=50,
+                    max_windows=self.settings.sync_max_pages,
                 )
             else:
                 fetch_iter = self.client.fetch_all_since(
