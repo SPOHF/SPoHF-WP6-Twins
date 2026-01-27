@@ -4,7 +4,7 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Annotated
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -71,7 +71,7 @@ if (PROJECT_ROOT / "static").exists():
     app.mount("/static", StaticFiles(directory=PROJECT_ROOT / "static"), name="static")
 
 
-def verify_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
+def verify_auth(credentials: Annotated[HTTPBasicCredentials, Depends(security)]) -> str:
     """Verify Basic Auth credentials."""
     if not AUTH_USERS:
         raise HTTPException(

@@ -11,7 +11,8 @@ SENSOR_TABLES: dict[str, list[str]] = {
     "dendro": ["adc_ch1", "adc_ch2", "adc_ch3"],
     "lht65_e5": ["temp", "hum", "lux"],
     "lht65_ne117": ["temp", "hum", "temp_ext"],
-    "s1000": ["temp", "hum", "air_press", "lux", "wind_sp", "wind_dir", "rainfall", "pm25", "pm10", "co2"],
+    "s1000": ["temp", "hum", "air_press", "lux", "wind_sp", "wind_dir",
+              "rainfall", "pm25", "pm10", "co2"],
     "s2100": ["par"],
     "s2101": ["temp", "hum"],
     "s2103": ["temp", "hum", "co2"],
@@ -117,25 +118,24 @@ class MySQLConnection:
             raise RuntimeError("Not connected")
 
         sensors = []
-        async with self.pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                for table, columns in SENSOR_TABLES.items():
-                    try:
-                        # Get device count and total readings
-                        await cursor.execute(
-                            f"SELECT COUNT(DISTINCT device_id), COUNT(*) FROM {table}"
-                        )
-                        row = await cursor.fetchone()
-                        if row and row[1] > 0:
-                            sensors.append({
-                                "table": table,
-                                "devices": row[0],
-                                "readings": row[1],
-                                "measurements": columns or ["value"],
-                            })
-                    except Exception:
-                        # Table might not exist
-                        continue
+        async with self.pool.acquire() as conn, conn.cursor() as cursor:
+            for table, columns in SENSOR_TABLES.items():
+                try:
+                    # Get device count and total readings
+                    await cursor.execute(
+                        f"SELECT COUNT(DISTINCT device_id), COUNT(*) FROM {table}"
+                    )
+                    row = await cursor.fetchone()
+                    if row and row[1] > 0:
+                        sensors.append({
+                            "table": table,
+                            "devices": row[0],
+                            "readings": row[1],
+                            "measurements": columns or ["value"],
+                        })
+                except Exception:
+                    # Table might not exist
+                    continue
 
         return sorted(sensors, key=lambda x: -x["readings"])
 
@@ -147,13 +147,12 @@ class MySQLConnection:
         if table not in SENSOR_TABLES:
             raise ValueError(f"Unknown table: {table}")
 
-        async with self.pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(
-                    f"SELECT DISTINCT device_id FROM {table} ORDER BY device_id"
-                )
-                rows = await cursor.fetchall()
-                return [row[0] for row in rows]
+        async with self.pool.acquire() as conn, conn.cursor() as cursor:
+            await cursor.execute(
+                f"SELECT DISTINCT device_id FROM {table} ORDER BY device_id"
+            )
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
 
     async def get_readings_by_measurement(
         self,
@@ -192,18 +191,17 @@ class MySQLConnection:
 
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-            async with self.pool.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor:
-                    # Order DESC to get most recent data, then reverse for chronological display
-                    query = f"""
-                        SELECT device_id, received_at, {', '.join(columns)}
-                        FROM {table}
-                        {where_clause}
-                        ORDER BY received_at DESC
-                        LIMIT {limit_per_table}
-                    """
-                    await cursor.execute(query, params)
-                    rows = list(reversed(await cursor.fetchall()))
+            async with self.pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cursor:
+                # Order DESC to get most recent data, then reverse for chronological display
+                query = f"""
+                    SELECT device_id, received_at, {', '.join(columns)}
+                    FROM {table}
+                    {where_clause}
+                    ORDER BY received_at DESC
+                    LIMIT {limit_per_table}
+                """
+                await cursor.execute(query, params)
+                rows = list(reversed(await cursor.fetchall()))
 
             for row in rows:
                 for col in columns:
@@ -258,18 +256,17 @@ class MySQLConnection:
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        async with self.pool.acquire() as conn:
-            async with conn.cursor(aiomysql.DictCursor) as cursor:
-                # Order DESC to get most recent data, then reverse for chronological display
-                query = f"""
+        async with self.pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cursor:
+            # Order DESC to get most recent data, then reverse for chronological display
+            query = f"""
                     SELECT device_id, received_at, {', '.join(columns)}
                     FROM {table}
                     {where_clause}
                     ORDER BY received_at DESC
                     LIMIT {limit}
                 """
-                await cursor.execute(query, params)
-                rows = list(reversed(await cursor.fetchall()))
+            await cursor.execute(query, params)
+            rows = list(reversed(await cursor.fetchall()))
 
         if not rows:
             return pd.DataFrame(columns=["device", "sensor", "time", "value"])
