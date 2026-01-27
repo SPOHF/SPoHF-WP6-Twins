@@ -38,7 +38,7 @@ jobs:
       matrix:
         include:
           - target: blue
-            image_suffix: ""
+            image_suffix: "-blue"
           - target: red
             image_suffix: "-red"
 
