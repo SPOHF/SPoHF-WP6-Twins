@@ -5,6 +5,7 @@ description = "SPoHF WP6 Sensor Data Sync - Yookr API to Neo4j"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "aiomysql>=0.2",
     "fastapi>=0.128.0",
     "httpx>=0.28",
     "neo4j>=5.27",
@@ -13,6 +14,7 @@ dependencies = [
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
     "python-dateutil>=2.9.0.post0",
+    "python-dotenv>=1.0",
     "structlog>=25.1",
     "tenacity>=9.0",
     "uvicorn>=0.40.0",

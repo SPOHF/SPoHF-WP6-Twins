@@ -55,3 +55,33 @@ secrets:
   existingSecret: ""  # Name of existing secret (default: <release>-secrets)
   apiToken: ""
   neo4jPassword: ""
+
+# Red Dashboard (MySQL backend with auth)
+red:
+  enabled: false
+  replicas: 1
+  image:
+    repository: ""  # If empty, uses main image.repository with "-red" suffix
+    tag: ""  # If empty, uses main image.tag
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  ingress:
+    enabled: true
+    host: ""  # Required if enabled: e.g., wp6-red.example.com
+  mysql:
+    host: ""
+    port: 3306
+    database: ""
+    user: ""
+    # password from secret
+  # Secret for red-specific credentials (mysql password, auth users)
+  secrets:
+    existingSecret: ""  # Name of existing secret (default: <release>-red-secrets)
+    # Keys expected in secret:
+    # - mysql-password: MySQL password
+    # - auth-users: Comma-separated users "user1:pass1,user2:pass2"

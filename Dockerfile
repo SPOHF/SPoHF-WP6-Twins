@@ -1,4 +1,10 @@
 # Multi-stage build for minimal image size
+# Supports building separate images for blue (Neo4j) and red (MySQL) dashboards
+#
+# Build blue: docker build --target blue -t wp6-data-blue .
+# Build red:  docker build --target red -t wp6-data-red .
+# Build default (blue): docker build -t wp6-data .
+
 FROM python:3.14-slim AS builder
 
 # Install uv
@@ -13,8 +19,8 @@ COPY src/ src/
 # Install dependencies and package
 RUN uv sync --frozen --no-dev
 
-# Production stage
-FROM python:3.14-slim
+# Common runtime stage
+FROM python:3.14-slim AS runtime
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash appuser
@@ -34,5 +40,13 @@ ENV PYTHONUNBUFFERED=1
 # Expose dashboard port
 EXPOSE 8000
 
-# Default: run dashboard (can override to run sync)
-CMD ["python", "-m", "wp6_data.dashboard"]
+# Blue dashboard (Neo4j backend) - default
+FROM runtime AS blue
+CMD ["python", "-m", "wp6_data.blue.dashboard"]
+
+# Red dashboard (MySQL backend with auth)
+FROM runtime AS red
+CMD ["python", "-m", "wp6_data.red.dashboard"]
+
+# Default target is blue (for backwards compatibility)
+FROM blue

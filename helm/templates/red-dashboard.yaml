@@ -1,0 +1,113 @@
+{{- if .Values.red.enabled }}
+{{- $redImage := .Values.red.image.repository | default (printf "%s-red" .Values.image.repository) }}
+{{- $redTag := .Values.red.image.tag | default .Values.image.tag }}
+{{- $redSecret := .Values.red.secrets.existingSecret | default (printf "%s-red-secrets" .Chart.Name) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}-red-dashboard
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-red-dashboard
+spec:
+  replicas: {{ .Values.red.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}-red-dashboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}-red-dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: "{{ $redImage }}:{{ $redTag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: WP6_RED_DB_HOST
+              value: {{ .Values.red.mysql.host | quote }}
+            - name: WP6_RED_DB_PORT
+              value: {{ .Values.red.mysql.port | quote }}
+            - name: WP6_RED_DB_NAME
+              value: {{ .Values.red.mysql.database | quote }}
+            - name: WP6_RED_DB_USER
+              value: {{ .Values.red.mysql.user | quote }}
+            - name: WP6_RED_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $redSecret }}
+                  key: mysql-password
+            - name: WP6_RED_AUTH_USERS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $redSecret }}
+                  key: auth-users
+          resources:
+            {{- toYaml .Values.red.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Chart.Name }}-red-dashboard
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-red-dashboard
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 8000
+      name: http
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}-red-dashboard
+{{- if .Values.red.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Chart.Name }}-red-dashboard
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-red-dashboard
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - {{ .Values.red.ingress.host }}
+      secretName: {{ .Chart.Name }}-red-dashboard-tls
+  rules:
+    - host: {{ .Values.red.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Chart.Name }}-red-dashboard
+                port:
+                  name: http
+{{- end }}
+{{- end }}
