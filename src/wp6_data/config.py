@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     sync_page_size: int = 100
     sync_max_pages: int = 100  # Safety limit
     sync_mode: str = "auto"  # "auto", "windowed", or "incremental"
+    sync_window_days: int = 1  # Days per window in windowed mode (use 30 for monthly)
 
     # Endpoints to sync (comma-separated)
     endpoints: str = "yookr-data"

@@ -57,23 +57,7 @@ SPoHF API ──> CronJob (sync) ──> Neo4j ──> Dashboard (FastAPI)
 
 ## Configuration
 
-All configuration via `WP6_*` environment variables:
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `WP6_API_BASE_URL` | SPoHF API base URL | `https://backoffice.spohf.com` |
-| `WP6_API_TOKEN` | Bearer token for API auth | *required* |
-| `WP6_NEO4J_URI` | Neo4j connection URI | *required* |
-| `WP6_NEO4J_USER` | Neo4j username | `neo4j` |
-| `WP6_NEO4J_PASSWORD` | Neo4j password | *required* |
-| `WP6_NEO4J_DATABASE` | Neo4j database name | `neo4j` |
-| `WP6_SYNC_LOOKBACK_HOURS` | Hours to look back on first sync | `24` |
-| `WP6_SYNC_PAGE_SIZE` | Records per API page | `100` |
-| `WP6_SYNC_MAX_PAGES` | Max pages/windows per sync run | `100` |
-| `WP6_SYNC_MODE` | Sync mode: `auto`, `windowed`, or `incremental` | `auto` |
-| `WP6_ENDPOINTS` | Comma-separated API endpoints | `yookr-data` |
-| `WP6_LOG_LEVEL` | Log level (DEBUG, INFO, WARN, ERROR) | `INFO` |
-| `WP6_LOG_FORMAT` | Log format (`json` or `console`) | `json` |
+All configuration via environment variables, see `.env.example`
 
 ### Sync Modes
 

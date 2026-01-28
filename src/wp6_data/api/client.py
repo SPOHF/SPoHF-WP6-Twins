@@ -128,17 +128,19 @@ class SpoHFClient:
         endpoint: str,
         since: datetime,
         max_windows: int = 1000,
+        window_days: int = 1,
     ) -> AsyncIterator[SensorReading]:
-        """Fetch all records using daily timestamp windows.
+        """Fetch all records using timestamp windows.
 
         The API returns max 10k records per timestamp window, but different
         timestamp values access different data. This method iterates through
-        daily windows to fetch all historical data.
+        time windows to fetch all historical data.
 
         Args:
             endpoint: API endpoint (e.g., "yookr-data")
             since: Start fetching from this timestamp
-            max_windows: Safety limit on number of daily windows
+            max_windows: Safety limit on number of windows
+            window_days: Days per window (1 for daily, 30 for monthly)
 
         Yields:
             SensorReading objects (may include duplicates across windows)
@@ -186,10 +188,12 @@ class SpoHFClient:
                     offset += self.page_size
 
                 if window_records > 0:
+                    window_end = current_ts + timedelta(days=window_days - 1)
                     logger.info(
                         "window_progress",
                         endpoint=endpoint,
-                        window=current_ts.strftime("%Y-%m-%d"),
+                        window_start=current_ts.strftime("%Y-%m-%d"),
+                        window_end=window_end.strftime("%Y-%m-%d"),
                         window_records=window_records,
                         total_records=total_yielded,
                     )
@@ -197,12 +201,12 @@ class SpoHFClient:
                 else:
                     consecutive_empty += 1
 
-                # Stop if we've had 30 consecutive empty days
-                if consecutive_empty >= 30:
+                # Stop if we've had 3 consecutive empty windows
+                if consecutive_empty >= 3:
                     break
 
-                # Move to next day
-                current_ts = current_ts + timedelta(days=1)
+                # Move to next window
+                current_ts = current_ts + timedelta(days=window_days)
                 window_count += 1
 
             logger.info(

@@ -118,6 +118,7 @@ class SyncOrchestrator:
                     endpoint,
                     since,
                     max_windows=self.settings.sync_max_pages,
+                    window_days=self.settings.sync_window_days,
                 )
             else:
                 fetch_iter = self.client.fetch_all_since(
