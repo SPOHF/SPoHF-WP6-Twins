@@ -1,5 +1,6 @@
 """WP6 Red Dashboard - MySQL-backed sensor visualization with authentication."""
 
+import json
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -192,6 +193,12 @@ async def home(user: str = Depends(verify_auth)) -> str:
     content = f"""
         <div class="user-info">Logged in as: {user}</div>
         <h1>WP6 Red - Sensor Dashboard</h1>
+
+        <div class="section">
+            <h2>Custom Compare</h2>
+            <p><a href="/compare">Create a custom dual-axis chart</a>
+            by selecting two sensor/measurement combinations.</p>
+        </div>
 
         <div class="section">
             <h2>Compare by Measurement Type</h2>
@@ -410,6 +417,144 @@ async def chart_device(
         show_footer=False,
         show_back_link=True,
         back_url=f"/table/{table}",
+    )
+
+
+@app.get("/compare", response_class=HTMLResponse)
+async def compare_form(user: str = Depends(verify_auth)) -> str:
+    """Form to select two device/measurement pairs for a custom dual-axis chart."""
+    if not db:
+        return render_page("WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
+
+    devices = await db.get_all_devices()
+    # device_id -> list of measurements (for JS)
+    device_data_json = json.dumps(
+        {did: info["measurements"] for did, info in sorted(devices.items())}
+    )
+    device_ids = sorted(devices.keys())
+
+    def select_html(prefix: str, label: str) -> str:
+        device_options = "".join(
+            f'<option value="{d}">{d}</option>' for d in device_ids
+        )
+        return f"""
+        <fieldset style="border:1px solid #ccc; padding:16px; border-radius:6px;">
+            <legend><strong>{label}</strong></legend>
+            <label>Device
+                <select name="{prefix}_device" id="{prefix}_device"
+                        onchange="updateMeasurements('{prefix}')"
+                        style="padding:4px;">
+                    {device_options}
+                </select>
+            </label>
+            <label style="margin-left:12px;">Measurement
+                <select name="{prefix}_measurement" id="{prefix}_measurement"
+                        style="padding:4px;">
+                </select>
+            </label>
+        </fieldset>
+        """
+
+    extra_css = """
+        fieldset { display: inline-block; margin-right: 16px; margin-bottom: 12px; }
+    """
+
+    content = f"""
+        <h1>Custom Compare</h1>
+        <p>Select two device/measurement combinations to plot on a dual y-axis chart.</p>
+        <form method="get" action="/compare/chart">
+            <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
+                {select_html("left", "Left Y-axis")}
+                {select_html("right", "Right Y-axis")}
+            </div>
+            <button type="submit"
+                    style="padding:8px 24px; background:#0066cc; color:white;
+                           border:none; border-radius:4px; cursor:pointer; font-size:1em;">
+                Generate Chart
+            </button>
+        </form>
+        <script>
+        var deviceData = {device_data_json};
+        function updateMeasurements(prefix) {{
+            var device = document.getElementById(prefix + '_device').value;
+            var sel = document.getElementById(prefix + '_measurement');
+            sel.innerHTML = '';
+            (deviceData[device] || []).forEach(function(m) {{
+                var opt = document.createElement('option');
+                opt.value = m; opt.textContent = m;
+                sel.appendChild(opt);
+            }});
+        }}
+        updateMeasurements('left');
+        updateMeasurements('right');
+        </script>
+    """
+
+    return render_page("Custom Compare - WP6 Red", content, extra_css=extra_css,
+                       show_back_link=True)
+
+
+@app.get("/compare/chart", response_class=HTMLResponse)
+async def compare_chart(
+    left_device: str = Query(...),
+    left_measurement: str = Query(...),
+    right_device: str = Query(...),
+    right_measurement: str = Query(...),
+    user: str = Depends(verify_auth),
+    start: Annotated[date | None, Query()] = None,
+    end: Annotated[date | None, Query()] = None,
+) -> str:
+    """Render a dual-axis chart for two user-selected device/measurement pairs."""
+    if not db:
+        return render_page("WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
+
+    default_start, default_end = default_date_range()
+    start = start or default_start
+    end = end or default_end
+    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
+    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+
+    try:
+        left_df = await db.get_readings_for_comparison(
+            left_device, left_measurement, start=start_dt, end=end_dt,
+        )
+        right_df = await db.get_readings_for_comparison(
+            right_device, right_measurement, start=start_dt, end=end_dt,
+        )
+    except ValueError as e:
+        return render_page(
+            "Compare - WP6 Red", f"<h1>Error: {e}</h1>",
+            show_back_link=True, back_url="/compare",
+        )
+
+    import pandas as pd
+
+    df = pd.concat([left_df, right_df], ignore_index=True)
+
+    filter_html = render_date_filter(start, end)
+
+    if df.empty:
+        return render_page(
+            "Compare - WP6 Red", filter_html + "<h1>No data found</h1>",
+            show_back_link=True, back_url="/compare",
+        )
+
+    left_label = f"{left_device} | {left_measurement}"
+    right_label = f"{right_device} | {right_measurement}"
+
+    # Relabel sensor column so dual axis chart can split on it
+    df.loc[df["sensor"] == left_measurement, "sensor"] = left_label
+    df.loc[df["sensor"] == right_measurement, "sensor"] = right_label
+
+    fig = make_dual_axis_chart(df, left_label, right_label)
+    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+
+    stats_html = f'<p style="color:#666; font-size:0.9em;">{len(df):,} data points</p>'
+
+    return render_page(
+        "Compare - WP6 Red",
+        filter_html + stats_html + chart_html,
+        show_logo=False, show_footer=False, show_back_link=True, back_url="/compare",
     )
 
 

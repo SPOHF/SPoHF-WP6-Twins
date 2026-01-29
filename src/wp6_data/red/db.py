@@ -219,6 +219,94 @@ class MySQLConnection:
             df = df.sort_values("time")
         return df
 
+    async def get_all_devices(self) -> dict[str, dict[str, list[str]]]:
+        """Get all device IDs across all tables with their available measurements.
+
+        Returns dict mapping device_id -> {"tables": [...], "measurements": [...]}.
+        A device may appear in multiple tables.
+        """
+        if not self.pool:
+            raise RuntimeError("Not connected")
+
+        devices: dict[str, dict[str, list[str]]] = {}
+        async with self.pool.acquire() as conn, conn.cursor() as cursor:
+            for table, cols in SENSOR_TABLES.items():
+                try:
+                    await cursor.execute(f"SELECT DISTINCT device_id FROM {table}")
+                    rows = await cursor.fetchall()
+                except Exception:
+                    continue
+                measurements = cols + COMMON_MEASUREMENTS
+                for (device_id,) in rows:
+                    if device_id not in devices:
+                        devices[device_id] = {"tables": [], "measurements": []}
+                    devices[device_id]["tables"].append(table)
+                    for m in measurements:
+                        if m not in devices[device_id]["measurements"]:
+                            devices[device_id]["measurements"].append(m)
+        return devices
+
+    async def get_readings_for_comparison(
+        self,
+        device_id: str,
+        measurement: str,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        limit: int = 100000,
+    ) -> pd.DataFrame:
+        """Fetch readings for a device + measurement across all tables that have both.
+
+        Returns DataFrame with columns: device, sensor, time, value.
+        """
+        if not self.pool:
+            raise RuntimeError("Not connected")
+
+        all_records = []
+        for table, cols in SENSOR_TABLES.items():
+            all_cols = cols + COMMON_MEASUREMENTS
+            if measurement not in all_cols:
+                continue
+
+            conditions = ["device_id = %s"]
+            params: list[Any] = [device_id]
+            if start:
+                conditions.append("received_at >= %s")
+                params.append(start)
+            if end:
+                conditions.append("received_at <= %s")
+                params.append(end)
+
+            where_clause = f"WHERE {' AND '.join(conditions)}"
+
+            async with self.pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cursor:
+                query = f"""
+                    SELECT device_id, received_at, {measurement}
+                    FROM {table}
+                    {where_clause}
+                    ORDER BY received_at DESC
+                    LIMIT {limit}
+                """
+                try:
+                    await cursor.execute(query, params)
+                except Exception:
+                    continue
+                rows = list(reversed(await cursor.fetchall()))
+
+            for row in rows:
+                if row.get(measurement) is not None:
+                    all_records.append({
+                        "device": row["device_id"],
+                        "sensor": measurement,
+                        "time": row["received_at"],
+                        "value": float(row[measurement]),
+                    })
+
+        df = pd.DataFrame(all_records)
+        if not df.empty:
+            df["time"] = pd.to_datetime(df["time"], utc=True)
+            df = df.sort_values("time")
+        return df
+
     async def get_readings(
         self,
         table: str,
