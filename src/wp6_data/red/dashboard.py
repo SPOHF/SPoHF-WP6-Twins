@@ -529,22 +529,36 @@ async def compare_chart(
 
     import pandas as pd
 
-    df = pd.concat([left_df, right_df], ignore_index=True)
+    left_label = f"{left_device} | {left_measurement}"
+    right_label = f"{right_device} | {right_measurement}"
+    if left_label == right_label:
+        left_label += " (left)"
+        right_label += " (right)"
 
-    filter_html = render_date_filter(start, end)
+    # Relabel before concat so each side keeps its identity even when measurements match
+    if not left_df.empty:
+        left_df = left_df.copy()
+        left_df["sensor"] = left_label
+    if not right_df.empty:
+        right_df = right_df.copy()
+        right_df["sensor"] = right_label
+
+    df = pd.concat([left_df, right_df], ignore_index=True)
+    if not df.empty:
+        df = df.sort_values("time")
+
+    filter_html = render_date_filter(start, end, extra_params={
+        "left_device": left_device,
+        "left_measurement": left_measurement,
+        "right_device": right_device,
+        "right_measurement": right_measurement,
+    })
 
     if df.empty:
         return render_page(
             "Compare - WP6 Red", filter_html + "<h1>No data found</h1>",
             show_back_link=True, back_url="/compare",
         )
-
-    left_label = f"{left_device} | {left_measurement}"
-    right_label = f"{right_device} | {right_measurement}"
-
-    # Relabel sensor column so dual axis chart can split on it
-    df.loc[df["sensor"] == left_measurement, "sensor"] = left_label
-    df.loc[df["sensor"] == right_measurement, "sensor"] = right_label
 
     fig = make_dual_axis_chart(df, left_label, right_label)
     chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")

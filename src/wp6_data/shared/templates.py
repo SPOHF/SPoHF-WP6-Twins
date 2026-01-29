@@ -10,7 +10,7 @@ def default_date_range() -> tuple[date, date]:
     return start, end
 
 
-def render_date_filter(start: date, end: date) -> str:
+def render_date_filter(start: date, end: date, extra_params: dict[str, str] | None = None) -> str:
     """Render an HTML date-range filter with quick-select presets and custom inputs."""
     today = date.today()
     presets = [
@@ -48,8 +48,15 @@ def render_date_filter(start: date, end: date) -> str:
             f"{label}</button>"
         )
 
+    hidden_fields = ""
+    if extra_params:
+        hidden_fields = "".join(
+            f'<input type="hidden" name="{k}" value="{v}">' for k, v in extra_params.items()
+        )
+
     return f"""
     <form id="dateFilter" method="get" style="margin-bottom: 16px;">
+        {hidden_fields}
         <div style="display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap;">
             {''.join(buttons)}
         </div>
