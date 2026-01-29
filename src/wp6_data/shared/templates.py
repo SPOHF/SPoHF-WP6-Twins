@@ -11,14 +11,67 @@ def default_date_range() -> tuple[date, date]:
 
 
 def render_date_filter(start: date, end: date) -> str:
-    """Render an HTML date-range filter form."""
+    """Render an HTML date-range filter with quick-select presets and custom inputs."""
+    today = date.today()
+    presets = [
+        ("1d", 1),
+        ("7d", 7),
+        ("30d", 30),
+        ("90d", 90),
+        ("1y", 365),
+        ("All", None),
+    ]
+    # Determine which preset is active
+    active = None
+    for label, days in presets:
+        if days is None:
+            if start == date(2024, 1, 1) and end == today:
+                active = label
+        elif start == today - timedelta(days=days) and end == today:
+            active = label
+
+    btn_style = (
+        "padding: 4px 12px; cursor: pointer; border: 1px solid #ccc;"
+        " border-radius: 4px; background: #f5f5f5;"
+    )
+    active_style = (
+        "padding: 4px 12px; cursor: pointer; border: 1px solid #0066cc;"
+        " border-radius: 4px; background: #0066cc; color: white;"
+    )
+
+    buttons = []
+    for label, days in presets:
+        style = active_style if label == active else btn_style
+        js_days = "null" if days is None else str(days)
+        buttons.append(
+            f'<button type="button" style="{style}" onclick="setRange({js_days})">'
+            f"{label}</button>"
+        )
+
     return f"""
-    <form method="get" style="margin-bottom: 16px; display: flex;
-          align-items: center; gap: 10px; flex-wrap: wrap;">
-        <label>From <input type="date" name="start" value="{start.isoformat()}"></label>
-        <label>To <input type="date" name="end" value="{end.isoformat()}"></label>
-        <button type="submit" style="padding: 4px 16px; cursor: pointer;">Apply</button>
+    <form id="dateFilter" method="get" style="margin-bottom: 16px;">
+        <div style="display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap;">
+            {''.join(buttons)}
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <label>From <input type="date" id="df-start" name="start"
+                   value="{start.isoformat()}"></label>
+            <label>To <input type="date" id="df-end" name="end"
+                   value="{end.isoformat()}"></label>
+            <button type="submit" style="{btn_style}">Apply</button>
+        </div>
     </form>
+    <script>
+    function setRange(days) {{
+        var end = new Date();
+        var start = days === null
+            ? new Date('2024-01-01')
+            : new Date(end.getTime() - days * 86400000);
+        document.getElementById('df-start').value = start.toISOString().slice(0, 10);
+        document.getElementById('df-end').value = end.toISOString().slice(0, 10);
+        document.getElementById('dateFilter').submit();
+    }}
+    </script>
     """
 
 
