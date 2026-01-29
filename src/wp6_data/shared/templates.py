@@ -1,5 +1,27 @@
 """Shared HTML templates for WP6 dashboards."""
 
+from datetime import date, timedelta
+
+
+def default_date_range() -> tuple[date, date]:
+    """Return default date range: last 7 days."""
+    end = date.today()
+    start = end - timedelta(days=7)
+    return start, end
+
+
+def render_date_filter(start: date, end: date) -> str:
+    """Render an HTML date-range filter form."""
+    return f"""
+    <form method="get" style="margin-bottom: 16px; display: flex;
+          align-items: center; gap: 10px; flex-wrap: wrap;">
+        <label>From <input type="date" name="start" value="{start.isoformat()}"></label>
+        <label>To <input type="date" name="end" value="{end.isoformat()}"></label>
+        <button type="submit" style="padding: 4px 16px; cursor: pointer;">Apply</button>
+    </form>
+    """
+
+
 BASE_CSS = """
     body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 40px; }
     h1 { color: #333; }

@@ -1,8 +1,9 @@
 """WP6 Blue Dashboard - Neo4j-backed sensor visualization."""
 
 import os
+from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -11,7 +12,13 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from neo4j import GraphDatabase
 
-from wp6_data.shared import make_dual_axis_chart, make_line_chart, render_page
+from wp6_data.shared import (
+    default_date_range,
+    make_dual_axis_chart,
+    make_line_chart,
+    render_date_filter,
+    render_page,
+)
 
 load_dotenv()
 
@@ -34,19 +41,33 @@ def get_driver() -> GraphDatabase.driver.__class__:
     return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
 
-def fetch_data(sensor_tags: list[str] | None = None, limit: int = 50000) -> pd.DataFrame:
+def fetch_data(
+    sensor_tags: list[str] | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    limit: int = 50000,
+) -> pd.DataFrame:
     """Fetch sensor readings from Neo4j."""
     with get_driver() as driver, driver.session() as session:
-        tag_filter = "WHERE s.tag IN $tags" if sensor_tags else ""
+        conditions = []
+        if sensor_tags:
+            conditions.append("s.tag IN $tags")
+        if start:
+            conditions.append("r.datetime_measure >= $start")
+        if end:
+            conditions.append("r.datetime_measure <= $end")
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         query = f"""
             MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
-            {tag_filter}
+            {where}
             RETURN d.device_name AS device, s.tag AS sensor,
                    r.datetime_measure AS time, r.value AS value
             ORDER BY r.datetime_measure
             LIMIT $limit
             """
-        result = session.run(query, tags=sensor_tags, limit=limit)
+        result = session.run(
+            query, tags=sensor_tags, start=start, end=end, limit=limit,
+        )
         records = []
         for r in result:
             rec = dict(r)
@@ -114,15 +135,25 @@ async def home() -> str:
 async def chart(
     sensors: str,
     dual: bool = Query(False, description="Use dual y-axis for 2 sensors"),
+    start: Annotated[date | None, Query(description="Start date (default: 7 days ago)")] = None,
+    end: Annotated[date | None, Query(description="End date (default: today)")] = None,
 ) -> str:
     """Render chart for specified sensors."""
+    default_start, default_end = default_date_range()
+    start = start or default_start
+    end = end or default_end
+    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
+    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+
     sensor_list = [s.strip() for s in sensors.split(",")]
-    df = fetch_data(sensor_tags=sensor_list)
+    df = fetch_data(sensor_tags=sensor_list, start=start_dt, end=end_dt)
+
+    filter_html = render_date_filter(start, end)
 
     if df.empty:
         return render_page(
             f"{sensors} - WP6 Blue",
-            "<h1>No data found</h1>",
+            filter_html + "<h1>No data found</h1>",
             show_back_link=True,
         )
 
@@ -135,7 +166,7 @@ async def chart(
 
     return render_page(
         f"{sensors} - WP6 Blue",
-        chart_html,
+        filter_html + chart_html,
         show_logo=False,
         show_footer=False,
         show_back_link=True,

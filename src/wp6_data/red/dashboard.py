@@ -3,6 +3,7 @@
 import os
 import secrets
 from contextlib import asynccontextmanager
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -13,7 +14,13 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
 from wp6_data.red.db import MEASUREMENT_GROUPS, MEASUREMENTS_TO_TABLES, MySQLConnection
-from wp6_data.shared import make_dual_axis_chart, make_line_chart, render_page
+from wp6_data.shared import (
+    default_date_range,
+    make_dual_axis_chart,
+    make_line_chart,
+    render_date_filter,
+    render_page,
+)
 
 load_dotenv()
 
@@ -206,6 +213,8 @@ async def measurement_view(
     measurement: str,
     user: str = Depends(verify_auth),
     limit: int = Query(100000, description="Max records per sensor table"),
+    start: Annotated[date | None, Query(description="Start date (default: 7 days ago)")] = None,
+    end: Annotated[date | None, Query(description="End date (default: today)")] = None,
 ) -> str:
     """Chart a measurement type across all sensors that have it."""
     if not db:
@@ -218,8 +227,16 @@ async def measurement_view(
             show_back_link=True,
         )
 
+    default_start, default_end = default_date_range()
+    start = start or default_start
+    end = end or default_end
+    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
+    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+
     try:
-        df = await db.get_readings_by_measurement(measurement, limit_per_table=limit)
+        df = await db.get_readings_by_measurement(
+            measurement, start=start_dt, end=end_dt, limit_per_table=limit,
+        )
     except Exception as e:
         return render_page(
             f"{measurement} - WP6 Red",
@@ -227,10 +244,12 @@ async def measurement_view(
             show_back_link=True,
         )
 
+    filter_html = render_date_filter(start, end)
+
     if df.empty:
         return render_page(
             f"{measurement} - WP6 Red",
-            "<h1>No data found</h1>",
+            filter_html + "<h1>No data found</h1>",
             show_back_link=True,
         )
 
@@ -242,7 +261,7 @@ async def measurement_view(
 
     return render_page(
         f"{measurement} - WP6 Red",
-        stats_html + chart_html,
+        filter_html + stats_html + chart_html,
         show_logo=False,
         show_footer=False,
         show_back_link=True,
@@ -284,13 +303,21 @@ async def chart_all(
     table: str,
     user: str = Depends(verify_auth),
     limit: int = Query(50000, description="Max records to fetch"),
+    start: Annotated[date | None, Query(description="Start date (default: 7 days ago)")] = None,
+    end: Annotated[date | None, Query(description="End date (default: today)")] = None,
 ) -> str:
     """Chart all devices for a sensor table."""
     if not db:
         return render_page("WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
 
+    default_start, default_end = default_date_range()
+    start = start or default_start
+    end = end or default_end
+    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
+    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+
     try:
-        df = await db.get_readings(table, limit=limit)
+        df = await db.get_readings(table, start=start_dt, end=end_dt, limit=limit)
     except ValueError as e:
         return render_page(
             f"{table} - WP6 Red",
@@ -299,10 +326,12 @@ async def chart_all(
             back_url=f"/table/{table}",
         )
 
+    filter_html = render_date_filter(start, end)
+
     if df.empty:
         return render_page(
             f"{table} - WP6 Red",
-            "<h1>No data found</h1>",
+            filter_html + "<h1>No data found</h1>",
             show_back_link=True,
             back_url=f"/table/{table}",
         )
@@ -314,7 +343,7 @@ async def chart_all(
 
     return render_page(
         f"{table} - WP6 Red",
-        stats_html + chart_html,
+        filter_html + stats_html + chart_html,
         show_logo=False,
         show_footer=False,
         show_back_link=True,
@@ -328,13 +357,23 @@ async def chart_device(
     device_id: str,
     user: str = Depends(verify_auth),
     limit: int = Query(50000, description="Max records to fetch"),
+    start: Annotated[date | None, Query(description="Start date (default: 7 days ago)")] = None,
+    end: Annotated[date | None, Query(description="End date (default: today)")] = None,
 ) -> str:
     """Chart a specific device."""
     if not db:
         return render_page("WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
 
+    default_start, default_end = default_date_range()
+    start = start or default_start
+    end = end or default_end
+    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
+    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+
     try:
-        df = await db.get_readings(table, device_id=device_id, limit=limit)
+        df = await db.get_readings(
+            table, device_id=device_id, start=start_dt, end=end_dt, limit=limit,
+        )
     except ValueError as e:
         return render_page(
             f"{device_id} - WP6 Red",
@@ -343,10 +382,12 @@ async def chart_device(
             back_url=f"/table/{table}",
         )
 
+    filter_html = render_date_filter(start, end)
+
     if df.empty:
         return render_page(
             f"{device_id} - WP6 Red",
-            "<h1>No data found</h1>",
+            filter_html + "<h1>No data found</h1>",
             show_back_link=True,
             back_url=f"/table/{table}",
         )
@@ -364,7 +405,7 @@ async def chart_device(
 
     return render_page(
         f"{device_id} - WP6 Red",
-        stats_html + chart_html,
+        filter_html + stats_html + chart_html,
         show_logo=False,
         show_footer=False,
         show_back_link=True,
