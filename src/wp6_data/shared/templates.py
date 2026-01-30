@@ -228,6 +228,7 @@ def render_page(
     <html>
     <head>
         <title>{title}</title>
+        <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
         <style>
             {BASE_CSS}
             {extra_css}
