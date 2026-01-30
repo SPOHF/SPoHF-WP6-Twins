@@ -10,6 +10,8 @@ Desired situation
       element.classList.add("mermaid");
     });
     import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    import elkLayouts from 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0/dist/mermaid-layout-elk.esm.min.mjs';
+    mermaid.registerLayoutLoaders(elkLayouts);
     mermaid.initialize({ startOnLoad: true });
 </script>
 
@@ -143,7 +145,7 @@ This ultimately helps prescribing actions to take over the year to get a more de
 
 these actions include: irrigation, adding nutrients, pest control
 
-## Red Twin
+### Red Twin
 
 The red twin (tomato) is as following:
 As tomatoes grow in greenhouses, the climate is controlled at large scale.
