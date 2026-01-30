@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 
+import pandas as pd
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -449,8 +450,8 @@ async def compare_form(user: str = Depends(verify_auth)) -> str:
 async def compare_chart(
     left_device: str = Query(...),
     left_measurement: str = Query(...),
-    right_device: str = Query(...),
-    right_measurement: str = Query(...),
+    right_device: str = Query(""),
+    right_measurement: str = Query(""),
     user: str = Depends(verify_auth),
     start: Annotated[date | None, Query()] = None,
     end: Annotated[date | None, Query()] = None,
@@ -458,6 +459,8 @@ async def compare_chart(
     """Render a dual-axis chart for two user-selected device/measurement pairs."""
     if not db:
         return render_page("WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
+
+    has_right = bool(right_device and right_measurement)
 
     default_start, default_end = default_date_range()
     start = start or default_start
@@ -469,8 +472,12 @@ async def compare_chart(
         left_df = await db.get_readings_for_comparison(
             left_device, left_measurement, start=start_dt, end=end_dt,
         )
-        right_df = await db.get_readings_for_comparison(
-            right_device, right_measurement, start=start_dt, end=end_dt,
+        right_df = (
+            await db.get_readings_for_comparison(
+                right_device, right_measurement, start=start_dt, end=end_dt,
+            )
+            if has_right
+            else pd.DataFrame(columns=["device", "sensor", "time", "value"])
         )
     except ValueError as e:
         return render_page(
@@ -479,17 +486,19 @@ async def compare_chart(
         )
 
     left_label = f"{left_device} | {left_measurement}"
-    right_label = f"{right_device} | {right_measurement}"
+    right_label = f"{right_device} | {right_measurement}" if has_right else ""
     df, left_label, right_label = prepare_comparison(
         left_df, right_df, left_label, right_label,
     )
 
-    filter_html = render_date_filter(start, end, extra_params={
+    extra_params: dict[str, str] = {
         "left_device": left_device,
         "left_measurement": left_measurement,
-        "right_device": right_device,
-        "right_measurement": right_measurement,
-    })
+    }
+    if has_right:
+        extra_params["right_device"] = right_device
+        extra_params["right_measurement"] = right_measurement
+    filter_html = render_date_filter(start, end, extra_params=extra_params)
 
     if df.empty:
         return render_page(
@@ -497,7 +506,10 @@ async def compare_chart(
             show_back_link=True, back_url="/compare",
         )
 
-    fig = make_dual_axis_chart(df, left_label, right_label)
+    if has_right:
+        fig = make_dual_axis_chart(df, left_label, right_label)
+    else:
+        fig = make_line_chart(df, title=left_label)
     chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
 
     stats_html = f'<p style="color:#666; font-size:0.9em;">{len(df):,} data points</p>'

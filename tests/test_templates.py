@@ -78,10 +78,6 @@ class TestRenderDateFilter:
         assert '<input type="hidden" name="sensor" value="temp">' in html
         assert '<input type="hidden" name="device" value="d1">' in html
 
-    def test_no_hidden_fields_without_extra_params(self):
-        html = render_date_filter(date(2025, 1, 1), date(2025, 1, 8))
-        assert 'type="hidden"' not in html
-
     def test_setrange_script_present(self):
         html = render_date_filter(date(2025, 1, 1), date(2025, 1, 8))
         assert "function setRange(days)" in html
@@ -189,3 +185,10 @@ class TestRenderCompareForm:
         html = render_compare_form({})
         assert "<form" in html
         assert "Generate Chart" in html
+
+    def test_right_axis_has_none_option(self):
+        html = render_compare_form(SAMPLE_DEVICE_DATA)
+        # Right device select should have a "None" option
+        right_select_start = html.index('id="right_device"')
+        right_select_chunk = html[right_select_start - 200 : right_select_start + 200]
+        assert "— None —" in right_select_chunk

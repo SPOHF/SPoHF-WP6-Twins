@@ -102,7 +102,8 @@ def render_compare_form(
     device_data_json = json.dumps(dict(sorted(device_data.items())))
     device_ids = sorted(device_data.keys())
 
-    def _select_html(prefix: str, label: str) -> str:
+    def _select_html(prefix: str, label: str, *, optional: bool = False) -> str:
+        none_option = '<option value="">— None —</option>' if optional else ""
         device_options = "".join(f'<option value="{d}">{d}</option>' for d in device_ids)
         return f"""
         <fieldset style="border:1px solid #ccc; padding:16px; border-radius:6px;">
@@ -111,7 +112,7 @@ def render_compare_form(
                 <select name="{prefix}_device" id="{prefix}_device"
                         onchange="updateMeasurements('{prefix}')"
                         style="padding:4px;">
-                    {device_options}
+                    {none_option}{device_options}
                 </select>
             </label>
             <label style="margin-left:12px;">Measurement
@@ -131,7 +132,7 @@ def render_compare_form(
         <form method="get" action="{action_url}">
             <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
                 {_select_html("left", "Left Y-axis")}
-                {_select_html("right", "Right Y-axis")}
+                {_select_html("right", "Right Y-axis", optional=True)}
             </div>
             <button type="submit" style="{btn_style}">Generate Chart</button>
         </form>
@@ -141,6 +142,7 @@ def render_compare_form(
             var device = document.getElementById(prefix + '_device').value;
             var sel = document.getElementById(prefix + '_measurement');
             sel.innerHTML = '';
+            if (!device) return;
             (deviceData[device] || []).forEach(function(m) {{
                 var opt = document.createElement('option');
                 opt.value = m; opt.textContent = m;
