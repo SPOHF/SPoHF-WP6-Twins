@@ -3,7 +3,7 @@
 import os
 import secrets
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Annotated
 
@@ -16,13 +16,13 @@ from fastapi.staticfiles import StaticFiles
 
 from wp6_data.red.db import MEASUREMENT_GROUPS, MEASUREMENTS_TO_TABLES, MySQLConnection
 from wp6_data.shared import (
-    default_date_range,
     make_dual_axis_chart,
     make_line_chart,
     prepare_comparison,
     render_compare_form,
     render_date_filter,
     render_page,
+    resolve_date_range,
 )
 
 load_dotenv()
@@ -236,11 +236,7 @@ async def measurement_view(
             show_back_link=True,
         )
 
-    default_start, default_end = default_date_range()
-    start = start or default_start
-    end = end or default_end
-    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
-    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+    start, end, start_dt, end_dt = resolve_date_range(start, end)
 
     try:
         df = await db.get_readings_by_measurement(
@@ -319,11 +315,7 @@ async def chart_all(
     if not db:
         return render_page("WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
 
-    default_start, default_end = default_date_range()
-    start = start or default_start
-    end = end or default_end
-    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
-    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+    start, end, start_dt, end_dt = resolve_date_range(start, end)
 
     try:
         df = await db.get_readings(table, start=start_dt, end=end_dt, limit=limit)
@@ -373,11 +365,7 @@ async def chart_device(
     if not db:
         return render_page("WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
 
-    default_start, default_end = default_date_range()
-    start = start or default_start
-    end = end or default_end
-    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
-    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+    start, end, start_dt, end_dt = resolve_date_range(start, end)
 
     try:
         df = await db.get_readings(
@@ -462,11 +450,7 @@ async def compare_chart(
 
     has_right = bool(right_device and right_measurement)
 
-    default_start, default_end = default_date_range()
-    start = start or default_start
-    end = end or default_end
-    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
-    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+    start, end, start_dt, end_dt = resolve_date_range(start, end)
 
     try:
         left_df = await db.get_readings_for_comparison(

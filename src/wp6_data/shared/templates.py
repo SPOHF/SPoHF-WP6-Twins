@@ -1,6 +1,6 @@
 """Shared HTML templates for WP6 dashboards."""
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 
 def default_date_range() -> tuple[date, date]:
@@ -8,6 +8,19 @@ def default_date_range() -> tuple[date, date]:
     end = date.today()
     start = end - timedelta(days=7)
     return start, end
+
+
+def resolve_date_range(
+    start: date | None = None,
+    end: date | None = None,
+) -> tuple[date, date, datetime, datetime]:
+    """Apply defaults and convert date params to a (date, date, datetime, datetime) tuple."""
+    default_start, default_end = default_date_range()
+    start = start or default_start
+    end = end or default_end
+    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
+    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+    return start, end, start_dt, end_dt
 
 
 def render_date_filter(start: date, end: date, extra_params: dict[str, str] | None = None) -> str:

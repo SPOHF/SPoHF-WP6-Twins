@@ -1,7 +1,7 @@
 """WP6 Blue Dashboard - Neo4j-backed sensor visualization."""
 
 import os
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -13,13 +13,13 @@ from fastapi.staticfiles import StaticFiles
 from neo4j import GraphDatabase
 
 from wp6_data.shared import (
-    default_date_range,
     make_dual_axis_chart,
     make_line_chart,
     prepare_comparison,
     render_compare_form,
     render_date_filter,
     render_page,
+    resolve_date_range,
 )
 
 load_dotenv()
@@ -139,11 +139,7 @@ async def chart(
     end: Annotated[date | None, Query(description="End date (default: today)")] = None,
 ) -> str:
     """Render chart for specified sensors."""
-    default_start, default_end = default_date_range()
-    start = start or default_start
-    end = end or default_end
-    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
-    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+    start, end, start_dt, end_dt = resolve_date_range(start, end)
 
     sensor_list = [s.strip() for s in sensors.split(",")]
     df = fetch_data(sensor_tags=sensor_list, start=start_dt, end=end_dt)
@@ -207,11 +203,7 @@ async def compare_chart(
     """Render a comparison chart for one or two device/sensor pairs."""
     has_right = bool(right_device and right_measurement)
 
-    default_start, default_end = default_date_range()
-    start = start or default_start
-    end = end or default_end
-    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
-    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+    start, end, start_dt, end_dt = resolve_date_range(start, end)
 
     left_df = fetch_data(sensor_tags=[left_measurement], start=start_dt, end=end_dt)
     if not left_df.empty:

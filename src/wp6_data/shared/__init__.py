@@ -6,6 +6,7 @@ from wp6_data.shared.templates import (
     render_compare_form,
     render_date_filter,
     render_page,
+    resolve_date_range,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "render_compare_form",
     "render_date_filter",
     "render_page",
+    "resolve_date_range",
 ]

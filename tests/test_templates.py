@@ -8,7 +8,43 @@ from wp6_data.shared.templates import (
     render_compare_form,
     render_date_filter,
     render_page,
+    resolve_date_range,
 )
+
+
+class TestResolveDateRange:
+    def test_applies_defaults_when_none(self):
+        start, end, start_dt, end_dt = resolve_date_range(None, None)
+        assert start == end - timedelta(days=7)
+        assert start_dt.hour == 0 and start_dt.minute == 0
+        assert end_dt.hour == 23 and end_dt.minute == 59 and end_dt.second == 59
+
+    def test_uses_provided_dates(self):
+        s, e = date(2025, 6, 1), date(2025, 6, 10)
+        start, end, start_dt, end_dt = resolve_date_range(s, e)
+        assert start == s
+        assert end == e
+        assert start_dt.year == 2025 and start_dt.month == 6 and start_dt.day == 1
+        assert end_dt.day == 10
+
+    def test_partial_override_start_only(self):
+        s = date(2025, 1, 1)
+        start, end, _, _ = resolve_date_range(s, None)
+        assert start == s
+        assert end == date.today()
+
+    def test_partial_override_end_only(self):
+        e = date(2025, 12, 31)
+        start, end, _, _ = resolve_date_range(None, e)
+        assert end == e
+        assert start == date.today() - timedelta(days=7)
+
+    def test_datetimes_are_utc(self):
+        from datetime import UTC
+
+        _, _, start_dt, end_dt = resolve_date_range(date(2025, 3, 1), date(2025, 3, 2))
+        assert start_dt.tzinfo is UTC
+        assert end_dt.tzinfo is UTC
 
 
 class TestDefaultDateRange:
