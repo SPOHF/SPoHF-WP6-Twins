@@ -82,6 +82,77 @@ def render_date_filter(start: date, end: date, extra_params: dict[str, str] | No
     """
 
 
+def render_compare_form(
+    device_data: dict[str, list[str]],
+    action_url: str = "/compare/chart",
+) -> str:
+    """Render a dual-axis compare form with cascading device → measurement selects.
+
+    Args:
+        device_data: Mapping of selectable entity (e.g. device id) to its
+            available sub-options (e.g. measurements or sensor tags).
+            Must be JSON-serialisable.
+        action_url: Form action URL.
+
+    Returns:
+        HTML string containing the form, fieldsets, and JavaScript.
+    """
+    import json
+
+    device_data_json = json.dumps(dict(sorted(device_data.items())))
+    device_ids = sorted(device_data.keys())
+
+    def _select_html(prefix: str, label: str) -> str:
+        device_options = "".join(f'<option value="{d}">{d}</option>' for d in device_ids)
+        return f"""
+        <fieldset style="border:1px solid #ccc; padding:16px; border-radius:6px;">
+            <legend><strong>{label}</strong></legend>
+            <label>Device
+                <select name="{prefix}_device" id="{prefix}_device"
+                        onchange="updateMeasurements('{prefix}')"
+                        style="padding:4px;">
+                    {device_options}
+                </select>
+            </label>
+            <label style="margin-left:12px;">Measurement
+                <select name="{prefix}_measurement" id="{prefix}_measurement"
+                        style="padding:4px;">
+                </select>
+            </label>
+        </fieldset>
+        """
+
+    btn_style = (
+        "padding:8px 24px; background:#0066cc; color:white;"
+        " border:none; border-radius:4px; cursor:pointer; font-size:1em;"
+    )
+
+    return f"""
+        <form method="get" action="{action_url}">
+            <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
+                {_select_html("left", "Left Y-axis")}
+                {_select_html("right", "Right Y-axis")}
+            </div>
+            <button type="submit" style="{btn_style}">Generate Chart</button>
+        </form>
+        <script>
+        var deviceData = {device_data_json};
+        function updateMeasurements(prefix) {{
+            var device = document.getElementById(prefix + '_device').value;
+            var sel = document.getElementById(prefix + '_measurement');
+            sel.innerHTML = '';
+            (deviceData[device] || []).forEach(function(m) {{
+                var opt = document.createElement('option');
+                opt.value = m; opt.textContent = m;
+                sel.appendChild(opt);
+            }});
+        }}
+        updateMeasurements('left');
+        updateMeasurements('right');
+        </script>
+    """
+
+
 BASE_CSS = """
     body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 40px; }
     h1 { color: #333; }

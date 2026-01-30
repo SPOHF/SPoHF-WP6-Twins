@@ -75,3 +75,43 @@ def make_dual_axis_chart(
     fig.update_yaxes(title_text=left, secondary_y=False)
     fig.update_yaxes(title_text=right, secondary_y=True)
     return fig
+
+
+def prepare_comparison(
+    left_df: pd.DataFrame,
+    right_df: pd.DataFrame,
+    left_label: str,
+    right_label: str,
+) -> pd.DataFrame:
+    """Prepare two DataFrames for a dual-axis comparison chart.
+
+    Relabels the ``sensor`` column in each DataFrame to the given label,
+    disambiguating when the labels are identical, then concatenates and
+    sorts by time.
+
+    Args:
+        left_df: DataFrame (device, sensor, time, value) for the left axis.
+        right_df: DataFrame (device, sensor, time, value) for the right axis.
+        left_label: Display label for the left series.
+        right_label: Display label for the right series.
+
+    Returns:
+        Combined DataFrame sorted by time, with ``sensor`` set to the
+        (possibly disambiguated) labels.  The caller can pass these labels
+        straight into :func:`make_dual_axis_chart`.
+    """
+    if left_label == right_label:
+        left_label += " (left)"
+        right_label += " (right)"
+
+    if not left_df.empty:
+        left_df = left_df.copy()
+        left_df["sensor"] = left_label
+    if not right_df.empty:
+        right_df = right_df.copy()
+        right_df["sensor"] = right_label
+
+    df = pd.concat([left_df, right_df], ignore_index=True)
+    if not df.empty:
+        df = df.sort_values("time")
+    return df, left_label, right_label

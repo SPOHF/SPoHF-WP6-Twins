@@ -1,6 +1,5 @@
 """WP6 Red Dashboard - MySQL-backed sensor visualization with authentication."""
 
-import json
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -19,6 +18,8 @@ from wp6_data.shared import (
     default_date_range,
     make_dual_axis_chart,
     make_line_chart,
+    prepare_comparison,
+    render_compare_form,
     render_date_filter,
     render_page,
 )
@@ -427,67 +428,17 @@ async def compare_form(user: str = Depends(verify_auth)) -> str:
         return render_page("WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
 
     devices = await db.get_all_devices()
-    # device_id -> list of measurements (for JS)
-    device_data_json = json.dumps(
-        {did: info["measurements"] for did, info in sorted(devices.items())}
-    )
-    device_ids = sorted(devices.keys())
-
-    def select_html(prefix: str, label: str) -> str:
-        device_options = "".join(
-            f'<option value="{d}">{d}</option>' for d in device_ids
-        )
-        return f"""
-        <fieldset style="border:1px solid #ccc; padding:16px; border-radius:6px;">
-            <legend><strong>{label}</strong></legend>
-            <label>Device
-                <select name="{prefix}_device" id="{prefix}_device"
-                        onchange="updateMeasurements('{prefix}')"
-                        style="padding:4px;">
-                    {device_options}
-                </select>
-            </label>
-            <label style="margin-left:12px;">Measurement
-                <select name="{prefix}_measurement" id="{prefix}_measurement"
-                        style="padding:4px;">
-                </select>
-            </label>
-        </fieldset>
-        """
+    device_data = {did: info["measurements"] for did, info in devices.items()}
 
     extra_css = """
         fieldset { display: inline-block; margin-right: 16px; margin-bottom: 12px; }
     """
 
+    form_html = render_compare_form(device_data, action_url="/compare/chart")
     content = f"""
         <h1>Custom Compare</h1>
         <p>Select two device/measurement combinations to plot on a dual y-axis chart.</p>
-        <form method="get" action="/compare/chart">
-            <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
-                {select_html("left", "Left Y-axis")}
-                {select_html("right", "Right Y-axis")}
-            </div>
-            <button type="submit"
-                    style="padding:8px 24px; background:#0066cc; color:white;
-                           border:none; border-radius:4px; cursor:pointer; font-size:1em;">
-                Generate Chart
-            </button>
-        </form>
-        <script>
-        var deviceData = {device_data_json};
-        function updateMeasurements(prefix) {{
-            var device = document.getElementById(prefix + '_device').value;
-            var sel = document.getElementById(prefix + '_measurement');
-            sel.innerHTML = '';
-            (deviceData[device] || []).forEach(function(m) {{
-                var opt = document.createElement('option');
-                opt.value = m; opt.textContent = m;
-                sel.appendChild(opt);
-            }});
-        }}
-        updateMeasurements('left');
-        updateMeasurements('right');
-        </script>
+        {form_html}
     """
 
     return render_page("Custom Compare - WP6 Red", content, extra_css=extra_css,
@@ -527,25 +478,11 @@ async def compare_chart(
             show_back_link=True, back_url="/compare",
         )
 
-    import pandas as pd
-
     left_label = f"{left_device} | {left_measurement}"
     right_label = f"{right_device} | {right_measurement}"
-    if left_label == right_label:
-        left_label += " (left)"
-        right_label += " (right)"
-
-    # Relabel before concat so each side keeps its identity even when measurements match
-    if not left_df.empty:
-        left_df = left_df.copy()
-        left_df["sensor"] = left_label
-    if not right_df.empty:
-        right_df = right_df.copy()
-        right_df["sensor"] = right_label
-
-    df = pd.concat([left_df, right_df], ignore_index=True)
-    if not df.empty:
-        df = df.sort_values("time")
+    df, left_label, right_label = prepare_comparison(
+        left_df, right_df, left_label, right_label,
+    )
 
     filter_html = render_date_filter(start, end, extra_params={
         "left_device": left_device,
