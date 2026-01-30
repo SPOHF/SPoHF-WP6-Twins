@@ -3,7 +3,7 @@
 To the home of WP6 - Digital twin. A workpackage within
 [SPoHF (Sustainable Production of Healthy Food)](https://www.spohf.com/).
 
-![Interreg](./static/interreg.png)
+![Interreg](./assets/interreg.png)
 
 The project contains two twins that are based on studies from other work packages:
 - the `Blue` domain represents blueberries (at Compass Agro (NL))
