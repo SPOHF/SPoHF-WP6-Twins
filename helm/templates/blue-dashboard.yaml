@@ -2,18 +2,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Chart.Name }}-dashboard
+  name: {{ .Chart.Name }}-blue-dashboard
   labels:
-    app.kubernetes.io/name: {{ .Chart.Name }}-dashboard
+    app.kubernetes.io/name: {{ .Chart.Name }}-blue-dashboard
 spec:
   replicas: {{ .Values.dashboard.replicas }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: {{ .Chart.Name }}-dashboard
+      app.kubernetes.io/name: {{ .Chart.Name }}-blue-dashboard
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: {{ .Chart.Name }}-dashboard
+        app.kubernetes.io/name: {{ .Chart.Name }}-blue-dashboard
     spec:
       containers:
         - name: dashboard
@@ -59,9 +59,9 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Chart.Name }}-dashboard
+  name: {{ .Chart.Name }}-blue-dashboard
   labels:
-    app.kubernetes.io/name: {{ .Chart.Name }}-dashboard
+    app.kubernetes.io/name: {{ .Chart.Name }}-blue-dashboard
 spec:
   type: ClusterIP
   ports:
@@ -69,15 +69,15 @@ spec:
       targetPort: 8000
       name: http
   selector:
-    app.kubernetes.io/name: {{ .Chart.Name }}-dashboard
+    app.kubernetes.io/name: {{ .Chart.Name }}-blue-dashboard
 {{- if .Values.dashboard.ingress.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ .Chart.Name }}-dashboard
+  name: {{ .Chart.Name }}-blue-dashboard
   labels:
-    app.kubernetes.io/name: {{ .Chart.Name }}-dashboard
+    app.kubernetes.io/name: {{ .Chart.Name }}-blue-dashboard
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
@@ -85,7 +85,7 @@ spec:
   tls:
     - hosts:
         - {{ .Values.dashboard.ingress.host }}
-      secretName: {{ .Chart.Name }}-dashboard-tls
+      secretName: {{ .Chart.Name }}-blue-dashboard-tls
   rules:
     - host: {{ .Values.dashboard.ingress.host }}
       http:
@@ -94,7 +94,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ .Chart.Name }}-dashboard
+                name: {{ .Chart.Name }}-blue-dashboard
                 port:
                   name: http
 {{- end }}
