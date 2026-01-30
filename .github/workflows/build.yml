@@ -32,6 +32,9 @@ jobs:
       - name: Lint with ruff
         run: uv run ruff check src/
 
+      - name: Run tests
+        run: uv run pytest tests/
+
   build:
     needs: lint
     runs-on: ubuntu-latest
