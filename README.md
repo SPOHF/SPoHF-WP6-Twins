@@ -1,9 +1,7 @@
 # WP6 Digital Twins Developer guide
 
-Documentation site on Github Pages](https://lenntt.github.io/SPoHF-WP6-Twins/).
+[Documentation site on Github Pages](https://lenntt.github.io/SPoHF-WP6-Twins/)
 
-
-![Interreg](./static/interreg.png)
 
 ## Dashboards
 
