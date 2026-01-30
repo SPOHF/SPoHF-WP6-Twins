@@ -16,6 +16,8 @@ from wp6_data.shared import (
     default_date_range,
     make_dual_axis_chart,
     make_line_chart,
+    prepare_comparison,
+    render_compare_form,
     render_date_filter,
     render_page,
 )
@@ -123,9 +125,7 @@ async def home() -> str:
         <h2>Available Sensors</h2>
         <ul>{sensor_list}</ul>
         <h2>Compare Sensors</h2>
-        <p>
-            <a href="/chart/soilConductivity,temperature?dual=true">EC vs temp (dual axis)</a>
-        </p>
+        <p><a href="/compare">Custom dual-axis comparison</a></p>
     """
 
     return render_page("WP6 Blue - Sensor Dashboard", content)
@@ -170,6 +170,83 @@ async def chart(
         show_logo=False,
         show_footer=False,
         show_back_link=True,
+    )
+
+
+@app.get("/compare", response_class=HTMLResponse)
+async def compare_form() -> str:
+    """Form to select two device/sensor pairs for a custom dual-axis chart."""
+    sensors = fetch_available_sensors()
+
+    # Build device -> [sensor tags] mapping
+    device_data: dict[str, list[str]] = {}
+    for s in sensors:
+        device_data.setdefault(s["device"], [])
+        if s["sensor"] not in device_data[s["device"]]:
+            device_data[s["device"]].append(s["sensor"])
+
+    form_html = render_compare_form(device_data, action_url="/compare/chart")
+    content = f"""
+        <h1>Custom Compare</h1>
+        <p>Select two device/sensor combinations to plot on a dual y-axis chart.</p>
+        {form_html}
+    """
+
+    return render_page("Custom Compare - WP6 Blue", content, show_back_link=True)
+
+
+@app.get("/compare/chart", response_class=HTMLResponse)
+async def compare_chart(
+    left_device: str = Query(...),
+    left_measurement: str = Query(...),
+    right_device: str = Query(...),
+    right_measurement: str = Query(...),
+    start: Annotated[date | None, Query()] = None,
+    end: Annotated[date | None, Query()] = None,
+) -> str:
+    """Render a dual-axis chart for two user-selected device/sensor pairs."""
+    default_start, default_end = default_date_range()
+    start = start or default_start
+    end = end or default_end
+    start_dt = datetime(start.year, start.month, start.day, tzinfo=UTC)
+    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+
+    left_df = fetch_data(sensor_tags=[left_measurement], start=start_dt, end=end_dt)
+    if not left_df.empty:
+        left_df = left_df[left_df["device"] == left_device]
+
+    right_df = fetch_data(sensor_tags=[right_measurement], start=start_dt, end=end_dt)
+    if not right_df.empty:
+        right_df = right_df[right_df["device"] == right_device]
+
+    left_label = f"{left_device} | {left_measurement}"
+    right_label = f"{right_device} | {right_measurement}"
+    df, left_label, right_label = prepare_comparison(
+        left_df, right_df, left_label, right_label,
+    )
+
+    filter_html = render_date_filter(start, end, extra_params={
+        "left_device": left_device,
+        "left_measurement": left_measurement,
+        "right_device": right_device,
+        "right_measurement": right_measurement,
+    })
+
+    if df.empty:
+        return render_page(
+            "Compare - WP6 Blue", filter_html + "<h1>No data found</h1>",
+            show_back_link=True, back_url="/compare",
+        )
+
+    fig = make_dual_axis_chart(df, left_label, right_label)
+    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+
+    stats_html = f'<p style="color:#666; font-size:0.9em;">{len(df):,} data points</p>'
+
+    return render_page(
+        "Compare - WP6 Blue",
+        filter_html + stats_html + chart_html,
+        show_logo=False, show_footer=False, show_back_link=True, back_url="/compare",
     )
 
 
