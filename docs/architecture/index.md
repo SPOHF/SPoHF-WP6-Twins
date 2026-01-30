@@ -18,8 +18,6 @@ Desired situation
 ```mermaid
 ---
 config:
-  look: handDrawn
-  theme: dark
   layout: elk
 ---
 flowchart TD
