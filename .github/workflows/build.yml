@@ -3,6 +3,8 @@ name: Build and Push
 on:
   push:
     branches: [main]
+    paths:
+      - "!docs/**"
   pull_request:
     branches: [main]
 
