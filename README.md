@@ -1,12 +1,9 @@
-# WP6 Digital Twins
+# WP6 Digital Twins Developer guide
 
-Sensor data platform for the [SPoHF (Sustainable Production of Healthy Food)](https://www.spohf.com/) project — WP6 digital twin workpackage.
+Documentation site on Github Pages](https://lenntt.github.io/SPoHF-WP6-Twins/).
+
 
 ![Interreg](./static/interreg.png)
-
-The project contains two twins based on studies in other work packages:
-- the `Blue` domain represents blueberries (at Compass Agro (NL))
-- the `Red` domain represents tomatoes in a greenhouse  (at Vitarom (DE))
 
 ## Dashboards
 
