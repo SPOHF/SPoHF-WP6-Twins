@@ -41,15 +41,12 @@ flowchart TD
             end
 
             r_sync ---> r_jobs
-
             r_jobs <--> r_db
-
             r_jobs <--> r_gui
-
             r_analytics <--> r_jobs
 
         end
-        style red fill:red
+        style red fill:#ee5858
 
         subgraph blue[Blue Twin - Blueberries]
             subgraph b_analytics[Analytics]
@@ -72,14 +69,11 @@ flowchart TD
             end
 
             b_sync ---> b_jobs
-
             b_jobs <--> b_db
-
             b_jobs <--> b_gui
-
             b_analytics <--> b_jobs
         end
-        style blue fill:blue
+        style blue fill:#464592
     end
 
     subgraph appcomm[AppComm DataLake]
@@ -95,13 +89,13 @@ flowchart TD
             b_manual[Manual - logs, lab data]@{ shape: cloud}
             b_yellow_cards[Yellow cards]@{ shape: cloud}
         end
-        style blue_source fill:blue
+        style blue_source fill:#464592
 
         subgraph red_sources[Tomato Greenhouse]
             r_sensors[Field sensors]@{ shape: cloud}
             r_manual[Manual - logs, lab data]@{ shape: cloud}
         end
-        style red_sources fill:red
+        style red_sources fill:#ee5858
     end
 
     b_sensors ---> ac_db

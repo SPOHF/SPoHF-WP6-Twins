@@ -13,9 +13,13 @@ The project contains two twins that are based on studies from other work package
 
 | Dashboard | Status | Reason/remark | Data source | Auth | URL |
 |-----------|--------| -------|---------|------|-----|
-| **Blue** |🔴 Usage discouraged | Data source not ready | Synced from SPoHF API (AppComm) | Public | `wp6-blue.spohf.fontysvenlo.dev` |
-| **Red** | 🟢 Ready for use | Temporary data source (data from october 2025) | Fontys GreenTechLab database | Basic Auth | `wp6-red.spohf.fontysvenlo.dev` |
+| **Blue** |🔴 Usage discouraged | Data source not ready | Synced from SPoHF API (AppComm) | Public | [wp6-blue.spohf.fontysvenlo.dev](https://wp6-blue.spohf.fontysvenlo.dev) |
+| **Red** | 🟢 Ready for use | Temporary data source (data from october 2025) | Fontys GreenTechLab database | Basic Auth | [wp6-red.spohf.fontysvenlo.dev](https://wp6-red.spohf.fontysvenlo.dev) |
 
 ## Architecture
 
 see [architecture](architecture/index.md)
+
+## Code repository
+
+github [SPoHF-WP6-Twins repository](https://github.com/lenntt/SPoHF-WP6-Twins/actions)
