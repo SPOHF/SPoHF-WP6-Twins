@@ -44,6 +44,16 @@ spec:
                 secretKeyRef:
                   name: {{ $redSecret }}
                   key: auth-users
+            {{- if .Values.red.export.enabled }}
+            - name: WP6_RED_EXPORT_DIR
+              value: /data/exports
+            {{- end }}
+          {{- if .Values.red.export.enabled }}
+          volumeMounts:
+            - name: exports
+              mountPath: /data/exports
+              readOnly: true
+          {{- end }}
           resources:
             {{- toYaml .Values.red.resources | nindent 12 }}
           livenessProbe:
@@ -67,6 +77,12 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 5
             failureThreshold: 18
+      {{- if .Values.red.export.enabled }}
+      volumes:
+        - name: exports
+          persistentVolumeClaim:
+            claimName: {{ .Chart.Name }}-red-exports
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

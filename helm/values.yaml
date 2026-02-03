@@ -85,3 +85,15 @@ red:
     # Keys expected in secret:
     # - mysql-password: MySQL password
     # - auth-users: Comma-separated users "user1:pass1,user2:pass2"
+  # CSV export job (runs nightly, generates downloadable CSVs)
+  export:
+    enabled: true
+    schedule: "0 2 * * *"  # 2 AM daily
+    storageSize: "1Gi"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi

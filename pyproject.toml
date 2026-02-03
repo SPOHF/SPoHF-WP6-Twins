@@ -30,6 +30,7 @@ dev = [
 
 [project.scripts]
 wp6-data-sync = "wp6_data.__main__:main"
+wp6-red-export = "wp6_data.red.export:main"
 
 [build-system]
 requires = ["hatchling"]
