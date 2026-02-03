@@ -4,7 +4,7 @@ import json
 import os
 import secrets
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -16,9 +16,18 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
 from wp6_data.red.db import MEASUREMENT_GROUPS, MEASUREMENTS_TO_TABLES, MySQLConnection
+from wp6_data.red.dli import (
+    OpenMeteoClient,
+    OptimizationParams,
+    calculate_daily_dli,
+    calculate_hourly_par,
+    get_model,
+)
 from wp6_data.shared import (
+    make_bar_chart,
     make_dual_axis_chart,
     make_line_chart,
+    make_schedule_chart,
     prepare_comparison,
     render_compare_form,
     render_date_filter,
@@ -218,6 +227,17 @@ async def home(user: str = Depends(verify_auth)) -> str:
     content = f"""
         <div class="user-info">Logged in as: {user}</div>
         <h1>WP6 Red - Sensor Dashboard</h1>
+
+        <div class="section">
+            <h2>Light Analysis (DLI)</h2>
+            <p>Daily Light Integral analysis and optimization tools:</p>
+            <ul>
+                <li><a href="/dli">DLI Dashboard</a> - Overview and navigation</li>
+                <li><a href="/dli/chart">Historical DLI</a> - Daily DLI bar chart</li>
+                <li><a href="/dli/schedule">Schedule Analysis</a> - Compare actual vs optimal</li>
+                <li><a href="/dli/forecast">Forecast</a> - Projected light schedules</li>
+            </ul>
+        </div>
 
         <div class="section">
             <h2>Custom Compare</h2>
@@ -551,6 +571,1079 @@ async def download_csv(table: str, user: str = Depends(verify_auth)) -> FileResp
         path=csv_path,
         media_type="text/csv",
         filename=f"{table}.csv",
+    )
+
+
+# =============================================================================
+# DLI (Daily Light Integral) Endpoints
+# =============================================================================
+
+# Weather client (shared across requests)
+weather_client: OpenMeteoClient | None = None
+
+
+def get_weather_client() -> OpenMeteoClient:
+    """Get or create weather client."""
+    global weather_client
+    if weather_client is None:
+        weather_client = OpenMeteoClient()
+    return weather_client
+
+
+@app.get("/dli", response_class=HTMLResponse)
+async def dli_home(user: str = Depends(verify_auth)) -> str:
+    """DLI dashboard overview page."""
+    if not db:
+        return render_page("DLI - WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
+
+    extra_css = """
+        .card { border: 1px solid #ddd; border-radius: 8px; padding: 20px;
+                margin-bottom: 20px; }
+        .card h3 { margin-top: 0; color: #333; }
+        .card p { color: #666; margin-bottom: 10px; }
+        .grid { display: grid; gap: 20px;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+        .btn { display: inline-block; padding: 8px 16px; background: #0066cc;
+               color: white; text-decoration: none; border-radius: 4px;
+               margin-right: 8px; }
+        .btn:hover { background: #0055aa; text-decoration: none; }
+        .stats { display: flex; gap: 40px; margin: 20px 0; }
+        .stat { text-align: center; }
+        .stat-value { font-size: 2em; font-weight: bold; color: #0066cc; }
+        .stat-label { font-size: 0.9em; color: #666; }
+    """
+
+    content = """
+        <h1>DLI Dashboard</h1>
+        <p>Daily Light Integral analysis for PAR sensors.</p>
+
+        <div class="grid">
+            <div class="card">
+                <h3>Historical DLI</h3>
+                <p>View daily DLI values calculated from PAR sensor readings.</p>
+                <a href="/dli/chart" class="btn">View Chart</a>
+                <a href="/dli/table" class="btn" style="background:#666;">View Table</a>
+            </div>
+
+            <div class="card">
+                <h3>Schedule Analysis</h3>
+                <p>Compare actual light schedules against weather-optimized recommendations.</p>
+                <a href="/dli/schedule" class="btn">Analyze Schedule</a>
+            </div>
+
+            <div class="card">
+                <h3>Forecast</h3>
+                <p>View projected natural light and optimal lamp schedules.</p>
+                <a href="/dli/forecast" class="btn">View Forecast</a>
+            </div>
+
+            <div class="card">
+                <h3>Prediction Model</h3>
+                <p>Train ML model to predict indoor PAR from weather data.</p>
+                <a href="/dli/model" class="btn">Manage Model</a>
+            </div>
+        </div>
+    """
+
+    return render_page("DLI Dashboard - WP6 Red", content, extra_css=extra_css, show_back_link=True)
+
+
+@app.get("/dli/chart", response_class=HTMLResponse)
+async def dli_chart(
+    user: str = Depends(verify_auth),
+    start: Annotated[date | None, Query(description="Start date")] = None,
+    end: Annotated[date | None, Query(description="End date")] = None,
+    device: Annotated[str | None, Query(description="Filter by device ID")] = None,
+) -> str:
+    """DLI bar chart with date filter and device selector."""
+    if not db:
+        return render_page("DLI Chart - WP6 Red", "<h1>Database not connected</h1>",
+                          show_back_link=True, back_url="/dli")
+
+    start, end, start_dt, end_dt = resolve_date_range(start, end)
+
+    try:
+        device_ids = [device] if device else None
+        par_df = await db.get_par_readings(device_ids=device_ids, start=start_dt, end=end_dt)
+    except Exception as e:
+        return render_page("DLI Chart - WP6 Red", f"<h1>Error: {e}</h1>",
+                          show_back_link=True, back_url="/dli")
+
+    # Build device filter dropdown
+    try:
+        all_devices = await db.get_par_devices()
+    except Exception:
+        all_devices = []
+
+    device_options = '<option value="">All Devices</option>' + "".join(
+        f'<option value="{d}" {"selected" if d == device else ""}>{d}</option>'
+        for d in all_devices
+    )
+
+    extra_params = {"device": device} if device else {}
+    filter_html = render_date_filter(start, end, extra_params=extra_params)
+
+    # Add device selector
+    base_url = f"?start={start}&end={end}&device="
+    device_selector = f"""
+        <div style="margin-bottom: 16px;">
+            <label>Device:
+                <select onchange="window.location.href='{base_url}' + this.value"
+                        style="padding: 4px;">
+                    {device_options}
+                </select>
+            </label>
+        </div>
+    """
+
+    if par_df.empty:
+        return render_page(
+            "DLI Chart - WP6 Red",
+            filter_html + device_selector + "<h1>No PAR data found</h1>",
+            show_back_link=True, back_url="/dli",
+        )
+
+    # Calculate DLI
+    dli_df = calculate_daily_dli(par_df)
+
+    if dli_df.empty:
+        return render_page(
+            "DLI Chart - WP6 Red",
+            filter_html + device_selector + "<h1>Insufficient data for DLI calculation</h1>",
+            show_back_link=True, back_url="/dli",
+        )
+
+    # Format date for display
+    dli_df["date_str"] = dli_df["date"].astype(str)
+
+    fig = make_bar_chart(
+        dli_df,
+        x="date_str",
+        y="dli",
+        color="device" if len(dli_df["device"].unique()) > 1 else None,
+        title="Daily Light Integral (DLI)",
+        y_label="DLI (mol/m²/day)",
+    )
+
+    # Add target DLI reference line
+    target_dli = float(os.getenv("WP6_RED_DLI_TARGET", "25.0"))
+    fig.add_hline(
+        y=target_dli,
+        line_dash="dash",
+        line_color="green",
+        annotation_text=f"Target: {target_dli}",
+        annotation_position="top right",
+    )
+
+    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+
+    # Summary stats
+    avg_dli = dli_df["dli"].mean()
+    max_dli = dli_df["dli"].max()
+    min_dli = dli_df["dli"].min()
+
+    stats_html = f"""
+        <div style="display: flex; gap: 40px; margin: 20px 0; color: #666;">
+            <div>Avg DLI: <strong>{avg_dli:.1f}</strong></div>
+            <div>Max: <strong>{max_dli:.1f}</strong></div>
+            <div>Min: <strong>{min_dli:.1f}</strong></div>
+            <div>Target: <strong>{target_dli}</strong></div>
+            <div>Days: <strong>{len(dli_df["date"].unique())}</strong></div>
+        </div>
+    """
+
+    return render_page(
+        "DLI Chart - WP6 Red",
+        filter_html + device_selector + stats_html + chart_html,
+        show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",
+    )
+
+
+@app.get("/dli/table", response_class=HTMLResponse)
+async def dli_table(
+    user: str = Depends(verify_auth),
+    start: Annotated[date | None, Query(description="Start date")] = None,
+    end: Annotated[date | None, Query(description="End date")] = None,
+) -> str:
+    """Raw DLI data table."""
+    if not db:
+        return render_page("DLI Table - WP6 Red", "<h1>Database not connected</h1>",
+                          show_back_link=True, back_url="/dli")
+
+    start, end, start_dt, end_dt = resolve_date_range(start, end)
+
+    try:
+        par_df = await db.get_par_readings(start=start_dt, end=end_dt)
+    except Exception as e:
+        return render_page("DLI Table - WP6 Red", f"<h1>Error: {e}</h1>",
+                          show_back_link=True, back_url="/dli")
+
+    filter_html = render_date_filter(start, end)
+
+    if par_df.empty:
+        return render_page(
+            "DLI Table - WP6 Red",
+            filter_html + "<h1>No PAR data found</h1>",
+            show_back_link=True, back_url="/dli",
+        )
+
+    dli_df = calculate_daily_dli(par_df)
+
+    if dli_df.empty:
+        return render_page(
+            "DLI Table - WP6 Red",
+            filter_html + "<h1>Insufficient data for DLI calculation</h1>",
+            show_back_link=True, back_url="/dli",
+        )
+
+    extra_css = """
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #f5f5f5; }
+        tr:hover { background-color: #f9f9f9; }
+        .good { color: green; }
+        .low { color: orange; }
+        .high { color: red; }
+    """
+
+    target_dli = float(os.getenv("WP6_RED_DLI_TARGET", "25.0"))
+
+    # Build table rows
+    rows = []
+    for _, row in dli_df.iterrows():
+        dli = row["dli"]
+        if dli < target_dli * 0.8:
+            dli_class = "low"
+        elif dli > target_dli * 1.2:
+            dli_class = "high"
+        else:
+            dli_class = "good"
+
+        rows.append(f"""
+            <tr>
+                <td>{row['date']}</td>
+                <td>{row['device']}</td>
+                <td class="{dli_class}"><strong>{dli:.1f}</strong></td>
+                <td>{row['avg_par']:.0f}</td>
+                <td>{row['photoperiod_hours']:.1f}</td>
+                <td>{row['reading_count']:,}</td>
+            </tr>
+        """)
+
+    table_html = f"""
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Device</th>
+                    <th>DLI (mol/m²/day)</th>
+                    <th>Avg PAR (μmol/m²/s)</th>
+                    <th>Photoperiod (hours)</th>
+                    <th>Readings</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(rows)}
+            </tbody>
+        </table>
+        <p style="color: #666; font-size: 0.9em; margin-top: 10px;">
+            Target DLI: {target_dli} mol/m²/day.
+            <span class="good">Green</span> = within 20% of target,
+            <span class="low">Orange</span> = below target,
+            <span class="high">Red</span> = above target.
+        </p>
+    """
+
+    return render_page(
+        "DLI Table - WP6 Red",
+        filter_html + table_html,
+        extra_css=extra_css,
+        show_back_link=True, back_url="/dli",
+    )
+
+
+@app.get("/dli/schedule", response_class=HTMLResponse)
+async def dli_schedule(
+    user: str = Depends(verify_auth),
+    analysis_date: Annotated[date | None, Query(description="Date to analyze")] = None,
+    target_dli: Annotated[float, Query(ge=10, le=50)] = 25.0,
+) -> str:
+    """Analyze actual vs optimal light schedule for a specific day."""
+    if not db:
+        return render_page("Schedule Analysis - WP6 Red", "<h1>Database not connected</h1>",
+                          show_back_link=True, back_url="/dli")
+
+    # Default to yesterday
+    if analysis_date is None:
+        analysis_date = date.today() - timedelta(days=1)
+
+    # Get actual PAR data for the day
+    params = OptimizationParams(target_dli=target_dli)
+    start_dt = datetime(analysis_date.year, analysis_date.month, analysis_date.day, tzinfo=UTC)
+    end_dt = start_dt + timedelta(days=1) - timedelta(seconds=1)
+
+    try:
+        par_df = await db.get_par_readings(
+            device_ids=[params.schedule_sensor], start=start_dt, end=end_dt
+        )
+    except Exception as e:
+        return render_page("Schedule Analysis - WP6 Red", f"<h1>Error: {e}</h1>",
+                          show_back_link=True, back_url="/dli")
+
+    # Get weather data for the day (forecast for today/future, historical for past)
+    client = get_weather_client()
+    try:
+        if analysis_date >= date.today():
+            # Use forecast API for today and future
+            all_forecasts = await client.get_forecast(days=7)
+            forecasts = [f for f in all_forecasts if f.date == analysis_date]
+        else:
+            # Use archive API for historical dates
+            forecasts = await client.get_historical(analysis_date, analysis_date)
+    except Exception as e:
+        return render_page(
+            "Schedule Analysis - WP6 Red",
+            f"<h1>Weather API Error: {e}</h1><p>Could not fetch weather data.</p>",
+            show_back_link=True, back_url="/dli",
+        )
+
+    if not forecasts:
+        return render_page(
+            "Schedule Analysis - WP6 Red",
+            "<h1>No weather data available</h1>",
+            show_back_link=True, back_url="/dli",
+        )
+
+    # Calculate optimal schedule
+    optimal = calculate_optimal_schedule(forecasts[0], params)
+    optimal_df = schedule_to_dataframe(optimal)
+
+    # Prepare actual data for charting
+    if not par_df.empty:
+        # Use raw readings for chart (native resolution)
+        actual_chart_df = par_df.rename(columns={"time": "datetime", "value": "par"})
+        # Use hourly aggregation for DLI comparison
+        hourly_df = calculate_hourly_par(par_df)
+        hourly_comparison_df = hourly_df.rename(columns={"par_avg": "par"})
+        comparison = compare_actual_vs_optimal(hourly_comparison_df, optimal)
+    else:
+        actual_chart_df = pd.DataFrame(columns=["datetime", "par"])
+        comparison = {
+            "actual_dli": 0,
+            "optimal_dli": optimal.achieved_dli,
+            "target_dli": target_dli,
+            "difference": 0,
+            "potential_savings_percent": 0,
+        }
+
+    # Build chart
+    fig = make_schedule_chart(
+        actual_chart_df,
+        optimal_df,
+        title=f"Light Schedule - {analysis_date}",
+    )
+    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+
+    extra_css = """
+        .controls { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 20px;
+                   padding: 15px; background: #f5f5f5; border-radius: 8px; }
+        .control-group { display: flex; align-items: center; gap: 8px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                     gap: 15px; margin: 20px 0; }
+        .stat-box { padding: 15px; background: #f9f9f9; border-radius: 8px; text-align: center; }
+        .stat-box .value { font-size: 1.5em; font-weight: bold; color: #0066cc; }
+        .stat-box .label { font-size: 0.85em; color: #666; }
+        .savings { color: green; }
+    """
+
+    controls_html = f"""
+        <form method="get" class="controls">
+            <div class="control-group">
+                <label>Date:</label>
+                <input type="date" name="analysis_date" value="{analysis_date}"
+                       onchange="this.form.submit()">
+            </div>
+            <div class="control-group">
+                <label>Target DLI:</label>
+                <input type="range" name="target_dli" min="15" max="40" step="1"
+                       value="{target_dli}"
+                       oninput="this.nextElementSibling.textContent=this.value"
+                       onchange="this.form.submit()">
+                <span>{target_dli}</span>
+            </div>
+        </form>
+    """
+
+    stats_html = f"""
+        <div class="stats-grid">
+            <div class="stat-box">
+                <div class="value">{comparison.get('actual_dli', 0):.1f}</div>
+                <div class="label">Actual DLI</div>
+            </div>
+            <div class="stat-box">
+                <div class="value">{optimal.achieved_dli:.1f}</div>
+                <div class="label">Optimal DLI</div>
+            </div>
+            <div class="stat-box">
+                <div class="value">{optimal.natural_dli:.1f}</div>
+                <div class="label">Natural DLI</div>
+            </div>
+            <div class="stat-box">
+                <div class="value">{optimal.lamp_dli:.1f}</div>
+                <div class="label">Lamp DLI (optimal)</div>
+            </div>
+            <div class="stat-box">
+                <div class="value savings">{optimal.savings_percent:.0f}%</div>
+                <div class="label">Potential Savings</div>
+            </div>
+        </div>
+    """
+
+    content = f"""
+        <h1>Schedule Analysis</h1>
+        {controls_html}
+        {stats_html}
+        {chart_html}
+        <p style="color: #666; font-size: 0.9em; margin-top: 10px;">
+            Blue area: actual PAR readings. Green dashed: optimal total PAR.
+            Yellow dotted: estimated natural light contribution.
+        </p>
+    """
+
+    return render_page(
+        "Schedule Analysis - WP6 Red",
+        content,
+        extra_css=extra_css,
+        show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",
+    )
+
+
+@app.get("/dli/forecast", response_class=HTMLResponse)
+async def dli_forecast(
+    user: str = Depends(verify_auth),
+    days: Annotated[int, Query(ge=1, le=14)] = 7,
+    target_dli: Annotated[float, Query(ge=10, le=50)] = 25.0,
+) -> str:
+    """View projected natural light and optimal lamp schedules."""
+    client = get_weather_client()
+
+    try:
+        forecasts = await client.get_forecast(days=days)
+    except Exception as e:
+        return render_page(
+            "Forecast - WP6 Red",
+            f"<h1>Weather API Error: {e}</h1>",
+            show_back_link=True, back_url="/dli",
+        )
+
+    if not forecasts:
+        return render_page(
+            "Forecast - WP6 Red",
+            "<h1>No forecast data available</h1>",
+            show_back_link=True, back_url="/dli",
+        )
+
+    # Calculate optimal schedules for each day
+    params = OptimizationParams(target_dli=target_dli)
+    schedules = [calculate_optimal_schedule(f, params) for f in forecasts]
+
+    # Build summary table
+    rows = []
+    for s in schedules:
+        lamp_needed = "Yes" if s.lamp_dli > 0.5 else "No"
+        rows.append(f"""
+            <tr>
+                <td>{s.date}</td>
+                <td>{s.natural_dli:.1f}</td>
+                <td>{s.lamp_dli:.1f}</td>
+                <td>{s.achieved_dli:.1f}</td>
+                <td>{s.lamp_hours:.0f}h</td>
+                <td style="color: {'green' if s.savings_percent > 20 else 'inherit'};">
+                    {s.savings_percent:.0f}%
+                </td>
+                <td>{lamp_needed}</td>
+            </tr>
+        """)
+
+    extra_css = """
+        .controls { display: flex; gap: 20px; margin-bottom: 20px;
+                   padding: 15px; background: #f5f5f5; border-radius: 8px; }
+        .control-group { display: flex; align-items: center; gap: 8px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
+        th { background-color: #f5f5f5; }
+        tr:hover { background-color: #f9f9f9; }
+    """
+
+    days_options = "".join(
+        f'<option value="{d}" {"selected" if d == days else ""}>{d} days</option>'
+        for d in [3, 7, 14]
+    )
+    controls_html = f"""
+        <form method="get" class="controls">
+            <div class="control-group">
+                <label>Forecast Days:</label>
+                <select name="days" onchange="this.form.submit()">
+                    {days_options}
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Target DLI:</label>
+                <input type="range" name="target_dli" min="15" max="40" step="1"
+                       value="{target_dli}"
+                       oninput="this.nextElementSibling.textContent=this.value"
+                       onchange="this.form.submit()">
+                <span>{target_dli}</span>
+            </div>
+        </form>
+    """
+
+    # Bar chart of forecasted DLI breakdown
+    chart_data = pd.DataFrame([
+        {"date": str(s.date), "Natural DLI": s.natural_dli, "Lamp DLI": s.lamp_dli}
+        for s in schedules
+    ])
+
+    fig = make_bar_chart(
+        chart_data.melt(id_vars="date", var_name="Source", value_name="DLI"),
+        x="date",
+        y="DLI",
+        color="Source",
+        title=f"Forecasted DLI Breakdown (Target: {target_dli})",
+        y_label="DLI (mol/m²/day)",
+        barmode="stack",
+    )
+    fig.add_hline(
+        y=target_dli,
+        line_dash="dash",
+        line_color="red",
+        annotation_text="Target",
+    )
+    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+
+    table_html = f"""
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Natural DLI</th>
+                    <th>Lamp DLI</th>
+                    <th>Total DLI</th>
+                    <th>Lamp Hours</th>
+                    <th>Savings</th>
+                    <th>Lamps Needed</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(rows)}
+            </tbody>
+        </table>
+    """
+
+    content = f"""
+        <h1>Light Forecast</h1>
+        <p>Projected natural light and optimal lamp usage based on weather forecast.</p>
+        {controls_html}
+        {chart_html}
+        {table_html}
+    """
+
+    return render_page(
+        "Forecast - WP6 Red",
+        content,
+        extra_css=extra_css,
+        show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",
+    )
+
+
+@app.get("/dli/model", response_class=HTMLResponse)
+async def dli_model_status(user: str = Depends(verify_auth)) -> str:
+    """View model status and training options."""
+    model = get_model()
+
+    extra_css = """
+        .model-card { border: 1px solid #ddd; border-radius: 8px; padding: 20px;
+                     margin-bottom: 20px; }
+        .model-card h3 { margin-top: 0; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                     gap: 15px; margin: 15px 0; }
+        .stat { padding: 10px; background: #f5f5f5; border-radius: 4px; text-align: center; }
+        .stat .value { font-size: 1.3em; font-weight: bold; color: #0066cc; }
+        .stat .label { font-size: 0.85em; color: #666; }
+        .coef-table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        .coef-table th, .coef-table td { padding: 8px; text-align: left;
+                                         border-bottom: 1px solid #eee; }
+        .btn { display: inline-block; padding: 10px 20px; background: #0066cc;
+               color: white; text-decoration: none; border-radius: 4px; border: none;
+               cursor: pointer; font-size: 1em; }
+        .btn:hover { background: #0055aa; }
+        .btn-secondary { background: #666; }
+        .warning { color: #cc6600; }
+        .success { color: green; }
+    """
+
+    if model.is_trained() and model.stats:
+        stats = model.stats
+        s1 = stats.stage1
+        s2 = stats.stage2
+
+        s1_coef_rows = "".join(
+            f"<tr><td>{name}</td><td>{value:+.4f}</td></tr>"
+            for name, value in s1.coefficients.items()
+        )
+        s2_coef_rows = "".join(
+            f"<tr><td>{name}</td><td>{value:+.4f}</td></tr>"
+            for name, value in s2.coefficients.items()
+        )
+
+        status_html = f"""
+            <div class="model-card">
+                <h3 class="success">Two-Stage Model Trained (Daily)</h3>
+                <p>OpenMeteo daily direct_radiation → s1000 daily lux → indoor PAR</p>
+
+                <div class="stats-grid">
+                    <div class="stat">
+                        <div class="value">{stats.r2_score:.3f}</div>
+                        <div class="label">Combined R²</div>
+                    </div>
+                    <div class="stat">
+                        <div class="value">{s1.r2_score:.3f}</div>
+                        <div class="label">Stage 1 R²</div>
+                    </div>
+                    <div class="stat">
+                        <div class="value">{s2.r2_score:.3f}</div>
+                        <div class="label">Stage 2 R²</div>
+                    </div>
+                    <div class="stat">
+                        <div class="value">{stats.n_samples:,}</div>
+                        <div class="label">Days</div>
+                    </div>
+                </div>
+
+                <h4>Stage 1: Weather API → Local Lux (Daily)</h4>
+                <p>Calibrates OpenMeteo direct_radiation to s1000 daily lux sum
+                   (R²={s1.r2_score:.3f}, RMSE={s1.rmse:.0f} lux/day)</p>
+                <table class="coef-table">
+                    <tr><th>Feature</th><th>Coefficient</th></tr>
+                    <tr><td>Intercept</td><td>{s1.intercept:+.4f}</td></tr>
+                    {s1_coef_rows}
+                </table>
+
+                <h4>Stage 2: Outdoor Lux → Indoor PAR (Daily)</h4>
+                <p>Greenhouse transmission model for daily totals
+                   (R²={s2.r2_score:.3f}, RMSE={s2.rmse:.1f} μmol/m²/day)</p>
+                <table class="coef-table">
+                    <tr><th>Feature</th><th>Coefficient</th></tr>
+                    <tr><td>Intercept</td><td>{s2.intercept:+.4f}</td></tr>
+                    {s2_coef_rows}
+                </table>
+
+                <p style="color: #666; font-size: 0.9em;">
+                    Outdoor sensor: <strong>{stats.outdoor_sensor}</strong><br>
+                    Indoor sensor: <strong>{stats.indoor_sensor}</strong><br>
+                    Trained: {stats.training_date.strftime('%Y-%m-%d %H:%M')} UTC<br>
+                    Data range: {stats.date_range[0]} to {stats.date_range[1]}
+                </p>
+            </div>
+        """
+    else:
+        status_html = """
+            <div class="model-card">
+                <h3 class="warning">No Model Trained</h3>
+                <p>The two-stage PAR prediction model has not been trained yet.</p>
+                <p>Training requires:</p>
+                <ul>
+                    <li><strong>Stage 1</strong>: OpenMeteo weather data + s1000 lux readings</li>
+                    <li><strong>Stage 2</strong>: s1000 lux + s2100-01-par indoor readings</li>
+                </ul>
+            </div>
+        """
+
+    train_form = """
+        <div class="model-card">
+            <h3>Train Model</h3>
+            <p>Trains a two-stage model:</p>
+            <ol>
+                <li><strong>Stage 1</strong>: OpenMeteo → s1000 lux (weather API calibration)</li>
+                <li><strong>Stage 2</strong>: s1000 lux → indoor PAR (greenhouse transmission)</li>
+            </ol>
+            <form method="post" action="/dli/model/train">
+                <button type="submit" class="btn">Train Model</button>
+            </form>
+            <p style="color: #666; font-size: 0.9em; margin-top: 10px;">
+                Uses all data from s1000 and s2100-01-par since 2025-10-24.
+            </p>
+        </div>
+    """
+
+    content = f"""
+        <h1>Light Prediction Model</h1>
+        <p>Two-stage ML model: OpenMeteo forecast → local calibration → indoor PAR prediction.</p>
+        {status_html}
+        {train_form}
+        <p style="margin-top: 20px;">
+            <a href="/dli/model/diagnostic">View training diagnostic</a> -
+            investigate data alignment and correlation issues.
+        </p>
+    """
+
+    return render_page(
+        "Light Model - WP6 Red",
+        content,
+        extra_css=extra_css,
+        show_back_link=True, back_url="/dli",
+    )
+
+
+@app.post("/dli/model/train", response_class=HTMLResponse)
+async def dli_model_train(user: str = Depends(verify_auth)) -> str:
+    """Train the two-stage light prediction model."""
+    if not db:
+        return render_page(
+            "Train Model - WP6 Red",
+            "<h1>Database not connected</h1>",
+            show_back_link=True, back_url="/dli/model",
+        )
+
+    # Use all data since 2025-11-01 (devices up and running)
+    start_dt = datetime(2025, 11, 1, tzinfo=UTC)
+    end_dt = datetime.now(UTC)
+
+    # Fetch indoor PAR data (s2100-01-par - natural light, not under lamps)
+    try:
+        indoor_df = await db.get_par_readings(
+            device_ids=["s2100-01-par"], start=start_dt, end=end_dt
+        )
+    except Exception as e:
+        return render_page(
+            "Train Model - WP6 Red",
+            f"<h1>Database Error (indoor PAR)</h1><p>{e}</p>",
+            show_back_link=True, back_url="/dli/model",
+        )
+
+    if indoor_df.empty:
+        return render_page(
+            "Train Model - WP6 Red",
+            "<h1>No Indoor PAR Data</h1>"
+            "<p>No s2100-01-par readings found for the selected date range.</p>",
+            show_back_link=True, back_url="/dli/model",
+        )
+
+    # Fetch outdoor weather station data (s1000 lux)
+    try:
+        outdoor_df = await db.get_weather_station_readings(start=start_dt, end=end_dt)
+    except Exception as e:
+        return render_page(
+            "Train Model - WP6 Red",
+            f"<h1>Database Error (s1000)</h1><p>{e}</p>",
+            show_back_link=True, back_url="/dli/model",
+        )
+
+    if outdoor_df.empty:
+        return render_page(
+            "Train Model - WP6 Red",
+            "<h1>No Weather Station Data</h1>"
+            "<p>No s1000 lux readings found for the selected date range.</p>",
+            show_back_link=True, back_url="/dli/model",
+        )
+
+    # Fetch OpenMeteo historical weather data (direct_radiation for better correlation)
+    client = get_weather_client()
+    try:
+        weather_df = await client.get_historical_dataframe_multi(
+            start_dt.date(), end_dt.date(), radiation_var="direct_radiation"
+        )
+    except Exception as e:
+        return render_page(
+            "Train Model - WP6 Red",
+            f"<h1>Weather API Error</h1><p>{e}</p>",
+            show_back_link=True, back_url="/dli/model",
+        )
+
+    if weather_df.empty:
+        return render_page(
+            "Train Model - WP6 Red",
+            "<h1>No OpenMeteo Data</h1>"
+            "<p>Could not fetch weather data for the date range.</p>",
+            show_back_link=True, back_url="/dli/model",
+        )
+
+    # Train two-stage model
+    model = get_model()
+    try:
+        stats = model.train(
+            weather_df=weather_df,
+            outdoor_df=outdoor_df,
+            indoor_df=indoor_df,
+        )
+        model.save()
+    except ValueError as e:
+        return render_page(
+            "Train Model - WP6 Red",
+            f"<h1>Training Failed</h1><p>{e}</p>",
+            show_back_link=True, back_url="/dli/model",
+        )
+    except Exception as e:
+        return render_page(
+            "Train Model - WP6 Red",
+            f"<h1>Training Error</h1><p>{e}</p>",
+            show_back_link=True, back_url="/dli/model",
+        )
+
+    extra_css = """
+        .success-card { border: 2px solid green; border-radius: 8px; padding: 20px;
+                       background: #f0fff0; }
+        .stats { display: flex; gap: 30px; margin: 20px 0; }
+        .stat { text-align: center; }
+        .stat .value { font-size: 1.5em; font-weight: bold; color: #0066cc; }
+        .stat .label { font-size: 0.9em; color: #666; }
+    """
+
+    content = f"""
+        <div class="success-card">
+            <h1>Two-Stage Model Trained (Daily)</h1>
+            <div class="stats">
+                <div class="stat">
+                    <div class="value">{stats.r2_score:.3f}</div>
+                    <div class="label">Combined R²</div>
+                </div>
+                <div class="stat">
+                    <div class="value">{stats.stage1.r2_score:.3f}</div>
+                    <div class="label">Stage 1 R²</div>
+                </div>
+                <div class="stat">
+                    <div class="value">{stats.stage2.r2_score:.3f}</div>
+                    <div class="label">Stage 2 R²</div>
+                </div>
+                <div class="stat">
+                    <div class="value">{stats.n_samples:,}</div>
+                    <div class="label">Days</div>
+                </div>
+            </div>
+            <p><strong>Stage 1</strong>: OpenMeteo daily direct_radiation → s1000 daily lux</p>
+            <p><strong>Stage 2</strong>: s1000 daily lux → indoor daily PAR</p>
+            <p style="margin-top: 15px;">
+                Model saved and will be used for PAR predictions.
+                <a href="/dli/model">View full model details</a>
+            </p>
+        </div>
+    """
+
+    return render_page(
+        "Model Trained - WP6 Red",
+        content,
+        extra_css=extra_css,
+        show_back_link=True, back_url="/dli/model",
+    )
+
+
+@app.get("/dli/model/diagnostic", response_class=HTMLResponse)
+async def dli_model_diagnostic(
+    user: str = Depends(verify_auth),
+) -> str:
+    """Diagnostic view to investigate model training data."""
+    if not db:
+        return render_page(
+            "Model Diagnostic - WP6 Red",
+            "<h1>Database not connected</h1>",
+            show_back_link=True, back_url="/dli/model",
+        )
+
+    # Use same date range as training
+    start_dt = datetime(2025, 11, 1, tzinfo=UTC)
+    end_dt = datetime.now(UTC)
+
+    # Fetch all data sources
+    try:
+        indoor_df = await db.get_par_readings(
+            device_ids=["s2100-01-par"], start=start_dt, end=end_dt
+        )
+        outdoor_df = await db.get_weather_station_readings(start=start_dt, end=end_dt)
+
+        # Fetch weather with direct_radiation (best correlation)
+        client = get_weather_client()
+        weather_df = await client.get_historical_dataframe_multi(
+            start_dt.date(), end_dt.date(), radiation_var="direct_radiation"
+        )
+    except Exception as e:
+        return render_page(
+            "Model Diagnostic - WP6 Red",
+            f"<h1>Error fetching data</h1><p>{e}</p>",
+            show_back_link=True, back_url="/dli/model",
+        )
+
+    # Data counts
+    indoor_count = len(indoor_df)
+    outdoor_count = len(outdoor_df)
+    weather_count = len(weather_df)
+
+    # Check date ranges
+    def date_range_str(df, time_col="time"):
+        if df.empty:
+            return "No data"
+        col = time_col if time_col in df.columns else "datetime"
+        dates = pd.to_datetime(df[col], utc=True)
+        return f"{dates.min().date()} to {dates.max().date()}"
+
+    indoor_range = date_range_str(indoor_df)
+    outdoor_range = date_range_str(outdoor_df)
+    weather_range = date_range_str(weather_df, "datetime")
+
+    # Align data for scatter plot (Stage 1: weather vs outdoor)
+    weather_df["datetime"] = pd.to_datetime(weather_df["datetime"], utc=True)
+    weather_df["hour_key"] = weather_df["datetime"].dt.floor("h")
+
+    outdoor_df["time"] = pd.to_datetime(outdoor_df["time"], utc=True)
+    outdoor_df["hour_key"] = outdoor_df["time"].dt.floor("h")
+    outdoor_hourly = outdoor_df.groupby("hour_key").agg({"lux": "mean"}).reset_index()
+
+    stage1_merged = weather_df.merge(outdoor_hourly, on="hour_key", how="inner")
+    stage1_merged = stage1_merged[stage1_merged["lux"] > 10]
+    stage1_merged = stage1_merged[stage1_merged["solar_radiation"] > 0]
+
+    # Create scatter plot
+    import plotly.express as px
+
+    if not stage1_merged.empty:
+        fig = px.scatter(
+            stage1_merged,
+            x="solar_radiation",
+            y="lux",
+            title="Stage 1: OpenMeteo Solar Radiation vs s1000 Lux",
+            labels={"solar_radiation": "OpenMeteo Solar Radiation (W/m²)", "lux": "s1000 Lux"},
+        )
+        fig.update_layout(height=500)
+        scatter_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+
+        # Calculate correlation
+        corr = stage1_merged["solar_radiation"].corr(stage1_merged["lux"])
+    else:
+        scatter_html = "<p>No aligned data for scatter plot</p>"
+        corr = 0
+
+    # Check for gaps - count readings per day
+    outdoor_df["date"] = outdoor_df["time"].dt.date
+    daily_counts = outdoor_df.groupby("date").size()
+    days_with_few = (daily_counts < 20).sum()
+    total_days = len(daily_counts)
+
+    # Test daily aggregation correlation
+    if not stage1_merged.empty:
+        stage1_merged["date"] = stage1_merged["hour_key"].dt.date
+        daily_agg = stage1_merged.groupby("date").agg({
+            "solar_radiation": "sum",
+            "lux": "sum",
+        }).reset_index()
+        daily_corr = daily_agg["solar_radiation"].corr(daily_agg["lux"])
+        daily_samples = len(daily_agg)
+    else:
+        daily_corr = 0
+        daily_samples = 0
+
+    # Check s1000 reporting frequency
+    if len(outdoor_df) > 1:
+        time_diffs = outdoor_df["time"].diff().dropna()
+        median_interval = time_diffs.median().total_seconds() / 60  # minutes
+        readings_per_hour = 60 / median_interval if median_interval > 0 else 0
+    else:
+        median_interval = 0
+        readings_per_hour = 0
+
+    # Sample timestamps to check alignment
+    sample_weather = weather_df.head(5)[["datetime", "solar_radiation"]].to_html(
+        index=False, classes="diag-table"
+    )
+    sample_outdoor = outdoor_df.head(5)[["time", "lux"]].to_html(
+        index=False, classes="diag-table"
+    )
+
+    extra_css = """
+        .diag-section { margin: 20px 0; padding: 15px; background: #f9f9f9;
+                       border-radius: 8px; }
+        .diag-section h3 { margin-top: 0; }
+        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
+        .stat-box { padding: 15px; background: white; border-radius: 4px; text-align: center; }
+        .stat-box .value { font-size: 1.5em; font-weight: bold; color: #0066cc; }
+        .stat-box .label { font-size: 0.85em; color: #666; }
+        .diag-table { border-collapse: collapse; font-size: 0.9em; }
+        .diag-table th, .diag-table td { padding: 5px 10px; border: 1px solid #ddd; }
+        .warning { color: #cc6600; }
+        .success { color: green; }
+    """
+
+    warn_class = "warning" if days_with_few > 10 else ""
+    daily_class = "success" if daily_corr > corr else ""
+
+    content = f"""
+        <h1>Model Training Diagnostic</h1>
+        <p style="color: #666;">Using <strong>direct_radiation</strong> from OpenMeteo</p>
+
+        <div class="diag-section">
+            <h3>Raw Data Counts</h3>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="value">{indoor_count:,}</div>
+                    <div class="label">Indoor PAR readings</div>
+                </div>
+                <div class="stat-box">
+                    <div class="value">{outdoor_count:,}</div>
+                    <div class="label">s1000 readings</div>
+                </div>
+                <div class="stat-box">
+                    <div class="value">{weather_count:,}</div>
+                    <div class="label">OpenMeteo hours</div>
+                </div>
+            </div>
+            <p style="margin-top: 10px; color: #666;">
+                Indoor: {indoor_range}<br>
+                Outdoor: {outdoor_range}<br>
+                Weather: {weather_range}
+            </p>
+        </div>
+
+        <div class="diag-section">
+            <h3>s1000 Reporting</h3>
+            <p>Median interval: <strong>{median_interval:.1f} min</strong>
+               (~{readings_per_hour:.0f} readings/hour)</p>
+        </div>
+
+        <div class="diag-section">
+            <h3>Correlation Comparison</h3>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="value">{corr:.3f}</div>
+                    <div class="label">Hourly (r) - {len(stage1_merged)} samples</div>
+                </div>
+                <div class="stat-box">
+                    <div class="value {daily_class}">{daily_corr:.3f}</div>
+                    <div class="label">Daily totals (r) - {daily_samples} days</div>
+                </div>
+                <div class="stat-box">
+                    <div class="value {warn_class}">{days_with_few}/{total_days}</div>
+                    <div class="label">Days with &lt;20 readings</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="diag-section">
+            <h3>Scatter: OpenMeteo vs s1000</h3>
+            {scatter_html}
+        </div>
+
+        <div class="diag-section">
+            <h3>Sample Timestamps</h3>
+            <p>OpenMeteo (first 5 rows):</p>
+            {sample_weather}
+            <p style="margin-top: 15px;">s1000 (first 5 rows):</p>
+            {sample_outdoor}
+        </div>
+    """
+
+    return render_page(
+        "Model Diagnostic - WP6 Red",
+        content,
+        extra_css=extra_css,
+        show_back_link=True, back_url="/dli/model",
     )
 
 
