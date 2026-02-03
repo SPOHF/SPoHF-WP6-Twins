@@ -72,3 +72,46 @@ class SyncStateManager:
             ts=timestamp.isoformat(),
             count=record_count,
         )
+
+    async def record_run_result(
+        self,
+        *,
+        success: bool,
+        duration_seconds: float,
+        record_count: int,
+        error: str | None = None,
+        api_status: int | None = None,
+        api_error_detail: str | None = None,
+    ) -> None:
+        """Record the result of a sync run for observability.
+
+        Args:
+            success: Whether the sync completed successfully
+            duration_seconds: How long the sync took
+            record_count: Number of records processed
+            error: Error message if failed
+            api_status: HTTP status code if API error
+            api_error_detail: Response body snippet if API error
+        """
+        await self._session.run(
+            """
+            MERGE (m:SyncMetadata {endpoint: $endpoint})
+            SET m.last_run_at = datetime(),
+                m.last_run_success = $success,
+                m.last_run_duration_seconds = $duration,
+                m.last_run_records = $records,
+                m.last_error = $error,
+                m.last_api_status = $api_status,
+                m.last_api_error_detail = $api_detail,
+                m.total_runs = coalesce(m.total_runs, 0) + 1,
+                m.total_failures = CASE WHEN $success THEN coalesce(m.total_failures, 0)
+                                        ELSE coalesce(m.total_failures, 0) + 1 END
+            """,
+            endpoint=self._endpoint,
+            success=success,
+            duration=duration_seconds,
+            records=record_count,
+            error=error,
+            api_status=api_status,
+            api_detail=api_error_detail,
+        )

@@ -1,9 +1,12 @@
 """Main sync orchestration logic."""
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 import structlog
+from tenacity import RetryError
 
 from wp6_data.api import SensorReading, SpoHFClient
 from wp6_data.config import Settings
@@ -85,6 +88,7 @@ class SyncOrchestrator:
         Returns:
             Number of records synced
         """
+        start_time = datetime.now(UTC)
         async with self.neo4j.session() as session:
             state = SyncStateManager(session, endpoint)
             since, is_initial = await state.get_last_timestamp_with_status(
@@ -127,37 +131,85 @@ class SyncOrchestrator:
                     self.settings.sync_max_pages,
                 )
 
-            async for reading in fetch_iter:
-                batch.append(self._reading_to_params(reading))
+            try:
+                async for reading in fetch_iter:
+                    batch.append(self._reading_to_params(reading))
 
-                # Track the latest timestamp we've seen
-                reading_ts = ensure_utc(reading.timestamp)
-                if reading_ts > latest_timestamp:
-                    latest_timestamp = reading_ts
+                    # Track the latest timestamp we've seen
+                    reading_ts = ensure_utc(reading.timestamp)
+                    if reading_ts > latest_timestamp:
+                        latest_timestamp = reading_ts
 
-                # Flush batch when full
-                if len(batch) >= BATCH_SIZE:
+                    # Flush batch when full
+                    if len(batch) >= BATCH_SIZE:
+                        await batch_upsert_readings(session, batch)
+                        total_count += len(batch)
+                        logger.debug("batch_flushed", count=len(batch), total=total_count)
+                        batch = []
+
+                # Flush remaining records
+                if batch:
                     await batch_upsert_readings(session, batch)
                     total_count += len(batch)
-                    logger.debug("batch_flushed", count=len(batch), total=total_count)
-                    batch = []
 
-            # Flush remaining records
-            if batch:
-                await batch_upsert_readings(session, batch)
-                total_count += len(batch)
+                # Update sync state if we processed any records
+                if total_count > 0:
+                    await state.update_timestamp(latest_timestamp, total_count)
 
-            # Update sync state if we processed any records
-            if total_count > 0:
-                await state.update_timestamp(latest_timestamp, total_count)
+                # Record successful run
+                duration = (datetime.now(UTC) - start_time).total_seconds()
+                await state.record_run_result(
+                    success=True,
+                    duration_seconds=duration,
+                    record_count=total_count,
+                )
 
-            logger.info(
-                "endpoint_synced",
-                endpoint=endpoint,
-                records=total_count,
-                latest=latest_timestamp.isoformat(),
-            )
-            return total_count
+                logger.info(
+                    "endpoint_synced",
+                    endpoint=endpoint,
+                    records=total_count,
+                    latest=latest_timestamp.isoformat(),
+                )
+                return total_count
+
+            except (httpx.HTTPStatusError, RetryError) as e:
+                # Extract API error details
+                duration = (datetime.now(UTC) - start_time).total_seconds()
+                api_status, api_detail, error_msg = self._extract_api_error(e)
+
+                await state.record_run_result(
+                    success=False,
+                    duration_seconds=duration,
+                    record_count=total_count,
+                    error=error_msg,
+                    api_status=api_status,
+                    api_error_detail=api_detail,
+                )
+                raise
+
+    def _extract_api_error(
+        self, exc: Exception
+    ) -> tuple[int | None, str | None, str]:
+        """Extract API error details from exception.
+
+        Returns:
+            Tuple of (status_code, response_detail, error_message)
+        """
+        # Unwrap RetryError to get the underlying HTTPStatusError
+        if isinstance(exc, RetryError) and exc.last_attempt.failed:
+            underlying = exc.last_attempt.exception()
+            if isinstance(underlying, httpx.HTTPStatusError):
+                exc = underlying
+
+        if isinstance(exc, httpx.HTTPStatusError):
+            status = exc.response.status_code
+            detail = exc.response.text[:500] if exc.response.text else None
+            # Extract just the status message for the error field
+            match = re.search(r"(\d{3}\s+\w+[\w\s]*)", str(exc))
+            msg = match.group(1) if match else str(exc)[:200]
+            return status, detail, msg
+
+        return None, None, str(exc)[:200]
 
     def _reading_to_params(self, reading: SensorReading) -> dict[str, Any]:
         """Convert SensorReading to Neo4j query parameters."""
