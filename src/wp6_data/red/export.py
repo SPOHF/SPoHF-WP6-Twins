@@ -3,7 +3,7 @@
 import asyncio
 import json
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiomysql
@@ -79,13 +79,13 @@ async def run_export() -> None:
             try:
                 path = await export_table(pool, table, export_dir)
                 if path:
-                    exported[table] = datetime.utcnow().isoformat()
+                    exported[table] = datetime.now(UTC).isoformat()
             except Exception as e:
                 log.error("export_failed", table=table, error=str(e))
 
         # Write metadata file with export timestamps per table
         metadata = {
-            "exported_at": datetime.utcnow().isoformat(),
+            "exported_at": datetime.now(UTC).isoformat(),
             "tables": exported,
         }
         metadata_path = export_dir / "metadata.json"
