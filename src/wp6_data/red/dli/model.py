@@ -372,22 +372,3 @@ def get_model() -> TwoStageLightModel:
     return _model
 
 
-def predict_indoor_par(
-    solar_radiation: float,
-    cloud_cover: float,
-    hour: int,
-    day_of_year: int,
-) -> float | None:
-    """Deprecated: The two-stage model is designed for daily predictions only.
-
-    For hourly PAR estimation, use the model's daily prediction and distribute
-    proportionally based on the hourly radiation profile. See optimizer.py for
-    the correct approach.
-
-    Always returns None to force fallback to physics-based estimation.
-    Use model.predict_dli() with daily radiation sum for accurate predictions.
-    """
-    # The two-stage model predicts daily indoor PAR from daily radiation sums.
-    # It cannot accurately predict hourly values from single-hour inputs.
-    # Return None to force physics fallback for any legacy callers.
-    return None

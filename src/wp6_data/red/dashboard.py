@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
+import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -18,13 +19,11 @@ from fastapi.staticfiles import StaticFiles
 from wp6_data.red.db import MEASUREMENT_GROUPS, MEASUREMENTS_TO_TABLES, MySQLConnection
 from wp6_data.red.dli import (
     OpenMeteoClient,
-    OptimizationParams,
     calculate_daily_dli,
     calculate_hourly_par,
     get_model,
 )
 from wp6_data.shared import (
-    make_bar_chart,
     make_dual_axis_chart,
     make_line_chart,
     make_schedule_chart,
@@ -46,6 +45,10 @@ DB_PASSWORD = os.getenv("WP6_RED_DB_PASSWORD", "")
 
 # Auth users: "user1:pass1,user2:pass2" (required, no default)
 AUTH_USERS_STR = os.getenv("WP6_RED_AUTH_USERS", "")
+
+# Admin users: comma-separated list of usernames with admin access
+ADMIN_USERS_STR = os.getenv("WP6_RED_ADMIN_USERS", "admin")
+ADMIN_USERS = {u.strip() for u in ADMIN_USERS_STR.split(",") if u.strip()}
 
 
 def parse_users(users_str: str) -> dict[str, str]:
@@ -118,6 +121,21 @@ def verify_auth(credentials: Annotated[HTTPBasicCredentials, Depends(security)])
         )
 
     return credentials.username
+
+
+def is_admin(user: str) -> bool:
+    """Check if user has admin access."""
+    return user in ADMIN_USERS
+
+
+def verify_admin_auth(user: str = Depends(verify_auth)) -> str:
+    """Verify user has admin access (for model training etc.)."""
+    if not is_admin(user):
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required",
+        )
+    return user
 
 
 def _export_info_html(export_meta: dict | None) -> str:
@@ -234,8 +252,7 @@ async def home(user: str = Depends(verify_auth)) -> str:
             <ul>
                 <li><a href="/dli">DLI Dashboard</a> - Overview and navigation</li>
                 <li><a href="/dli/chart">Historical DLI</a> - Daily DLI bar chart</li>
-                <li><a href="/dli/schedule">Schedule Analysis</a> - Compare actual vs optimal</li>
-                <li><a href="/dli/forecast">Forecast</a> - Projected light schedules</li>
+                <li><a href="/dli/schedule">Schedule Analysis</a> - Predict plant light</li>
             </ul>
         </div>
 
@@ -596,52 +613,79 @@ async def dli_home(user: str = Depends(verify_auth)) -> str:
     if not db:
         return render_page("DLI - WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
 
+    # Get model status for the card
+    model = get_model()
+    user_is_admin = is_admin(user)
+
+    # Build model card based on status and permissions
+    if model.is_trained() and model.stats:
+        trained_date = model.stats.training_date.strftime("%Y-%m-%d")
+        r2 = model.stats.r2_score
+        model_status = f"""
+            <p style="color: green; margin: 0;">Trained: {trained_date}</p>
+            <p style="color: #666; margin: 5px 0 10px 0;">R² = {r2:.3f}</p>
+        """
+    else:
+        model_status = '<p style="color: #999; margin-bottom: 10px;">Not trained</p>'
+
+    if user_is_admin:
+        model_card = f"""
+            <div class="card">
+                <h3>Prediction Model</h3>
+                <p>Train ML model to predict indoor PAR from weather data.</p>
+                {model_status}
+                <a href="/dli/model" class="btn">Manage Model</a>
+            </div>
+        """
+    else:
+        model_card = f"""
+            <div class="card card-disabled">
+                <h3>Prediction Model</h3>
+                <p>ML model to predict indoor PAR from weather data.</p>
+                {model_status}
+                <span class="btn-disabled">Admin only</span>
+            </div>
+        """
+
     extra_css = """
         .card { border: 1px solid #ddd; border-radius: 8px; padding: 20px;
                 margin-bottom: 20px; }
         .card h3 { margin-top: 0; color: #333; }
         .card p { color: #666; margin-bottom: 10px; }
+        .card-disabled { background: #f9f9f9; opacity: 0.8; }
+        .card-disabled h3 { color: #999; }
         .grid { display: grid; gap: 20px;
                 grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
         .btn { display: inline-block; padding: 8px 16px; background: #0066cc;
                color: white; text-decoration: none; border-radius: 4px;
                margin-right: 8px; }
         .btn:hover { background: #0055aa; text-decoration: none; }
+        .btn-disabled { display: inline-block; padding: 8px 16px; background: #ccc;
+                       color: #666; border-radius: 4px; font-size: 0.9em; }
         .stats { display: flex; gap: 40px; margin: 20px 0; }
         .stat { text-align: center; }
         .stat-value { font-size: 2em; font-weight: bold; color: #0066cc; }
         .stat-label { font-size: 0.9em; color: #666; }
     """
 
-    content = """
+    content = f"""
         <h1>DLI Dashboard</h1>
         <p>Daily Light Integral analysis for PAR sensors.</p>
 
         <div class="grid">
             <div class="card">
                 <h3>Historical DLI</h3>
-                <p>View daily DLI values calculated from PAR sensor readings.</p>
+                <p>Compare natural light vs total light (with lamps) over time.</p>
                 <a href="/dli/chart" class="btn">View Chart</a>
-                <a href="/dli/table" class="btn" style="background:#666;">View Table</a>
             </div>
 
             <div class="card">
                 <h3>Schedule Analysis</h3>
-                <p>Compare actual light schedules against weather-optimized recommendations.</p>
+                <p>Predict plant light based on schedule and weather data.</p>
                 <a href="/dli/schedule" class="btn">Analyze Schedule</a>
             </div>
 
-            <div class="card">
-                <h3>Forecast</h3>
-                <p>View projected natural light and optimal lamp schedules.</p>
-                <a href="/dli/forecast" class="btn">View Forecast</a>
-            </div>
-
-            <div class="card">
-                <h3>Prediction Model</h3>
-                <p>Train ML model to predict indoor PAR from weather data.</p>
-                <a href="/dli/model" class="btn">Manage Model</a>
-            </div>
+            {model_card}
         </div>
     """
 
@@ -653,323 +697,513 @@ async def dli_chart(
     user: str = Depends(verify_auth),
     start: Annotated[date | None, Query(description="Start date")] = None,
     end: Annotated[date | None, Query(description="End date")] = None,
-    device: Annotated[str | None, Query(description="Filter by device ID")] = None,
 ) -> str:
-    """DLI bar chart with date filter and device selector."""
+    """DLI chart comparing natural light vs total light over time."""
     if not db:
         return render_page("DLI Chart - WP6 Red", "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
     start, end, start_dt, end_dt = resolve_date_range(start, end)
 
+    # Fetch both sensors: natural light and total light
+    natural_sensor = "s2100-01-par"
+    total_sensor = "s2100-02-par"
+
     try:
-        device_ids = [device] if device else None
-        par_df = await db.get_par_readings(device_ids=device_ids, start=start_dt, end=end_dt)
+        par_df = await db.get_par_readings(
+            device_ids=[natural_sensor, total_sensor], start=start_dt, end=end_dt
+        )
     except Exception as e:
         return render_page("DLI Chart - WP6 Red", f"<h1>Error: {e}</h1>",
-                          show_back_link=True, back_url="/dli")
-
-    # Build device filter dropdown
-    try:
-        all_devices = await db.get_par_devices()
-    except Exception:
-        all_devices = []
-
-    device_options = '<option value="">All Devices</option>' + "".join(
-        f'<option value="{d}" {"selected" if d == device else ""}>{d}</option>'
-        for d in all_devices
-    )
-
-    extra_params = {"device": device} if device else {}
-    filter_html = render_date_filter(start, end, extra_params=extra_params)
-
-    # Add device selector
-    base_url = f"?start={start}&end={end}&device="
-    device_selector = f"""
-        <div style="margin-bottom: 16px;">
-            <label>Device:
-                <select onchange="window.location.href='{base_url}' + this.value"
-                        style="padding: 4px;">
-                    {device_options}
-                </select>
-            </label>
-        </div>
-    """
-
-    if par_df.empty:
-        return render_page(
-            "DLI Chart - WP6 Red",
-            filter_html + device_selector + "<h1>No PAR data found</h1>",
-            show_back_link=True, back_url="/dli",
-        )
-
-    # Calculate DLI
-    dli_df = calculate_daily_dli(par_df)
-
-    if dli_df.empty:
-        return render_page(
-            "DLI Chart - WP6 Red",
-            filter_html + device_selector + "<h1>Insufficient data for DLI calculation</h1>",
-            show_back_link=True, back_url="/dli",
-        )
-
-    # Format date for display
-    dli_df["date_str"] = dli_df["date"].astype(str)
-
-    fig = make_bar_chart(
-        dli_df,
-        x="date_str",
-        y="dli",
-        color="device" if len(dli_df["device"].unique()) > 1 else None,
-        title="Daily Light Integral (DLI)",
-        y_label="DLI (mol/m²/day)",
-    )
-
-    # Add target DLI reference line
-    target_dli = float(os.getenv("WP6_RED_DLI_TARGET", "25.0"))
-    fig.add_hline(
-        y=target_dli,
-        line_dash="dash",
-        line_color="green",
-        annotation_text=f"Target: {target_dli}",
-        annotation_position="top right",
-    )
-
-    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
-
-    # Summary stats
-    avg_dli = dli_df["dli"].mean()
-    max_dli = dli_df["dli"].max()
-    min_dli = dli_df["dli"].min()
-
-    stats_html = f"""
-        <div style="display: flex; gap: 40px; margin: 20px 0; color: #666;">
-            <div>Avg DLI: <strong>{avg_dli:.1f}</strong></div>
-            <div>Max: <strong>{max_dli:.1f}</strong></div>
-            <div>Min: <strong>{min_dli:.1f}</strong></div>
-            <div>Target: <strong>{target_dli}</strong></div>
-            <div>Days: <strong>{len(dli_df["date"].unique())}</strong></div>
-        </div>
-    """
-
-    return render_page(
-        "DLI Chart - WP6 Red",
-        filter_html + device_selector + stats_html + chart_html,
-        show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",
-    )
-
-
-@app.get("/dli/table", response_class=HTMLResponse)
-async def dli_table(
-    user: str = Depends(verify_auth),
-    start: Annotated[date | None, Query(description="Start date")] = None,
-    end: Annotated[date | None, Query(description="End date")] = None,
-) -> str:
-    """Raw DLI data table."""
-    if not db:
-        return render_page("DLI Table - WP6 Red", "<h1>Database not connected</h1>",
-                          show_back_link=True, back_url="/dli")
-
-    start, end, start_dt, end_dt = resolve_date_range(start, end)
-
-    try:
-        par_df = await db.get_par_readings(start=start_dt, end=end_dt)
-    except Exception as e:
-        return render_page("DLI Table - WP6 Red", f"<h1>Error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
     filter_html = render_date_filter(start, end)
 
     if par_df.empty:
         return render_page(
-            "DLI Table - WP6 Red",
+            "DLI Chart - WP6 Red",
             filter_html + "<h1>No PAR data found</h1>",
             show_back_link=True, back_url="/dli",
         )
 
+    # Calculate DLI per device per day
     dli_df = calculate_daily_dli(par_df)
 
     if dli_df.empty:
         return render_page(
-            "DLI Table - WP6 Red",
+            "DLI Chart - WP6 Red",
             filter_html + "<h1>Insufficient data for DLI calculation</h1>",
             show_back_link=True, back_url="/dli",
         )
 
+    # Rename devices to friendly labels
+    device_labels = {
+        natural_sensor: "Natural Light",
+        total_sensor: "Total Light",
+    }
+    dli_df["source"] = dli_df["device"].map(device_labels).fillna(dli_df["device"])
+
+    # Pivot data for cleaner charts
+    natural_data = dli_df[dli_df["device"] == natural_sensor][
+        ["date", "dli", "photoperiod_hours"]
+    ].rename(columns={"dli": "natural_dli", "photoperiod_hours": "natural_hours"})
+    total_data = dli_df[dli_df["device"] == total_sensor][
+        ["date", "dli", "photoperiod_hours"]
+    ].rename(columns={"dli": "total_dli", "photoperiod_hours": "total_hours"})
+
+    chart_df = natural_data.merge(total_data, on="date", how="outer").sort_values("date")
+
+    # Create DLI line chart with area fill
+    import plotly.graph_objects as go
+
+    fig_dli = go.Figure()
+    fig_dli.add_trace(go.Scatter(
+        x=chart_df["date"], y=chart_df["total_dli"],
+        name="Total Light", mode="lines+markers",
+        line={"color": "#2ecc71", "width": 2},
+        marker={"size": 6},
+        fill="tozeroy", fillcolor="rgba(46, 204, 113, 0.2)",
+    ))
+    fig_dli.add_trace(go.Scatter(
+        x=chart_df["date"], y=chart_df["natural_dli"],
+        name="Natural Light", mode="lines+markers",
+        line={"color": "#3498db", "width": 2},
+        marker={"size": 6},
+        fill="tozeroy", fillcolor="rgba(52, 152, 219, 0.2)",
+    ))
+
+    # Add trendline for Total DLI
+    total_valid = chart_df.dropna(subset=["total_dli"])
+    if len(total_valid) >= 2:
+        x_numeric = np.arange(len(total_valid))
+        coeffs = np.polyfit(x_numeric, total_valid["total_dli"].values, 1)
+        trendline_y = np.polyval(coeffs, x_numeric)
+        slope_per_day = coeffs[0]
+        trend_label = f"Trend ({slope_per_day:+.2f}/day)"
+        fig_dli.add_trace(go.Scatter(
+            x=total_valid["date"], y=trendline_y,
+            name=trend_label, mode="lines",
+            line={"color": "#e74c3c", "width": 2, "dash": "dash"},
+        ))
+
+    fig_dli.update_layout(
+        title="Daily Light Integral (DLI)",
+        yaxis_title="DLI (mol/m²/day)",
+        xaxis_title="",
+        height=400,
+        hovermode="x unified",
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+        margin={"t": 60, "b": 40},
+    )
+    chart_dli_html = fig_dli.to_html(full_html=False, include_plotlyjs="cdn")
+
+    # Create photoperiod chart
+    fig_hours = go.Figure()
+    fig_hours.add_trace(go.Bar(
+        x=chart_df["date"], y=chart_df["total_hours"],
+        name="Total Hours", marker_color="#2ecc71",
+    ))
+    fig_hours.update_layout(
+        title="Photoperiod (hours of light)",
+        yaxis_title="Hours",
+        xaxis_title="",
+        height=300,
+        hovermode="x unified",
+        margin={"t": 60, "b": 40},
+    )
+    chart_hours_html = fig_hours.to_html(full_html=False, include_plotlyjs=False)
+
+    # Summary stats
+    days_count = len(chart_df)
+    natural_avg = chart_df["natural_dli"].mean() if "natural_dli" in chart_df else 0
+    total_avg = chart_df["total_dli"].mean() if "total_dli" in chart_df else 0
+    hours_avg = chart_df["total_hours"].mean() if "total_hours" in chart_df else 0
+
     extra_css = """
-        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        .stats-row { display: flex; gap: 30px; margin: 20px 0; flex-wrap: wrap; }
+        .stat-box { padding: 15px 20px; background: #f8f9fa; border-radius: 8px;
+                   text-align: center; min-width: 120px; }
+        .stat-box .value { font-size: 1.4em; font-weight: bold; color: #2c3e50; }
+        .stat-box .label { font-size: 0.85em; color: #7f8c8d; margin-top: 4px; }
+        .chart-section { margin-bottom: 30px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
         th { background-color: #f5f5f5; }
         tr:hover { background-color: #f9f9f9; }
-        .good { color: green; }
-        .low { color: orange; }
-        .high { color: red; }
     """
 
-    target_dli = float(os.getenv("WP6_RED_DLI_TARGET", "25.0"))
+    stats_html = f"""
+        <div class="stats-row">
+            <div class="stat-box">
+                <div class="value">{total_avg:.1f}</div>
+                <div class="label">Avg Total DLI</div>
+            </div>
+            <div class="stat-box">
+                <div class="value">{natural_avg:.1f}</div>
+                <div class="label">Avg Natural DLI</div>
+            </div>
+            <div class="stat-box">
+                <div class="value">{hours_avg:.1f}h</div>
+                <div class="label">Avg Photoperiod</div>
+            </div>
+            <div class="stat-box">
+                <div class="value">{days_count}</div>
+                <div class="label">Days</div>
+            </div>
+        </div>
+    """
 
-    # Build table rows
-    rows = []
-    for _, row in dli_df.iterrows():
-        dli = row["dli"]
-        if dli < target_dli * 0.8:
-            dli_class = "low"
-        elif dli > target_dli * 1.2:
-            dli_class = "high"
+    # Build data table
+    table_df = chart_df.sort_values("date", ascending=False)
+    table_rows = []
+    for _, row in table_df.iterrows():
+        natural_dli_val = f"{row['natural_dli']:.1f}" if pd.notna(row.get("natural_dli")) else "-"
+        total_dli_val = f"{row['total_dli']:.1f}" if pd.notna(row.get("total_dli")) else "-"
+        total_hrs = f"{row['total_hours']:.1f}" if pd.notna(row.get("total_hours")) else "-"
+
+        # Calculate lamp contribution
+        if pd.notna(row.get("total_dli")) and pd.notna(row.get("natural_dli")):
+            lamp_dli = row["total_dli"] - row["natural_dli"]
+            lamp_str = f"{lamp_dli:.1f}"
         else:
-            dli_class = "good"
+            lamp_str = "-"
 
-        rows.append(f"""
+        table_rows.append(f"""
             <tr>
                 <td>{row['date']}</td>
-                <td>{row['device']}</td>
-                <td class="{dli_class}"><strong>{dli:.1f}</strong></td>
-                <td>{row['avg_par']:.0f}</td>
-                <td>{row['photoperiod_hours']:.1f}</td>
-                <td>{row['reading_count']:,}</td>
+                <td>{natural_dli_val}</td>
+                <td>{total_dli_val}</td>
+                <td>{lamp_str}</td>
+                <td>{total_hrs}</td>
             </tr>
         """)
 
     table_html = f"""
-        <table>
-            <thead>
-                <tr>
-                    <th>Date</th>
-                    <th>Device</th>
-                    <th>DLI (mol/m²/day)</th>
-                    <th>Avg PAR (μmol/m²/s)</th>
-                    <th>Photoperiod (hours)</th>
-                    <th>Readings</th>
-                </tr>
-            </thead>
-            <tbody>
-                {''.join(rows)}
-            </tbody>
-        </table>
-        <p style="color: #666; font-size: 0.9em; margin-top: 10px;">
-            Target DLI: {target_dli} mol/m²/day.
-            <span class="good">Green</span> = within 20% of target,
-            <span class="low">Orange</span> = below target,
-            <span class="high">Red</span> = above target.
-        </p>
+        <details style="margin-top: 20px;">
+            <summary style="cursor: pointer; font-weight: bold; padding: 10px;
+                          background: #f5f5f5; border-radius: 4px;">
+                View Data Table
+            </summary>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Natural DLI</th>
+                        <th>Total DLI</th>
+                        <th>Lamp DLI</th>
+                        <th>Photoperiod</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join(table_rows)}
+                </tbody>
+            </table>
+        </details>
+    """
+
+    content = f"""
+        {filter_html}
+        {stats_html}
+        <div class="chart-section">{chart_dli_html}</div>
+        <div class="chart-section">{chart_hours_html}</div>
+        {table_html}
     """
 
     return render_page(
-        "DLI Table - WP6 Red",
-        filter_html + table_html,
+        "DLI Chart - WP6 Red",
+        content,
         extra_css=extra_css,
-        show_back_link=True, back_url="/dli",
+        show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",
     )
 
 
 @app.get("/dli/schedule", response_class=HTMLResponse)
 async def dli_schedule(
     user: str = Depends(verify_auth),
-    analysis_date: Annotated[date | None, Query(description="Date to analyze")] = None,
-    target_dli: Annotated[float, Query(ge=10, le=50)] = 25.0,
+    start_date: Annotated[date | None, Query(description="Start date")] = None,
+    end_date: Annotated[date | None, Query(description="End date")] = None,
 ) -> str:
-    """Analyze actual vs optimal light schedule for a specific day."""
+    """Analyze light schedule with predictions based on inferred lamp schedule."""
     if not db:
         return render_page("Schedule Analysis - WP6 Red", "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
-    # Default to yesterday
-    if analysis_date is None:
-        analysis_date = date.today() - timedelta(days=1)
+    # Default to today
+    today = date.today()
+    if start_date is None:
+        start_date = today
+    if end_date is None:
+        end_date = start_date
 
-    # Get actual PAR data for the day
-    params = OptimizationParams(target_dli=target_dli)
-    start_dt = datetime(analysis_date.year, analysis_date.month, analysis_date.day, tzinfo=UTC)
-    end_dt = start_dt + timedelta(days=1) - timedelta(seconds=1)
+    # Ensure valid range
+    if end_date < start_date:
+        end_date = start_date
+
+    sensor = os.getenv("WP6_RED_DLI_SCHEDULE_SENSOR", "s2100-02-par")
+    yesterday = today - timedelta(days=1)
+
+    # Get yesterday's data for inferring lamp schedule
+    yesterday_start = datetime(yesterday.year, yesterday.month, yesterday.day, tzinfo=UTC)
+    yesterday_end = yesterday_start + timedelta(days=1) - timedelta(seconds=1)
 
     try:
-        par_df = await db.get_par_readings(
-            device_ids=[params.schedule_sensor], start=start_dt, end=end_dt
+        yesterday_par_df = await db.get_par_readings(
+            device_ids=[sensor], start=yesterday_start, end=yesterday_end
         )
     except Exception as e:
         return render_page("Schedule Analysis - WP6 Red", f"<h1>Error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
-    # Get weather data for the day (forecast for today/future, historical for past)
+    # Calculate yesterday's DLI
+    yesterday_dli = 0.0
+    if not yesterday_par_df.empty:
+        yesterday_daily = calculate_daily_dli(yesterday_par_df)
+        if not yesterday_daily.empty:
+            yesterday_dli = yesterday_daily["dli"].iloc[0]
+
+    # Get weather client and model
     client = get_weather_client()
+    model = get_model()
+
+    # Infer lamp schedule from yesterday (hourly: actual - predicted natural)
+    inferred_lamp_hourly: dict[int, float] = {}  # hour -> lamp PAR
+    yesterday_natural_dli = 0.0
+    if not yesterday_par_df.empty and model.is_trained():
+        try:
+            yesterday_weather = await client.get_historical(yesterday, yesterday)
+            if yesterday_weather:
+                forecast = yesterday_weather[0]
+                yesterday_natural_dli = model.predict_dli(forecast.total_radiation)
+
+                # Calculate hourly averages from actual data
+                yesterday_hourly = calculate_hourly_par(yesterday_par_df)
+
+                # Distribute natural DLI across hours proportionally to radiation
+                for h in forecast.hourly:
+                    hour = h.datetime.hour
+                    if forecast.total_radiation > 0:
+                        hour_fraction = h.solar_radiation / forecast.total_radiation
+                        natural_par = (yesterday_natural_dli * hour_fraction * 1_000_000) / 3600
+                    else:
+                        natural_par = 0.0
+
+                    # Get actual PAR for this hour
+                    hour_data = yesterday_hourly[
+                        yesterday_hourly["datetime"].dt.hour == hour
+                    ]
+                    actual_par = hour_data["par_avg"].iloc[0] if not hour_data.empty else 0.0
+
+                    # Infer lamp contribution (clamp to 0)
+                    inferred_lamp_hourly[hour] = max(0.0, actual_par - natural_par)
+        except Exception:
+            pass  # Fall back to no lamp inference
+
+    # Get data for selected date range
+    range_start = datetime(start_date.year, start_date.month, start_date.day, tzinfo=UTC)
+    range_end = datetime(end_date.year, end_date.month, end_date.day, tzinfo=UTC)
+    range_end = range_end + timedelta(days=1) - timedelta(seconds=1)
+
     try:
-        if analysis_date >= date.today():
-            # Use forecast API for today and future
-            all_forecasts = await client.get_forecast(days=7)
-            forecasts = [f for f in all_forecasts if f.date == analysis_date]
-        else:
-            # Use archive API for historical dates
-            forecasts = await client.get_historical(analysis_date, analysis_date)
+        par_df = await db.get_par_readings(device_ids=[sensor], start=range_start, end=range_end)
     except Exception as e:
-        return render_page(
-            "Schedule Analysis - WP6 Red",
-            f"<h1>Weather API Error: {e}</h1><p>Could not fetch weather data.</p>",
-            show_back_link=True, back_url="/dli",
-        )
+        return render_page("Schedule Analysis - WP6 Red", f"<h1>Error: {e}</h1>",
+                          show_back_link=True, back_url="/dli")
 
-    if not forecasts:
-        return render_page(
-            "Schedule Analysis - WP6 Red",
-            "<h1>No weather data available</h1>",
-            show_back_link=True, back_url="/dli",
-        )
-
-    # Calculate optimal schedule
-    optimal = calculate_optimal_schedule(forecasts[0], params)
-    optimal_df = schedule_to_dataframe(optimal)
-
-    # Prepare actual data for charting
+    # Prepare actual data for chart (raw readings)
+    actual_df = None
     if not par_df.empty:
-        # Use raw readings for chart (native resolution)
-        actual_chart_df = par_df.rename(columns={"time": "datetime", "value": "par"})
-        # Use hourly aggregation for DLI comparison
-        hourly_df = calculate_hourly_par(par_df)
-        hourly_comparison_df = hourly_df.rename(columns={"par_avg": "par"})
-        comparison = compare_actual_vs_optimal(hourly_comparison_df, optimal)
-    else:
-        actual_chart_df = pd.DataFrame(columns=["datetime", "par"])
-        comparison = {
-            "actual_dli": 0,
-            "optimal_dli": optimal.achieved_dli,
-            "target_dli": target_dli,
-            "difference": 0,
-            "potential_savings_percent": 0,
-        }
+        actual_df = par_df.rename(columns={"time": "datetime", "value": "par"})
+
+    # Get weather for date range (for predictions)
+    predicted_df = None
+    natural_df = None
+
+    if model.is_trained():
+        try:
+            # Get weather data for date range - combine historical and forecast as needed
+            forecasts = []
+
+            # Fetch historical weather for past dates
+            if start_date < today:
+                hist_end = min(end_date, today - timedelta(days=1))
+                historical = await client.get_historical(start_date, hist_end)
+                forecasts.extend(historical)
+
+            # Fetch forecast for today and future dates
+            if end_date >= today:
+                all_forecasts = await client.get_forecast(days=14)
+                for f in all_forecasts:
+                    if f.date >= today and start_date <= f.date <= end_date:
+                        forecasts.append(f)
+
+            predicted_records = []
+            natural_records = []
+
+            for forecast in forecasts:
+                day_natural_dli = model.predict_dli(forecast.total_radiation)
+
+                for h in forecast.hourly:
+                    # Calculate natural PAR for this hour
+                    if forecast.total_radiation > 0:
+                        hour_fraction = h.solar_radiation / forecast.total_radiation
+                        natural_par = (day_natural_dli * hour_fraction * 1_000_000) / 3600
+                    else:
+                        natural_par = 0.0
+
+                    natural_records.append({"datetime": h.datetime, "par": natural_par})
+
+                    # Calculate predicted PAR = inferred lamp + natural
+                    lamp_par = inferred_lamp_hourly.get(h.datetime.hour, 0.0)
+                    predicted_par = natural_par + lamp_par
+                    predicted_records.append({"datetime": h.datetime, "par": predicted_par})
+
+            if predicted_records:
+                predicted_df = pd.DataFrame(predicted_records)
+                predicted_df["datetime"] = pd.to_datetime(predicted_df["datetime"], utc=True)
+
+            if natural_records:
+                natural_df = pd.DataFrame(natural_records)
+                natural_df["datetime"] = pd.to_datetime(natural_df["datetime"], utc=True)
+
+        except Exception:
+            pass  # Predictions unavailable
+
+    # Calculate daily DLI values for annotations and cards
+    daily_dli: dict[date, dict] = {}  # date -> {actual, predicted, natural}
+    tomorrow = today + timedelta(days=1)
+
+    # Add yesterday's actual and natural DLI (already calculated above)
+    if yesterday_dli > 0:
+        daily_dli[yesterday] = {"actual": yesterday_dli}
+    if yesterday_natural_dli > 0:
+        daily_dli.setdefault(yesterday, {})["natural"] = yesterday_natural_dli
+
+    # Actual DLI per day from selected range
+    if not par_df.empty:
+        actual_daily = calculate_daily_dli(par_df)
+        for _, row in actual_daily.iterrows():
+            d = row["date"].date() if hasattr(row["date"], "date") else row["date"]
+            daily_dli.setdefault(d, {})["actual"] = row["dli"]
+
+    # Predicted/natural DLI per day (from forecasts)
+    if predicted_df is not None and not predicted_df.empty:
+        predicted_df["date"] = predicted_df["datetime"].dt.date
+        for d, grp in predicted_df.groupby("date"):
+            dli = grp["par"].sum() * 3600 / 1_000_000
+            daily_dli.setdefault(d, {})["predicted"] = dli
+
+    if natural_df is not None and not natural_df.empty:
+        natural_df["date"] = natural_df["datetime"].dt.date
+        for d, grp in natural_df.groupby("date"):
+            dli = grp["par"].sum() * 3600 / 1_000_000
+            daily_dli.setdefault(d, {})["natural"] = dli
+
+    # Ensure today and tomorrow have predictions for cards (if not already in range)
+    if model.is_trained():
+        for card_date in [today, tomorrow]:
+            if card_date not in daily_dli or "predicted" not in daily_dli.get(card_date, {}):
+                try:
+                    forecasts = await client.get_forecast(days=7)
+                    for f in forecasts:
+                        if f.date == card_date:
+                            nat_dli = model.predict_dli(f.total_radiation)
+                            # Calculate predicted = natural + inferred lamp
+                            pred_dli = nat_dli
+                            for h in f.hourly:
+                                lamp = inferred_lamp_hourly.get(h.datetime.hour, 0.0)
+                                pred_dli += lamp * 3600 / 1_000_000
+                            daily_dli.setdefault(card_date, {})["predicted"] = pred_dli
+                            daily_dli.setdefault(card_date, {})["natural"] = nat_dli
+                            break
+                except Exception:
+                    pass
+
+    # For today: combine actual (observed so far) + predicted remainder
+    current_hour = datetime.now(UTC).hour
+    today_vals_tmp = daily_dli.get(today, {})
+    has_today_data = "actual" in today_vals_tmp and "predicted" in today_vals_tmp
+    if has_today_data and predicted_df is not None and not predicted_df.empty:
+        today_predicted = predicted_df[predicted_df["date"] == today]
+        if not today_predicted.empty:
+            remaining = today_predicted[today_predicted["datetime"].dt.hour > current_hour]
+            remainder_dli = remaining["par"].sum() * 3600 / 1_000_000
+            daily_dli[today]["estimated"] = today_vals_tmp["actual"] + remainder_dli
 
     # Build chart
+    title = f"Light Schedule - {start_date}" if start_date == end_date else \
+            f"Light Schedule - {start_date} to {end_date}"
     fig = make_schedule_chart(
-        actual_chart_df,
-        optimal_df,
-        title=f"Light Schedule - {analysis_date}",
+        actual_df=actual_df,
+        predicted_df=predicted_df,
+        natural_df=natural_df,
+        title=title,
     )
+
+    # Add daily DLI annotations at noon of each day (at bottom to avoid legend)
+    for d, values in sorted(daily_dli.items()):
+        noon = datetime(d.year, d.month, d.day, 12, tzinfo=UTC)
+        parts = []
+        if "actual" in values:
+            parts.append(f"A:{values['actual']:.1f}")
+        if "predicted" in values:
+            parts.append(f"P:{values['predicted']:.1f}")
+        if "natural" in values:
+            parts.append(f"N:{values['natural']:.1f}")
+        if parts:
+            fig.add_annotation(
+                x=noon, y=0.02, yref="paper", yanchor="bottom",
+                text="<br>".join(parts),
+                showarrow=False, font={"size": 10}, bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="#ccc", borderwidth=1, borderpad=4,
+            )
+
     chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+
+    # Get DLI values for yesterday, today, tomorrow cards
+    yesterday_vals = daily_dli.get(yesterday, {})
+    today_vals = daily_dli.get(today, {})
+    tomorrow_vals = daily_dli.get(tomorrow, {})
+
+    unit = '<span class="unit">mol/m²</span>'
+
+    def format_card_value(vals: dict, use_estimated: bool = False) -> str:
+        if use_estimated and "estimated" in vals:
+            return f"{vals['estimated']:.1f}~ {unit}"
+        if "actual" in vals:
+            return f"{vals['actual']:.1f} {unit}"
+        if "predicted" in vals:
+            return f"{vals['predicted']:.1f}* {unit}"
+        return "-"
+
+    def format_card_sublabel(vals: dict) -> str:
+        if "natural" in vals:
+            return f"(natural: {vals['natural']:.1f})"
+        return ""
 
     extra_css = """
         .controls { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 20px;
                    padding: 15px; background: #f5f5f5; border-radius: 8px; }
         .control-group { display: flex; align-items: center; gap: 8px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr);
                      gap: 15px; margin: 20px 0; }
         .stat-box { padding: 15px; background: #f9f9f9; border-radius: 8px; text-align: center; }
         .stat-box .value { font-size: 1.5em; font-weight: bold; color: #0066cc; }
+        .stat-box .value .unit { font-size: 0.5em; font-weight: normal; color: #999; }
         .stat-box .label { font-size: 0.85em; color: #666; }
-        .savings { color: green; }
+        .stat-box .sublabel { font-size: 0.75em; color: #999; }
     """
 
     controls_html = f"""
         <form method="get" class="controls">
             <div class="control-group">
-                <label>Date:</label>
-                <input type="date" name="analysis_date" value="{analysis_date}"
+                <label>Start:</label>
+                <input type="date" name="start_date" value="{start_date}"
                        onchange="this.form.submit()">
             </div>
             <div class="control-group">
-                <label>Target DLI:</label>
-                <input type="range" name="target_dli" min="15" max="40" step="1"
-                       value="{target_dli}"
-                       oninput="this.nextElementSibling.textContent=this.value"
+                <label>End:</label>
+                <input type="date" name="end_date" value="{end_date}"
                        onchange="this.form.submit()">
-                <span>{target_dli}</span>
             </div>
         </form>
     """
@@ -977,179 +1211,38 @@ async def dli_schedule(
     stats_html = f"""
         <div class="stats-grid">
             <div class="stat-box">
-                <div class="value">{comparison.get('actual_dli', 0):.1f}</div>
-                <div class="label">Actual DLI</div>
+                <div class="value">{format_card_value(yesterday_vals)}</div>
+                <div class="label">Yesterday</div>
+                <div class="sublabel">{format_card_sublabel(yesterday_vals)}</div>
             </div>
             <div class="stat-box">
-                <div class="value">{optimal.achieved_dli:.1f}</div>
-                <div class="label">Optimal DLI</div>
+                <div class="value">{format_card_value(today_vals, use_estimated=True)}</div>
+                <div class="label">Today</div>
+                <div class="sublabel">{format_card_sublabel(today_vals)}</div>
             </div>
             <div class="stat-box">
-                <div class="value">{optimal.natural_dli:.1f}</div>
-                <div class="label">Natural DLI</div>
-            </div>
-            <div class="stat-box">
-                <div class="value">{optimal.lamp_dli:.1f}</div>
-                <div class="label">Lamp DLI (optimal)</div>
-            </div>
-            <div class="stat-box">
-                <div class="value savings">{optimal.savings_percent:.0f}%</div>
-                <div class="label">Potential Savings</div>
+                <div class="value">{format_card_value(tomorrow_vals)}</div>
+                <div class="label">Tomorrow</div>
+                <div class="sublabel">{format_card_sublabel(tomorrow_vals)}</div>
             </div>
         </div>
+        <p style="color: #999; font-size: 0.8em; margin-top: -10px;">* predicted ~ estimated</p>
     """
 
     content = f"""
-        <h1>Schedule Analysis</h1>
+        <h1>Daily Light Integral (DLI) Analysis</h1>
         {controls_html}
         {stats_html}
         {chart_html}
         <p style="color: #666; font-size: 0.9em; margin-top: 10px;">
-            Blue area: actual PAR readings. Green dashed: optimal total PAR.
-            Yellow dotted: estimated natural light contribution.
+            A/P/N = Actual / Predicted / Natural DLI values per day.<br/>
+            Natural light predictions are based on the current ML model.<br/>
+            Total predicted is yesterday's inferred lamp schedule + natural light.<br/>
         </p>
     """
 
     return render_page(
-        "Schedule Analysis - WP6 Red",
-        content,
-        extra_css=extra_css,
-        show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",
-    )
-
-
-@app.get("/dli/forecast", response_class=HTMLResponse)
-async def dli_forecast(
-    user: str = Depends(verify_auth),
-    days: Annotated[int, Query(ge=1, le=14)] = 7,
-    target_dli: Annotated[float, Query(ge=10, le=50)] = 25.0,
-) -> str:
-    """View projected natural light and optimal lamp schedules."""
-    client = get_weather_client()
-
-    try:
-        forecasts = await client.get_forecast(days=days)
-    except Exception as e:
-        return render_page(
-            "Forecast - WP6 Red",
-            f"<h1>Weather API Error: {e}</h1>",
-            show_back_link=True, back_url="/dli",
-        )
-
-    if not forecasts:
-        return render_page(
-            "Forecast - WP6 Red",
-            "<h1>No forecast data available</h1>",
-            show_back_link=True, back_url="/dli",
-        )
-
-    # Calculate optimal schedules for each day
-    params = OptimizationParams(target_dli=target_dli)
-    schedules = [calculate_optimal_schedule(f, params) for f in forecasts]
-
-    # Build summary table
-    rows = []
-    for s in schedules:
-        lamp_needed = "Yes" if s.lamp_dli > 0.5 else "No"
-        rows.append(f"""
-            <tr>
-                <td>{s.date}</td>
-                <td>{s.natural_dli:.1f}</td>
-                <td>{s.lamp_dli:.1f}</td>
-                <td>{s.achieved_dli:.1f}</td>
-                <td>{s.lamp_hours:.0f}h</td>
-                <td style="color: {'green' if s.savings_percent > 20 else 'inherit'};">
-                    {s.savings_percent:.0f}%
-                </td>
-                <td>{lamp_needed}</td>
-            </tr>
-        """)
-
-    extra_css = """
-        .controls { display: flex; gap: 20px; margin-bottom: 20px;
-                   padding: 15px; background: #f5f5f5; border-radius: 8px; }
-        .control-group { display: flex; align-items: center; gap: 8px; }
-        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
-        th { background-color: #f5f5f5; }
-        tr:hover { background-color: #f9f9f9; }
-    """
-
-    days_options = "".join(
-        f'<option value="{d}" {"selected" if d == days else ""}>{d} days</option>'
-        for d in [3, 7, 14]
-    )
-    controls_html = f"""
-        <form method="get" class="controls">
-            <div class="control-group">
-                <label>Forecast Days:</label>
-                <select name="days" onchange="this.form.submit()">
-                    {days_options}
-                </select>
-            </div>
-            <div class="control-group">
-                <label>Target DLI:</label>
-                <input type="range" name="target_dli" min="15" max="40" step="1"
-                       value="{target_dli}"
-                       oninput="this.nextElementSibling.textContent=this.value"
-                       onchange="this.form.submit()">
-                <span>{target_dli}</span>
-            </div>
-        </form>
-    """
-
-    # Bar chart of forecasted DLI breakdown
-    chart_data = pd.DataFrame([
-        {"date": str(s.date), "Natural DLI": s.natural_dli, "Lamp DLI": s.lamp_dli}
-        for s in schedules
-    ])
-
-    fig = make_bar_chart(
-        chart_data.melt(id_vars="date", var_name="Source", value_name="DLI"),
-        x="date",
-        y="DLI",
-        color="Source",
-        title=f"Forecasted DLI Breakdown (Target: {target_dli})",
-        y_label="DLI (mol/m²/day)",
-        barmode="stack",
-    )
-    fig.add_hline(
-        y=target_dli,
-        line_dash="dash",
-        line_color="red",
-        annotation_text="Target",
-    )
-    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
-
-    table_html = f"""
-        <table>
-            <thead>
-                <tr>
-                    <th>Date</th>
-                    <th>Natural DLI</th>
-                    <th>Lamp DLI</th>
-                    <th>Total DLI</th>
-                    <th>Lamp Hours</th>
-                    <th>Savings</th>
-                    <th>Lamps Needed</th>
-                </tr>
-            </thead>
-            <tbody>
-                {''.join(rows)}
-            </tbody>
-        </table>
-    """
-
-    content = f"""
-        <h1>Light Forecast</h1>
-        <p>Projected natural light and optimal lamp usage based on weather forecast.</p>
-        {controls_html}
-        {chart_html}
-        {table_html}
-    """
-
-    return render_page(
-        "Forecast - WP6 Red",
+        "Daily Light Integral (DLI) - WP6 Red",
         content,
         extra_css=extra_css,
         show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",
@@ -1157,7 +1250,7 @@ async def dli_forecast(
 
 
 @app.get("/dli/model", response_class=HTMLResponse)
-async def dli_model_status(user: str = Depends(verify_auth)) -> str:
+async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
     """View model status and training options."""
     model = get_model()
 
@@ -1296,7 +1389,7 @@ async def dli_model_status(user: str = Depends(verify_auth)) -> str:
 
 
 @app.post("/dli/model/train", response_class=HTMLResponse)
-async def dli_model_train(user: str = Depends(verify_auth)) -> str:
+async def dli_model_train(user: str = Depends(verify_admin_auth)) -> str:
     """Train the two-stage light prediction model."""
     if not db:
         return render_page(
@@ -1439,7 +1532,7 @@ async def dli_model_train(user: str = Depends(verify_auth)) -> str:
 
 @app.get("/dli/model/diagnostic", response_class=HTMLResponse)
 async def dli_model_diagnostic(
-    user: str = Depends(verify_auth),
+    user: str = Depends(verify_admin_auth),
 ) -> str:
     """Diagnostic view to investigate model training data."""
     if not db:

@@ -4,6 +4,63 @@ import numpy as np
 import pandas as pd
 
 
+def _photoperiod_seconds(
+    par_values: np.ndarray,
+    time_seconds: np.ndarray,
+    *,
+    threshold: float,
+) -> float:
+    """Return total seconds where PAR is above threshold.
+
+    Uses piecewise-linear interpolation between consecutive samples, so it behaves
+    well with gaps and multiple separate "on" periods.
+    """
+    if len(par_values) < 2:
+        return 0.0
+
+    photoperiod = 0.0
+    for idx in range(len(par_values) - 1):
+        t0 = float(time_seconds[idx])
+        t1 = float(time_seconds[idx + 1])
+        if t1 <= t0:
+            continue
+
+        p0 = float(par_values[idx])
+        p1 = float(par_values[idx + 1])
+
+        a0 = p0 > threshold
+        a1 = p1 > threshold
+
+        # Fully above threshold
+        if a0 and a1:
+            photoperiod += t1 - t0
+            continue
+
+        # Fully below threshold
+        if (not a0) and (not a1):
+            continue
+
+        # Crosses the threshold within the interval; assume linear change.
+        dp = p1 - p0
+        if dp == 0:
+            # Flat line exactly at threshold or numerical edge-case.
+            continue
+
+        # Fraction of the interval until crossing.
+        frac_to_cross = (threshold - p0) / dp
+        # Clamp to [0, 1] to be safe with noisy data.
+        frac_to_cross = float(np.clip(frac_to_cross, 0.0, 1.0))
+
+        if a0 and (not a1):
+            # Above -> below: count time from start until crossing.
+            photoperiod += (t1 - t0) * frac_to_cross
+        elif (not a0) and a1:
+            # Below -> above: count time from crossing until end.
+            photoperiod += (t1 - t0) * (1.0 - frac_to_cross)
+
+    return photoperiod
+
+
 def calculate_daily_dli(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate DLI from PAR readings using trapezoidal integration.
 
@@ -48,16 +105,13 @@ def calculate_daily_dli(df: pd.DataFrame) -> pd.DataFrame:
         non_zero = par_values[par_values > 0]
         avg_par = float(np.mean(non_zero)) if len(non_zero) > 0 else 0.0
 
-        # Photoperiod: time span where PAR > threshold (e.g., 10 μmol/m²/s)
+        # Photoperiod: total time where PAR > threshold (e.g., 10 μmol/m²/s)
         threshold = 10
-        above_threshold = par_values > threshold
-        if above_threshold.any():
-            first_idx = np.argmax(above_threshold)
-            last_idx = len(above_threshold) - np.argmax(above_threshold[::-1]) - 1
-            photoperiod_seconds = time_seconds[last_idx] - time_seconds[first_idx]
-            photoperiod_hours = photoperiod_seconds / 3600
-        else:
-            photoperiod_hours = 0.0
+        photoperiod_hours = _photoperiod_seconds(
+            par_values,
+            time_seconds,
+            threshold=threshold,
+        ) / 3600.0
 
         results.append({
             "date": date_val,
