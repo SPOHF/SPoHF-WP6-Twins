@@ -1,14 +1,19 @@
 """Two-stage ML model for predicting daily indoor light from weather data.
 
-Stage 1: OpenMeteo daily direct_radiation → s1000 daily lux (calibrates API to local)
+Stage 1: OpenMeteo daily weather → s1000 daily lux (calibrates API to local)
 Stage 2: s1000 daily lux → daily indoor PAR sum (greenhouse transmission)
 
+Features:
+- Stage 1: direct_radiation_sum, diffuse_radiation_sum, cloud_cover_avg, day_of_year
+- Stage 2: lux_sum, day_of_year
+
 Trained on daily aggregates for better correlation (0.9+) vs hourly (0.7).
+Uses Ridge regression to handle correlated features.
 """
 
 import os
 import pickle
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -35,6 +40,7 @@ class StageStats:
     n_samples: int
     coefficients: dict[str, float]
     intercept: float
+    feature_names: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -48,6 +54,7 @@ class ModelStats:
     outdoor_sensor: str = "s1000"
     indoor_sensor: str = "s2100-01-par"
     aggregation: str = "daily"
+    model_version: int = 5
 
     @property
     def r2_score(self) -> float:
@@ -63,14 +70,16 @@ class ModelStats:
 class TwoStageLightModel:
     """Two-stage model for predicting daily indoor light.
 
-    Stage 1: Daily OpenMeteo direct_radiation → daily s1000 lux
-        Input: daily sum of direct_radiation, avg cloud_cover, day_of_year
+    Stage 1: Daily OpenMeteo weather → daily s1000 lux
+        Input: direct_radiation_sum, diffuse_radiation_sum, cloud_cover_avg,
+               day_of_year_sin, day_of_year_cos
         Output: daily sum of lux (calibrated to local weather station)
 
     Stage 2: Daily s1000 lux → daily indoor PAR
-        Input: daily sum of lux, day_of_year
+        Input: lux_sum, day_of_year_sin, day_of_year_cos
         Output: daily sum of indoor PAR (μmol/m²/day, convert to DLI by /1e6*3600)
 
+    Uses Ridge regression to handle correlated features.
     Uses daily aggregation for better correlation (~0.9 vs ~0.7 hourly).
     """
 
@@ -78,12 +87,34 @@ class TwoStageLightModel:
         self.stage1_model = None  # OpenMeteo → daily lux
         self.stage2_model = None  # daily lux → daily indoor PAR
         self.stats: ModelStats | None = None
-        self.stage1_features = ["direct_radiation_sum"]
-        self.stage2_features = ["lux_sum"]
+        # Extended feature set for better predictions
+        self.stage1_features = [
+            "direct_radiation_sum",
+            "diffuse_radiation_sum",
+            "cloud_cover_avg",
+            "day_of_year_sin",
+            "day_of_year_cos",
+        ]
+        self.stage2_features = ["lux_sum", "day_of_year_sin", "day_of_year_cos"]
+        # Feature transformers
+        self.stage1_poly = None
+        self.stage2_poly = None
+        self.stage1_scaler = None
+        self.stage2_scaler = None
 
     def is_trained(self) -> bool:
         """Check if both stages are trained."""
         return self.stage1_model is not None and self.stage2_model is not None
+
+    def _add_day_of_year_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add cyclical day-of-year features (sin/cos encoding)."""
+        df = df.copy()
+        # Convert date to day of year
+        day_of_year = pd.to_datetime(df["date"]).dt.dayofyear
+        # Cyclical encoding for day of year (handles year wrap-around)
+        df["day_of_year_sin"] = np.sin(2 * np.pi * day_of_year / 365)
+        df["day_of_year_cos"] = np.cos(2 * np.pi * day_of_year / 365)
+        return df
 
     def train(
         self,
@@ -97,14 +128,26 @@ class TwoStageLightModel:
 
         Args:
             weather_df: OpenMeteo data with columns: datetime, solar_radiation, cloud_cover
+                       Optionally: diffuse_radiation for better accuracy
             outdoor_df: s1000 weather station with columns: time, lux
             indoor_df: PAR sensor with columns: time, value (or par)
 
         Returns:
             ModelStats with both stage statistics
         """
-        from sklearn.linear_model import LinearRegression
+        from sklearn.linear_model import RidgeCV
         from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+        from sklearn.preprocessing import StandardScaler
+
+        # Reset feature lists to full extended set (may have been overwritten by load())
+        candidate_s1_features = [
+            "direct_radiation_sum",
+            "diffuse_radiation_sum",
+            "cloud_cover_avg",
+            "day_of_year_sin",
+            "day_of_year_cos",
+        ]
+        candidate_s2_features = ["lux_sum", "day_of_year_sin", "day_of_year_cos"]
 
         # Aggregate to daily and align (Stage 1)
         stage1_data = self._align_weather_to_outdoor_daily(weather_df, outdoor_df)
@@ -122,43 +165,73 @@ class TwoStageLightModel:
                 "(need s1000 + indoor PAR overlap)"
             )
 
-        # Train Stage 1: daily OpenMeteo → daily lux
-        X1 = stage1_data[self.stage1_features].values
+        # Add day-of-year features
+        stage1_data = self._add_day_of_year_features(stage1_data)
+        stage2_data = self._add_day_of_year_features(stage2_data)
+
+        # Determine available features for Stage 1
+        available_s1_features = [f for f in candidate_s1_features if f in stage1_data.columns]
+        if not available_s1_features:
+            raise ValueError("No valid Stage 1 features found in data")
+
+        # Train Stage 1: daily OpenMeteo → daily lux with RidgeCV
+        X1 = stage1_data[available_s1_features].values
         y1 = stage1_data["lux_sum"].values
 
-        self.stage1_model = LinearRegression()
-        self.stage1_model.fit(X1, y1)
+        # Scale features, then RidgeCV with cross-validation for alpha
+        alphas = [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
+        self.stage1_poly = None  # No polynomial features (simpler model)
+        self.stage1_scaler = StandardScaler()
 
-        y1_pred = self.stage1_model.predict(X1)
+        X1_scaled = self.stage1_scaler.fit_transform(X1)
+
+        self.stage1_model = RidgeCV(alphas=alphas, cv=5)
+        self.stage1_model.fit(X1_scaled, y1)
+
+        y1_pred = self.stage1_model.predict(X1_scaled)
+
+        coef_dict = dict(zip(available_s1_features, self.stage1_model.coef_, strict=True))
+
         stage1_stats = StageStats(
             r2_score=round(r2_score(y1, y1_pred), 4),
             rmse=round(np.sqrt(mean_squared_error(y1, y1_pred)), 2),
             mae=round(mean_absolute_error(y1, y1_pred), 2),
             n_samples=len(stage1_data),
-            coefficients=dict(zip(
-                self.stage1_features, self.stage1_model.coef_, strict=True
-            )),
-            intercept=round(self.stage1_model.intercept_, 4),
+            coefficients=coef_dict,
+            intercept=round(float(self.stage1_model.intercept_), 4),
+            feature_names=available_s1_features,
         )
 
         # Train Stage 2: daily lux → daily indoor PAR
-        X2 = stage2_data[self.stage2_features].values
+        available_s2_features = [f for f in candidate_s2_features if f in stage2_data.columns]
+        X2 = stage2_data[available_s2_features].values
         y2 = stage2_data["par_sum"].values
 
-        self.stage2_model = LinearRegression()
-        self.stage2_model.fit(X2, y2)
+        self.stage2_poly = None  # No polynomial features
+        self.stage2_scaler = StandardScaler()
 
-        y2_pred = self.stage2_model.predict(X2)
+        X2_scaled = self.stage2_scaler.fit_transform(X2)
+
+        self.stage2_model = RidgeCV(alphas=alphas, cv=5)
+        self.stage2_model.fit(X2_scaled, y2)
+
+        y2_pred = self.stage2_model.predict(X2_scaled)
+
+        coef_dict2 = dict(zip(available_s2_features, self.stage2_model.coef_, strict=True))
+
         stage2_stats = StageStats(
             r2_score=round(r2_score(y2, y2_pred), 4),
             rmse=round(np.sqrt(mean_squared_error(y2, y2_pred)), 2),
             mae=round(mean_absolute_error(y2, y2_pred), 2),
             n_samples=len(stage2_data),
-            coefficients=dict(zip(
-                self.stage2_features, self.stage2_model.coef_, strict=True
-            )),
-            intercept=round(self.stage2_model.intercept_, 4),
+            coefficients=coef_dict2,
+            intercept=round(float(self.stage2_model.intercept_), 4),
+            feature_names=available_s2_features,
         )
+
+        # Store the actual features used
+        self.stage1_features = available_s1_features
+        self.stage2_features = available_s2_features
 
         # Date range
         all_dates = list(stage1_data["date"]) + list(stage2_data["date"])
@@ -172,6 +245,7 @@ class TwoStageLightModel:
             outdoor_sensor=outdoor_sensor,
             indoor_sensor=indoor_sensor,
             aggregation="daily",
+            model_version=5,
         )
 
         return self.stats
@@ -179,7 +253,11 @@ class TwoStageLightModel:
     def _align_weather_to_outdoor_daily(
         self, weather_df: pd.DataFrame, outdoor_df: pd.DataFrame
     ) -> pd.DataFrame:
-        """Align and aggregate OpenMeteo + s1000 data to daily totals."""
+        """Align and aggregate OpenMeteo + s1000 data to daily totals.
+
+        Handles both single-radiation (solar_radiation) and multi-radiation
+        (direct_radiation, diffuse_radiation) weather data formats.
+        """
         weather = weather_df.copy()
         outdoor = outdoor_df.copy()
 
@@ -190,11 +268,35 @@ class TwoStageLightModel:
         weather["date"] = weather["datetime"].dt.date
         outdoor["date"] = outdoor["time"].dt.date
 
+        # Build aggregation dict based on available columns
+        agg_dict = {}
+
+        # Handle radiation columns - prefer direct_radiation over solar_radiation
+        # (they may both exist with the same data, so only use one)
+        if "direct_radiation" in weather.columns:
+            agg_dict["direct_radiation"] = "sum"
+        elif "solar_radiation" in weather.columns:
+            agg_dict["solar_radiation"] = "sum"
+
+        if "diffuse_radiation" in weather.columns:
+            agg_dict["diffuse_radiation"] = "sum"
+        if "cloud_cover" in weather.columns:
+            agg_dict["cloud_cover"] = "mean"
+
+        if not agg_dict:
+            raise ValueError("No radiation columns found in weather data")
+
         # Aggregate weather to daily
-        weather_daily = weather.groupby("date").agg({
-            "solar_radiation": "sum",  # direct_radiation from OpenMeteo
-        }).reset_index()
-        weather_daily.columns = ["date", "direct_radiation_sum"]
+        weather_daily = weather.groupby("date").agg(agg_dict).reset_index()
+
+        # Rename columns to standard names
+        rename_map = {
+            "solar_radiation": "direct_radiation_sum",
+            "direct_radiation": "direct_radiation_sum",
+            "diffuse_radiation": "diffuse_radiation_sum",
+            "cloud_cover": "cloud_cover_avg",
+        }
+        weather_daily = weather_daily.rename(columns=rename_map)
 
         # Aggregate outdoor lux to daily
         outdoor_daily = outdoor.groupby("date").agg({
@@ -210,7 +312,8 @@ class TwoStageLightModel:
 
         # Filter valid days (some light recorded)
         merged = merged[merged["lux_sum"] > 1000]  # At least some daylight
-        merged = merged[merged["direct_radiation_sum"] > 0]
+        if "direct_radiation_sum" in merged.columns:
+            merged = merged[merged["direct_radiation_sum"] > 0]
 
         return merged
 
@@ -262,11 +365,17 @@ class TwoStageLightModel:
     def predict_daily(
         self,
         direct_radiation_sum: float,
+        diffuse_radiation_sum: float | None = None,
+        cloud_cover_avg: float | None = None,
+        day_of_year: int | None = None,
     ) -> float:
         """Predict daily indoor PAR sum from OpenMeteo daily forecast.
 
         Args:
             direct_radiation_sum: Daily sum of direct_radiation (W/m² summed over hours)
+            diffuse_radiation_sum: Daily sum of diffuse_radiation (optional)
+            cloud_cover_avg: Daily average cloud cover % (optional)
+            day_of_year: Day of year 1-365 (optional, defaults to today)
 
         Returns:
             Predicted daily indoor PAR sum (μmol/m²/day sum over readings)
@@ -274,13 +383,47 @@ class TwoStageLightModel:
         if not self.is_trained():
             raise RuntimeError("Model not trained. Call train() or load() first.")
 
-        # Stage 1: OpenMeteo → daily lux
-        X1 = np.array([[direct_radiation_sum]])
+        # Default day_of_year to today
+        if day_of_year is None:
+            day_of_year = datetime.now().timetuple().tm_yday
+
+        # Calculate cyclical day-of-year features
+        day_sin = np.sin(2 * np.pi * day_of_year / 365)
+        day_cos = np.cos(2 * np.pi * day_of_year / 365)
+
+        # Build Stage 1 feature vector based on what was used during training
+        feature_values = {
+            "direct_radiation_sum": direct_radiation_sum,
+            "diffuse_radiation_sum": diffuse_radiation_sum or 0.0,
+            "cloud_cover_avg": cloud_cover_avg or 50.0,  # Default to 50% if not provided
+            "day_of_year_sin": day_sin,
+            "day_of_year_cos": day_cos,
+        }
+
+        X1 = np.array([[feature_values[f] for f in self.stage1_features]])
+
+        # Apply polynomial transform and scaling if available
+        if self.stage1_poly is not None:
+            X1 = self.stage1_poly.transform(X1)
+        if self.stage1_scaler is not None:
+            X1 = self.stage1_scaler.transform(X1)
+
         predicted_lux_sum = self.stage1_model.predict(X1)[0]
         predicted_lux_sum = max(0, predicted_lux_sum)
 
-        # Stage 2: daily lux → daily indoor PAR
-        X2 = np.array([[predicted_lux_sum]])
+        # Build Stage 2 feature vector
+        s2_feature_values = {
+            "lux_sum": predicted_lux_sum,
+            "day_of_year_sin": day_sin,
+            "day_of_year_cos": day_cos,
+        }
+        X2 = np.array([[s2_feature_values[f] for f in self.stage2_features]])
+
+        if self.stage2_poly is not None:
+            X2 = self.stage2_poly.transform(X2)
+        if self.stage2_scaler is not None:
+            X2 = self.stage2_scaler.transform(X2)
+
         predicted_par_sum = self.stage2_model.predict(X2)[0]
 
         return max(0.0, round(predicted_par_sum, 1))
@@ -288,18 +431,29 @@ class TwoStageLightModel:
     def predict_dli(
         self,
         direct_radiation_sum: float,
+        diffuse_radiation_sum: float | None = None,
+        cloud_cover_avg: float | None = None,
+        day_of_year: int | None = None,
         readings_per_day: int = 144,  # Assuming 10-min intervals
     ) -> float:
         """Predict DLI (mol/m²/day) from OpenMeteo daily forecast.
 
         Args:
             direct_radiation_sum: Daily sum of direct_radiation
+            diffuse_radiation_sum: Daily sum of diffuse_radiation (optional)
+            cloud_cover_avg: Daily average cloud cover % (optional)
+            day_of_year: Day of year 1-365 (optional, defaults to today)
             readings_per_day: Expected number of PAR readings per day
 
         Returns:
             Predicted DLI in mol/m²/day
         """
-        par_sum = self.predict_daily(direct_radiation_sum)
+        par_sum = self.predict_daily(
+            direct_radiation_sum,
+            diffuse_radiation_sum=diffuse_radiation_sum,
+            cloud_cover_avg=cloud_cover_avg,
+            day_of_year=day_of_year,
+        )
 
         # Convert PAR sum to DLI
         # PAR sum is sum of readings, each reading represents ~10 min = 600 seconds
@@ -322,8 +476,14 @@ class TwoStageLightModel:
         data = {
             "stage1_model": self.stage1_model,
             "stage2_model": self.stage2_model,
+            "stage1_poly": self.stage1_poly,
+            "stage2_poly": self.stage2_poly,
+            "stage1_scaler": self.stage1_scaler,
+            "stage2_scaler": self.stage2_scaler,
+            "stage1_features": self.stage1_features,
+            "stage2_features": self.stage2_features,
             "stats": self.stats,
-            "version": 4,  # Simplified single-feature version
+            "version": 6,  # Polynomial features + RidgeCV version
         }
 
         with open(path, "wb") as f:
@@ -343,12 +503,33 @@ class TwoStageLightModel:
 
         version = data.get("version", 1)
         if version < 4:
-            # Old model format - incompatible with simplified features
+            # Old model format - incompatible
             return None
 
         self.stage1_model = data["stage1_model"]
         self.stage2_model = data["stage2_model"]
         self.stats = data["stats"]
+
+        # Load transformers and features (v5+)
+        if version >= 5:
+            self.stage1_scaler = data.get("stage1_scaler")
+            self.stage2_scaler = data.get("stage2_scaler")
+            self.stage1_features = data.get("stage1_features", ["direct_radiation_sum"])
+            self.stage2_features = data.get("stage2_features", ["lux_sum"])
+        else:
+            # v4 compatibility - single feature, no scaling
+            self.stage1_scaler = None
+            self.stage2_scaler = None
+            self.stage1_features = ["direct_radiation_sum"]
+            self.stage2_features = ["lux_sum"]
+
+        # Load polynomial transformers (v6+)
+        if version >= 6:
+            self.stage1_poly = data.get("stage1_poly")
+            self.stage2_poly = data.get("stage2_poly")
+        else:
+            self.stage1_poly = None
+            self.stage2_poly = None
 
         return self.stats
 

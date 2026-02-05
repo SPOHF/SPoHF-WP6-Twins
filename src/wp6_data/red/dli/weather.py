@@ -209,6 +209,7 @@ class OpenMeteoClient:
         start: date,
         end: date,
         radiation_var: str = "shortwave_radiation",
+        include_diffuse: bool = False,
     ) -> pd.DataFrame:
         """Get historical data with selectable radiation variable.
 
@@ -221,18 +222,23 @@ class OpenMeteoClient:
                 - diffuse_radiation (scattered light)
                 - direct_normal_irradiance (perpendicular to sun)
                 - global_tilted_irradiance (for tilted surfaces)
+            include_diffuse: If True, also fetch diffuse_radiation
 
         Returns:
-            DataFrame with columns: datetime, solar_radiation, cloud_cover, temperature
+            DataFrame with columns: datetime, solar_radiation (or direct_radiation),
+            cloud_cover, temperature, and optionally diffuse_radiation
         """
         client = await self._get_client()
 
-        hourly_vars = f"{radiation_var},cloud_cover,temperature_2m"
+        # Build hourly variables list
+        hourly_vars = [radiation_var, "cloud_cover", "temperature_2m"]
+        if include_diffuse and radiation_var != "diffuse_radiation":
+            hourly_vars.append("diffuse_radiation")
 
         params = {
             "latitude": self.latitude,
             "longitude": self.longitude,
-            "hourly": hourly_vars,
+            "hourly": ",".join(hourly_vars),
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
             "timezone": "UTC",
@@ -247,15 +253,22 @@ class OpenMeteoClient:
         radiation = hourly.get(radiation_var, [])
         cloud = hourly.get("cloud_cover", [])
         temp = hourly.get("temperature_2m", [])
+        diffuse = hourly.get("diffuse_radiation", []) if include_diffuse else []
 
         records = []
         for i, time_str in enumerate(times):
-            records.append({
+            record = {
                 "datetime": datetime.fromisoformat(time_str).replace(tzinfo=UTC),
                 "solar_radiation": radiation[i] if i < len(radiation) else 0.0,
                 "cloud_cover": cloud[i] if i < len(cloud) else 0.0,
                 "temperature": temp[i] if i < len(temp) else 0.0,
-            })
+            }
+            # Also store as direct_radiation if that's what was requested
+            if radiation_var == "direct_radiation":
+                record["direct_radiation"] = record["solar_radiation"]
+            if include_diffuse:
+                record["diffuse_radiation"] = diffuse[i] if i < len(diffuse) else 0.0
+            records.append(record)
 
         df = pd.DataFrame(records)
         if not df.empty:

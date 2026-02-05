@@ -1280,19 +1280,27 @@ async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
         s1 = stats.stage1
         s2 = stats.stage2
 
+        # Show feature names if available
+        s1_features = getattr(s1, "feature_names", list(s1.coefficients.keys()))
+        s2_features = getattr(s2, "feature_names", list(s2.coefficients.keys()))
+
         s1_coef_rows = "".join(
-            f"<tr><td>{name}</td><td>{value:+.4f}</td></tr>"
-            for name, value in s1.coefficients.items()
+            f"<tr><td>{name}</td><td>{s1.coefficients.get(name, 0):+.4f}</td></tr>"
+            for name in s1_features
         )
         s2_coef_rows = "".join(
-            f"<tr><td>{name}</td><td>{value:+.4f}</td></tr>"
-            for name, value in s2.coefficients.items()
+            f"<tr><td>{name}</td><td>{s2.coefficients.get(name, 0):+.4f}</td></tr>"
+            for name in s2_features
         )
+
+        # Model version info
+        model_version = getattr(stats, "model_version", 4)
+        model_type = "Ridge regression" if model_version >= 5 else "Linear regression"
 
         status_html = f"""
             <div class="model-card">
                 <h3 class="success">Two-Stage Model Trained (Daily)</h3>
-                <p>OpenMeteo daily direct_radiation → s1000 daily lux → indoor PAR</p>
+                <p>OpenMeteo weather → s1000 daily lux → indoor PAR ({model_type})</p>
 
                 <div class="stats-grid">
                     <div class="stat">
@@ -1314,8 +1322,11 @@ async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
                 </div>
 
                 <h4>Stage 1: Weather API → Local Lux (Daily)</h4>
-                <p>Calibrates OpenMeteo direct_radiation to s1000 daily lux sum
+                <p>Calibrates OpenMeteo weather to s1000 daily lux sum
                    (R²={s1.r2_score:.3f}, RMSE={s1.rmse:.0f} lux/day)</p>
+                <p style="color: #666; font-size: 0.85em;">
+                    Features: {', '.join(s1_features)}
+                </p>
                 <table class="coef-table">
                     <tr><th>Feature</th><th>Coefficient</th></tr>
                     <tr><td>Intercept</td><td>{s1.intercept:+.4f}</td></tr>
@@ -1325,6 +1336,9 @@ async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
                 <h4>Stage 2: Outdoor Lux → Indoor PAR (Daily)</h4>
                 <p>Greenhouse transmission model for daily totals
                    (R²={s2.r2_score:.3f}, RMSE={s2.rmse:.1f} μmol/m²/day)</p>
+                <p style="color: #666; font-size: 0.85em;">
+                    Features: {', '.join(s2_features)}
+                </p>
                 <table class="coef-table">
                     <tr><th>Feature</th><th>Coefficient</th></tr>
                     <tr><td>Intercept</td><td>{s2.intercept:+.4f}</td></tr>
@@ -1335,7 +1349,8 @@ async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
                     Outdoor sensor: <strong>{stats.outdoor_sensor}</strong><br>
                     Indoor sensor: <strong>{stats.indoor_sensor}</strong><br>
                     Trained: {stats.training_date.strftime('%Y-%m-%d %H:%M')} UTC<br>
-                    Data range: {stats.date_range[0]} to {stats.date_range[1]}
+                    Data range: {stats.date_range[0]} to {stats.date_range[1]}<br>
+                    Model version: v{model_version}
                 </p>
             </div>
         """
@@ -1440,11 +1455,13 @@ async def dli_model_train(user: str = Depends(verify_admin_auth)) -> str:
             show_back_link=True, back_url="/dli/model",
         )
 
-    # Fetch OpenMeteo historical weather data (direct_radiation for better correlation)
+    # Fetch OpenMeteo historical weather data (direct + diffuse radiation for better model)
     client = get_weather_client()
     try:
         weather_df = await client.get_historical_dataframe_multi(
-            start_dt.date(), end_dt.date(), radiation_var="direct_radiation"
+            start_dt.date(), end_dt.date(),
+            radiation_var="direct_radiation",
+            include_diffuse=True,
         )
     except Exception as e:
         return render_page(
@@ -1553,10 +1570,12 @@ async def dli_model_diagnostic(
         )
         outdoor_df = await db.get_weather_station_readings(start=start_dt, end=end_dt)
 
-        # Fetch weather with direct_radiation (best correlation)
+        # Fetch weather with direct_radiation + diffuse (for improved model)
         client = get_weather_client()
         weather_df = await client.get_historical_dataframe_multi(
-            start_dt.date(), end_dt.date(), radiation_var="direct_radiation"
+            start_dt.date(), end_dt.date(),
+            radiation_var="direct_radiation",
+            include_diffuse=True,
         )
     except Exception as e:
         return render_page(
