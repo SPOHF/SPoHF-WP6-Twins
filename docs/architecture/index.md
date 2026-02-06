@@ -85,14 +85,14 @@ flowchart TD
 
     subgraph sources[data sources]
         subgraph blue_source[Blueberry field]
-            b_sensors[Greenhouse sensors]@{ shape: cloud}
+            b_sensors[Field sensors]@{ shape: cloud}
             b_manual[Manual - logs, lab data]@{ shape: cloud}
             b_yellow_cards[Yellow cards]@{ shape: cloud}
         end
         style blue_source fill:#464592
 
         subgraph red_sources[Tomato Greenhouse]
-            r_sensors[Field sensors]@{ shape: cloud}
+            r_sensors[Greenhouse sensors]@{ shape: cloud}
             r_manual[Manual - logs, lab data]@{ shape: cloud}
         end
         style red_sources fill:#ee5858
