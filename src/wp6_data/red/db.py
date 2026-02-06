@@ -376,3 +376,144 @@ class MySQLConnection:
             df["time"] = pd.to_datetime(df["time"], utc=True)
             df = df.sort_values("time")
         return df
+
+    # TODO: i think this can be easily refactored?
+
+    async def get_par_readings(
+        self,
+        device_ids: list[str] | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        limit: int = 500000,
+    ) -> pd.DataFrame:
+        """Fetch PAR readings from s2100 table.
+
+        Args:
+            device_ids: Optional list of device IDs to filter (e.g., ['s2100-01-par'])
+            start: Start datetime filter
+            end: End datetime filter
+            limit: Maximum records to fetch
+
+        Returns:
+            DataFrame with columns: device, sensor, time, value
+        """
+        if not self.pool:
+            raise RuntimeError("Not connected")
+
+        conditions = []
+        params: list[Any] = []
+
+        if device_ids:
+            placeholders = ", ".join(["%s"] * len(device_ids))
+            conditions.append(f"device_id IN ({placeholders})")
+            params.extend(device_ids)
+        if start:
+            conditions.append("received_at >= %s")
+            params.append(start)
+        if end:
+            conditions.append("received_at <= %s")
+            params.append(end)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        async with self.pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cursor:
+            query = f"""
+                SELECT device_id, received_at, par
+                FROM s2100
+                {where_clause}
+                ORDER BY received_at DESC
+                LIMIT {limit}
+            """
+            await cursor.execute(query, params)
+            rows = list(reversed(await cursor.fetchall()))
+
+        if not rows:
+            return pd.DataFrame(columns=["device", "sensor", "time", "value"])
+
+        records = []
+        for row in rows:
+            if row.get("par") is not None:
+                records.append({
+                    "device": row["device_id"],
+                    "sensor": "par",
+                    "time": row["received_at"],
+                    "value": float(row["par"]),
+                })
+
+        df = pd.DataFrame(records)
+        if not df.empty:
+            df["time"] = pd.to_datetime(df["time"], utc=True)
+            df = df.sort_values("time")
+        return df
+
+    async def get_par_devices(self) -> list[str]:
+        """Get list of device IDs that have PAR readings."""
+        if not self.pool:
+            raise RuntimeError("Not connected")
+
+        async with self.pool.acquire() as conn, conn.cursor() as cursor:
+            await cursor.execute("SELECT DISTINCT device_id FROM s2100 ORDER BY device_id")
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
+
+    async def get_weather_station_readings(
+        self,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        limit: int = 500000,
+    ) -> pd.DataFrame:
+        """Fetch lux readings from s1000 weather station.
+
+        Args:
+            start: Start datetime filter
+            end: End datetime filter
+            limit: Maximum records to fetch
+
+        Returns:
+            DataFrame with columns: device, time, lux, temp, hum
+        """
+        if not self.pool:
+            raise RuntimeError("Not connected")
+
+        conditions = []
+        params: list[Any] = []
+
+        if start:
+            conditions.append("received_at >= %s")
+            params.append(start)
+        if end:
+            conditions.append("received_at <= %s")
+            params.append(end)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        async with self.pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cursor:
+            query = f"""
+                SELECT device_id, received_at, lux, temp, hum
+                FROM s1000
+                {where_clause}
+                ORDER BY received_at DESC
+                LIMIT {limit}
+            """
+            await cursor.execute(query, params)
+            rows = list(reversed(await cursor.fetchall()))
+
+        if not rows:
+            return pd.DataFrame(columns=["device", "time", "lux", "temp", "hum"])
+
+        records = []
+        for row in rows:
+            if row.get("lux") is not None:
+                records.append({
+                    "device": row["device_id"],
+                    "time": row["received_at"],
+                    "lux": float(row["lux"]),
+                    "temp": float(row["temp"]) if row.get("temp") else None,
+                    "hum": float(row["hum"]) if row.get("hum") else None,
+                })
+
+        df = pd.DataFrame(records)
+        if not df.empty:
+            df["time"] = pd.to_datetime(df["time"], utc=True)
+            df = df.sort_values("time")
+        return df

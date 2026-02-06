@@ -1,5 +1,6 @@
 """Shared Plotly chart helpers."""
 
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -77,12 +78,189 @@ def make_dual_axis_chart(
     return fig
 
 
+def make_bar_chart(
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+    color: str | None = None,
+    title: str = "",
+    y_label: str | None = None,
+    barmode: str = "group",
+    text_auto: bool = True,
+) -> go.Figure:
+    """Create a bar chart with optional grouping.
+
+    Args:
+        df: DataFrame with data to plot
+        x: Column name for x-axis
+        y: Column name for y-axis values
+        color: Optional column name for grouping/coloring bars
+        title: Chart title
+        y_label: Optional y-axis label (defaults to y column name)
+        barmode: Bar mode ('group', 'stack', 'relative')
+        text_auto: Show values on bars
+
+    Returns:
+        Plotly Figure object
+    """
+    fig = px.bar(
+        df,
+        x=x,
+        y=y,
+        color=color,
+        title=title,
+        barmode=barmode,
+        text_auto=".1f" if text_auto else False,
+    )
+
+    fig.update_layout(
+        hovermode="x unified",
+        height=500,
+        yaxis_title=y_label or y,
+        xaxis_title="",
+    )
+
+    if text_auto:
+        fig.update_traces(textposition="outside")
+
+    return fig
+
+
+def make_schedule_chart(
+    actual_df: pd.DataFrame | None = None,
+    predicted_df: pd.DataFrame | None = None,
+    natural_df: pd.DataFrame | None = None,
+    title: str = "Light Schedule",
+    y_label: str = "PAR (μmol/m²/s)",
+) -> go.Figure:
+    """Create an overlay chart showing actual and predicted PAR.
+
+    Args:
+        actual_df: DataFrame with columns: datetime, par (actual PAR readings)
+        predicted_df: DataFrame with columns: datetime, par (predicted PAR)
+        natural_df: DataFrame with columns: datetime, par (predicted natural light)
+        title: Chart title
+        y_label: Y-axis label
+
+    Returns:
+        Plotly Figure object
+    """
+    fig = go.Figure()
+
+    # Predicted natural light - filled area (yellow)
+    if natural_df is not None and not natural_df.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=natural_df["datetime"],
+                y=natural_df["par"],
+                name="Natural (predicted)",
+                mode="lines",
+                fill="tozeroy",
+                fillcolor="rgba(251, 188, 4, 0.2)",
+                line={"color": "rgb(251, 188, 4)", "width": 1, "dash": "dot"},
+            )
+        )
+
+    # Predicted PAR - dashed line (orange)
+    if predicted_df is not None and not predicted_df.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=predicted_df["datetime"],
+                y=predicted_df["par"],
+                name="Predicted",
+                mode="lines",
+                line={"color": "rgb(234, 67, 53)", "width": 2, "dash": "dash"},
+            )
+        )
+
+    # Actual PAR - filled area (blue)
+    if actual_df is not None and not actual_df.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=actual_df["datetime"],
+                y=actual_df["par"],
+                name="Actual",
+                mode="lines",
+                fill="tozeroy",
+                fillcolor="rgba(66, 133, 244, 0.3)",
+                line={"color": "rgb(66, 133, 244)", "width": 2},
+            )
+        )
+
+    fig.update_layout(
+        title=title,
+        hovermode="x unified",
+        height=500,
+        yaxis_title=y_label,
+        xaxis_title="",
+        legend={"yanchor": "top", "y": 0.99, "xanchor": "left", "x": 0.01},
+    )
+
+    return fig
+
+
+def make_stacked_area_chart(
+    df: pd.DataFrame,
+    x: str,
+    y_columns: list[str],
+    colors: dict[str, str] | None = None,
+    title: str = "",
+    y_label: str = "",
+) -> go.Figure:
+    """Create a stacked area chart.
+
+    Args:
+        df: DataFrame with data
+        x: Column name for x-axis
+        y_columns: List of column names to stack
+        colors: Optional dict mapping column names to colors
+        title: Chart title
+        y_label: Y-axis label
+
+    Returns:
+        Plotly Figure object
+    """
+    fig = go.Figure()
+
+    default_colors = [
+        "rgba(66, 133, 244, 0.7)",   # Blue
+        "rgba(251, 188, 4, 0.7)",    # Yellow
+        "rgba(52, 168, 83, 0.7)",    # Green
+        "rgba(234, 67, 53, 0.7)",    # Red
+    ]
+
+    for i, col in enumerate(y_columns):
+        color = (colors or {}).get(col, default_colors[i % len(default_colors)])
+        fig.add_trace(
+            go.Scatter(
+                x=df[x],
+                y=df[col],
+                name=col,
+                mode="lines",
+                fill="tonexty" if i > 0 else "tozeroy",
+                fillcolor=color,
+                line={"width": 0.5},
+                stackgroup="one",
+            )
+        )
+
+    fig.update_layout(
+        title=title,
+        hovermode="x unified",
+        height=500,
+        yaxis_title=y_label,
+        xaxis_title="",
+    )
+
+    return fig
+
+
 def prepare_comparison(
     left_df: pd.DataFrame,
     right_df: pd.DataFrame,
     left_label: str,
     right_label: str,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, str, str]:
     """Prepare two DataFrames for a dual-axis comparison chart.
 
     Relabels the ``sensor`` column in each DataFrame to the given label,

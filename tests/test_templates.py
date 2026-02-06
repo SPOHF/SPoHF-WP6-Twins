@@ -20,21 +20,21 @@ class TestResolveDateRange:
         assert end_dt.hour == 23 and end_dt.minute == 59 and end_dt.second == 59
 
     def test_uses_provided_dates(self):
-        s, e = date(2025, 6, 1), date(2025, 6, 10)
+        s, e = date(2026, 6, 1), date(2026, 6, 10)
         start, end, start_dt, end_dt = resolve_date_range(s, e)
         assert start == s
         assert end == e
-        assert start_dt.year == 2025 and start_dt.month == 6 and start_dt.day == 1
+        assert start_dt.year == 2026 and start_dt.month == 6 and start_dt.day == 1
         assert end_dt.day == 10
 
     def test_partial_override_start_only(self):
-        s = date(2025, 1, 1)
+        s = date(2026, 1, 1)
         start, end, _, _ = resolve_date_range(s, None)
         assert start == s
         assert end == date.today()
 
     def test_partial_override_end_only(self):
-        e = date(2025, 12, 31)
+        e = date(2026, 12, 31)
         start, end, _, _ = resolve_date_range(None, e)
         assert end == e
         assert start == date.today() - timedelta(days=7)
@@ -42,7 +42,7 @@ class TestResolveDateRange:
     def test_datetimes_are_utc(self):
         from datetime import UTC
 
-        _, _, start_dt, end_dt = resolve_date_range(date(2025, 3, 1), date(2025, 3, 2))
+        _, _, start_dt, end_dt = resolve_date_range(date(2026, 3, 1), date(2026, 3, 2))
         assert start_dt.tzinfo is UTC
         assert end_dt.tzinfo is UTC
 
@@ -50,11 +50,11 @@ class TestResolveDateRange:
 class TestDefaultDateRange:
     @patch("wp6_data.shared.templates.date")
     def test_returns_7_day_window(self, mock_date):
-        mock_date.today.return_value = date(2025, 3, 15)
+        mock_date.today.return_value = date(2026, 3, 15)
         mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
         start, end = default_date_range()
-        assert end == date(2025, 3, 15)
-        assert start == date(2025, 3, 8)
+        assert end == date(2026, 3, 15)
+        assert start == date(2026, 3, 8)
 
     def test_start_before_end(self):
         start, end = default_date_range()
@@ -64,25 +64,25 @@ class TestDefaultDateRange:
 
 class TestRenderDateFilter:
     def test_contains_form_element(self):
-        html = render_date_filter(date(2025, 1, 1), date(2025, 1, 8))
+        html = render_date_filter(date(2026, 1, 1), date(2026, 1, 8))
         assert '<form id="dateFilter"' in html
         assert 'method="get"' in html
 
     def test_contains_all_preset_buttons(self):
-        html = render_date_filter(date(2025, 1, 1), date(2025, 1, 8))
+        html = render_date_filter(date(2026, 1, 1), date(2026, 1, 8))
         for label in ("1d", "7d", "30d", "90d", "1y", "All"):
             assert f">{label}</button>" in html
 
     def test_date_inputs_have_correct_values(self):
-        start = date(2025, 2, 1)
-        end = date(2025, 2, 10)
+        start = date(2026, 2, 1)
+        end = date(2026, 2, 10)
         html = render_date_filter(start, end)
-        assert 'value="2025-02-01"' in html
-        assert 'value="2025-02-10"' in html
+        assert 'value="2026-02-01"' in html
+        assert 'value="2026-02-10"' in html
 
     @patch("wp6_data.shared.templates.date")
     def test_active_preset_7d(self, mock_date):
-        today = date(2025, 3, 15)
+        today = date(2026, 3, 15)
         mock_date.today.return_value = today
         mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
         start = today - timedelta(days=7)
@@ -92,7 +92,7 @@ class TestRenderDateFilter:
 
     @patch("wp6_data.shared.templates.date")
     def test_active_preset_all(self, mock_date):
-        today = date(2025, 3, 15)
+        today = date(2026, 3, 15)
         mock_date.today.return_value = today
         mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
         html = render_date_filter(date(2024, 1, 1), today)
@@ -100,22 +100,22 @@ class TestRenderDateFilter:
 
     @patch("wp6_data.shared.templates.date")
     def test_no_active_preset_for_custom_range(self, mock_date):
-        today = date(2025, 3, 15)
+        today = date(2026, 3, 15)
         mock_date.today.return_value = today
         mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
-        html = render_date_filter(date(2025, 2, 1), date(2025, 2, 15))
+        html = render_date_filter(date(2026, 2, 1), date(2026, 2, 15))
         # No button should have the active style
         assert html.count("background: #0066cc") == 0
 
     def test_extra_params_rendered_as_hidden_fields(self):
         html = render_date_filter(
-            date(2025, 1, 1), date(2025, 1, 8), extra_params={"sensor": "temp", "device": "d1"}
+            date(2026, 1, 1), date(2026, 1, 8), extra_params={"sensor": "temp", "device": "d1"}
         )
         assert '<input type="hidden" name="sensor" value="temp">' in html
         assert '<input type="hidden" name="device" value="d1">' in html
 
     def test_setrange_script_present(self):
-        html = render_date_filter(date(2025, 1, 1), date(2025, 1, 8))
+        html = render_date_filter(date(2026, 1, 1), date(2026, 1, 8))
         assert "function setRange(days)" in html
 
 
