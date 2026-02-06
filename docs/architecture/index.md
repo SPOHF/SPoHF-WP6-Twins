@@ -161,10 +161,11 @@ Where does what run:
 
 - Fontys
     - user interfaces
+    - potentially: schedulers and definitions of workloads
     - temporary steps towards desired sitation, waiting for dependencies
 - ProcEvolution
-    - (everything else)
     - data warehouse
+    - task loads, e.g. syncronization
     - analytics services
 
 
@@ -172,7 +173,7 @@ Where does what run:
 
 For now, roughly:
 
-- Nochschule Niederrhein
+- Hochschule Niederrhein
     - data analysis, finding correlations
 
 - ProcEvolution
