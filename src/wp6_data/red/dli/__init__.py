@@ -30,6 +30,8 @@ from wp6_data.red.dli.diagnostics import (
     align_weather_outdoor_hourly,
     analyze_reporting_frequency,
     calculate_correlation_comparison,
+    derive_daily_lamp_profile,
+    subtract_lamp_from_sensor,
 )
 from wp6_data.red.dli.model import (
     LightCorrelationModel,
@@ -79,6 +81,8 @@ __all__ = [
     "align_weather_outdoor_hourly",
     "analyze_reporting_frequency",
     "calculate_correlation_comparison",
+    "derive_daily_lamp_profile",
+    "subtract_lamp_from_sensor",
     # Model classes and functions
     "get_model",
     "LightCorrelationModel",

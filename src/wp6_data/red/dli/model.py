@@ -11,6 +11,7 @@ Trained on daily aggregates for better correlation (0.9+) vs hourly (0.7).
 Uses Ridge regression to handle correlated features.
 """
 
+import contextlib
 import os
 import pickle
 from dataclasses import dataclass, field
@@ -62,6 +63,8 @@ class ModelStats:
     indoor_sensor: str = "s2100-01-par"
     aggregation: str = "daily"
     model_version: int = 5
+    attenuation_factor: float = 1.0
+    attenuation_samples: int = 0
 
     @property
     def r2_score(self) -> float:
@@ -108,6 +111,8 @@ class TwoStageLightModel:
         self.stage2_poly = None
         self.stage1_scaler = None
         self.stage2_scaler = None
+        # Attenuation: above-lamp → plant-level conversion factor
+        self.attenuation_factor: float = 1.0
 
     def is_trained(self) -> bool:
         """Check if both stages are trained."""
@@ -124,6 +129,8 @@ class TwoStageLightModel:
         indoor_df: pd.DataFrame,
         outdoor_sensor: str = "s1000",
         indoor_sensor: str = "s2100-01-par",
+        plant_level_df: pd.DataFrame | None = None,
+        above_lamp_df: pd.DataFrame | None = None,
     ) -> ModelStats:
         """Train both stages on daily aggregated data.
 
@@ -132,6 +139,9 @@ class TwoStageLightModel:
                        Optionally: diffuse_radiation for better accuracy
             outdoor_df: s1000 weather station with columns: time, lux
             indoor_df: PAR sensor with columns: time, value (or par)
+                       (now s2100-01-par, the above-lamp sensor)
+            plant_level_df: Optional s2100-02-par readings for attenuation computation
+            above_lamp_df: Optional s2100-01-par readings for attenuation computation
 
         Returns:
             ModelStats with both stage statistics
@@ -234,6 +244,16 @@ class TwoStageLightModel:
         self.stage1_features = available_s1_features
         self.stage2_features = available_s2_features
 
+        # Compute attenuation factor (above-lamp → plant-level)
+        attenuation_factor = 1.0
+        attenuation_samples = 0
+        if plant_level_df is not None and above_lamp_df is not None:
+            with contextlib.suppress(Exception):
+                attenuation_factor, attenuation_samples = self._compute_attenuation(
+                    above_lamp_df, plant_level_df
+                )
+        self.attenuation_factor = attenuation_factor
+
         # Date range
         all_dates = list(stage1_data["date"]) + list(stage2_data["date"])
         date_range = (min(all_dates), max(all_dates)) if all_dates else (None, None)
@@ -246,7 +266,9 @@ class TwoStageLightModel:
             outdoor_sensor=outdoor_sensor,
             indoor_sensor=indoor_sensor,
             aggregation="daily",
-            model_version=5,
+            model_version=7,
+            attenuation_factor=round(attenuation_factor, 4),
+            attenuation_samples=attenuation_samples,
         )
 
         return self.stats
@@ -266,6 +288,49 @@ class TwoStageLightModel:
     ) -> pd.DataFrame:
         """Align and aggregate s1000 + indoor PAR data to daily totals."""
         return align_outdoor_to_indoor_daily(outdoor_df, indoor_df)
+
+    def _compute_attenuation(
+        self, above_lamp_df: pd.DataFrame, plant_level_df: pd.DataFrame
+    ) -> tuple[float, int]:
+        """Compute attenuation factor from lamp-corrected s2100-02/s2100-01 daily ratio.
+
+        Returns:
+            Tuple of (median_ratio, n_days_used)
+        """
+        from wp6_data.red.dli.diagnostics import (
+            derive_daily_lamp_profile,
+            subtract_lamp_from_sensor,
+        )
+
+        # Lamp-correct the plant-level sensor
+        lamp_profile = derive_daily_lamp_profile(above_lamp_df, plant_level_df)
+        corrected_plant = subtract_lamp_from_sensor(plant_level_df, lamp_profile)
+
+        # Aggregate both to daily sums
+        above = above_lamp_df.copy()
+        above["time"] = pd.to_datetime(above["time"], utc=True)
+        above["date"] = above["time"].dt.date
+        above_daily = above.groupby("date")["value"].sum().reset_index()
+        above_daily.columns = ["date", "above_sum"]
+
+        corrected = corrected_plant.copy()
+        corrected["time"] = pd.to_datetime(corrected["time"], utc=True)
+        corrected["date"] = corrected["time"].dt.date
+        plant_daily = corrected.groupby("date")["value"].sum().reset_index()
+        plant_daily.columns = ["date", "plant_sum"]
+
+        # Merge and compute per-day ratio
+        merged = above_daily.merge(plant_daily, on="date", how="inner")
+        # Filter out days with negligible light
+        merged = merged[(merged["above_sum"] > 100) & (merged["plant_sum"] > 0)]
+
+        if merged.empty:
+            return 1.0, 0
+
+        merged["ratio"] = merged["plant_sum"] / merged["above_sum"]
+        median_ratio = float(merged["ratio"].median())
+
+        return median_ratio, len(merged)
 
     def predict_daily(
         self,
@@ -330,6 +395,9 @@ class TwoStageLightModel:
 
         predicted_par_sum = self.stage2_model.predict(X2)[0]
 
+        # Apply attenuation to convert above-lamp prediction to plant-level estimate
+        predicted_par_sum *= self.attenuation_factor
+
         return max(0.0, round(predicted_par_sum, 1))
 
     def predict_dli(
@@ -387,7 +455,8 @@ class TwoStageLightModel:
             "stage1_features": self.stage1_features,
             "stage2_features": self.stage2_features,
             "stats": self.stats,
-            "version": 6,  # Polynomial features + RidgeCV version
+            "attenuation_factor": self.attenuation_factor,
+            "version": 7,
         }
 
         with open(path, "wb") as f:
@@ -435,6 +504,12 @@ class TwoStageLightModel:
             self.stage1_poly = None
             self.stage2_poly = None
 
+        # Load attenuation factor (v7+), env var override for simulation
+        self.attenuation_factor = data.get("attenuation_factor", 1.0)
+        override = os.getenv("WP6_RED_DLI_ATTENUATION_OVERRIDE")
+        if override:
+            self.attenuation_factor = float(override)
+
         return self.stats
 
 
@@ -455,5 +530,3 @@ def get_model() -> TwoStageLightModel:
         _model.load()
 
     return _model
-
-
