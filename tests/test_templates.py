@@ -87,8 +87,8 @@ class TestRenderDateFilter:
         mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
         start = today - timedelta(days=7)
         html = render_date_filter(start, today)
-        # 7d button should have active style (blue background)
-        assert 'background: #0066cc; color: white;" onclick="setRange(7)">7d</button>' in html
+        # 7d button should have active style (contrast class)
+        assert 'class="contrast" onclick="setRange(7)">7d</button>' in html
 
     @patch("wp6_data.shared.templates.date")
     def test_active_preset_all(self, mock_date):
@@ -96,7 +96,7 @@ class TestRenderDateFilter:
         mock_date.today.return_value = today
         mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
         html = render_date_filter(date(2024, 1, 1), today)
-        assert 'background: #0066cc; color: white;" onclick="setRange(null)">All</button>' in html
+        assert 'class="contrast" onclick="setRange(null)">All</button>' in html
 
     @patch("wp6_data.shared.templates.date")
     def test_no_active_preset_for_custom_range(self, mock_date):
@@ -104,8 +104,8 @@ class TestRenderDateFilter:
         mock_date.today.return_value = today
         mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
         html = render_date_filter(date(2026, 2, 1), date(2026, 2, 15))
-        # No button should have the active style
-        assert html.count("background: #0066cc") == 0
+        # No button should have the active (contrast) class
+        assert 'class="contrast"' not in html
 
     def test_extra_params_rendered_as_hidden_fields(self):
         html = render_date_filter(
@@ -160,9 +160,9 @@ class TestRenderPage:
         html = render_page("T", "content", extra_css=".custom { color: red; }")
         assert ".custom { color: red; }" in html
 
-    def test_base_css_always_included(self):
+    def test_pico_css_always_included(self):
         html = render_page("T", "content")
-        assert "font-family:" in html
+        assert "pico.classless.min.css" in html
 
 
 SAMPLE_DEVICE_DATA = {

@@ -43,21 +43,12 @@ def render_date_filter(start: date, end: date, extra_params: dict[str, str] | No
         elif start == today - timedelta(days=days) and end == today:
             active = label
 
-    btn_style = (
-        "padding: 4px 12px; cursor: pointer; border: 1px solid #ccc;"
-        " border-radius: 4px; background: #f5f5f5;"
-    )
-    active_style = (
-        "padding: 4px 12px; cursor: pointer; border: 1px solid #0066cc;"
-        " border-radius: 4px; background: #0066cc; color: white;"
-    )
-
     buttons = []
     for label, days in presets:
-        style = active_style if label == active else btn_style
+        cls = "contrast" if label == active else "outline"
         js_days = "null" if days is None else str(days)
         buttons.append(
-            f'<button type="button" style="{style}" onclick="setRange({js_days})">'
+            f'<button type="button" class="{cls}" onclick="setRange({js_days})">'
             f"{label}</button>"
         )
 
@@ -68,19 +59,21 @@ def render_date_filter(start: date, end: date, extra_params: dict[str, str] | No
         )
 
     return f"""
-    <form id="dateFilter" method="get" style="margin-bottom: 16px;">
+    <article class="date-filter">
+    <form id="dateFilter" method="get">
         {hidden_fields}
-        <div style="display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap;">
+        <div class="date-presets">
             {''.join(buttons)}
         </div>
-        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <div class="date-inputs">
             <label>From <input type="date" id="df-start" name="start"
                    value="{start.isoformat()}"></label>
             <label>To <input type="date" id="df-end" name="end"
                    value="{end.isoformat()}"></label>
-            <button type="submit" style="{btn_style}">Apply</button>
+            <button type="submit" class="outline">Apply</button>
         </div>
     </form>
+    </article>
     <script>
     function setRange(days) {{
         var end = new Date();
@@ -119,35 +112,30 @@ def render_compare_form(
         none_option = '<option value="">— None —</option>' if optional else ""
         device_options = "".join(f'<option value="{d}">{d}</option>' for d in device_ids)
         return f"""
-        <fieldset style="border:1px solid #ccc; padding:16px; border-radius:6px;">
+        <fieldset>
             <legend><strong>{label}</strong></legend>
-            <label>Device
-                <select name="{prefix}_device" id="{prefix}_device"
-                        onchange="updateMeasurements('{prefix}')"
-                        style="padding:4px;">
-                    {none_option}{device_options}
-                </select>
-            </label>
-            <label style="margin-left:12px;">Measurement
-                <select name="{prefix}_measurement" id="{prefix}_measurement"
-                        style="padding:4px;">
-                </select>
-            </label>
+            <div class="compare-selects">
+                <label>Device
+                    <select name="{prefix}_device" id="{prefix}_device"
+                            onchange="updateMeasurements('{prefix}')">
+                        {none_option}{device_options}
+                    </select>
+                </label>
+                <label>Measurement
+                    <select name="{prefix}_measurement" id="{prefix}_measurement">
+                    </select>
+                </label>
+            </div>
         </fieldset>
         """
 
-    btn_style = (
-        "padding:8px 24px; background:#0066cc; color:white;"
-        " border:none; border-radius:4px; cursor:pointer; font-size:1em;"
-    )
-
     return f"""
         <form method="get" action="{action_url}">
-            <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
+            <div class="compare-axes">
                 {_select_html("left", "Left Y-axis")}
                 {_select_html("right", "Right Y-axis", optional=True)}
             </div>
-            <button type="submit" style="{btn_style}">Generate Chart</button>
+            <button type="submit">Generate Chart</button>
         </form>
         <script>
         var deviceData = {device_data_json};
@@ -169,15 +157,39 @@ def render_compare_form(
 
 
 BASE_CSS = """
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 40px; }
-    h1 { color: #333; }
-    ul { line-height: 1.8; }
-    a { color: #0066cc; text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    :root {
+        --pico-font-size: 93.75%;
+        --pico-block-spacing-vertical: 0.5rem;
+        --pico-block-spacing-horizontal: 0.5rem;
+        --pico-form-element-spacing-vertical: 0.4rem;
+        --pico-form-element-spacing-horizontal: 0.6rem;
+        --pico-typography-spacing-vertical: 0.75rem;
+    }
+    h1 { --pico-typography-spacing-vertical: 1rem; }
+    article { padding: 1rem; }
+    .date-filter { padding: 0.75rem 1rem; }
+    .date-filter form { margin-bottom: 0; }
+    .date-presets { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+    .date-presets button { width: auto; padding: 0.25rem 0.75rem; margin-bottom: 0; }
+    .date-inputs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .date-inputs label { margin-bottom: 0; }
+    .date-inputs button { width: auto; padding: 0.25rem 0.75rem; margin-bottom: 0; }
+    .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
+    .stats-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+    .stats-grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
+    .stats-grid.cols-auto { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+    .stats-grid article { text-align: center; margin-bottom: 0; }
+    .stat-value { font-size: 1.5em; font-weight: bold; color: #0066cc; }
+    .success { color: green !important; }
+    .warning { color: #cc6600 !important; }
+    .compare-axes { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+    .compare-selects { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .compare-selects label { margin-bottom: 0; }
+    .back { margin-bottom: 20px; }
     .logo { margin-bottom: 20px; }
     .logo img { max-height: 80px; }
-    .back { margin-bottom: 20px; }
     footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; }
+    .footer-logo { max-height: 60px; }
 """
 
 
@@ -218,27 +230,31 @@ def render_page(
     )
 
     footer_html = (
-        '<footer><img src="/static/interreg.png" alt="Interreg" style="max-height: 60px;"></footer>'
+        '<footer><img src="/static/interreg.png" alt="Interreg" class="footer-logo"></footer>'
         if show_footer
         else ""
     )
 
     return f"""
     <!DOCTYPE html>
-    <html>
+    <html data-theme="light">
     <head>
         <title>{title}</title>
         <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+        <link rel="stylesheet"
+              href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css">
         <style>
             {BASE_CSS}
             {extra_css}
         </style>
     </head>
     <body>
-        {logo_html}
-        {back_html}
-        {content}
-        {footer_html}
+        <main>
+            {logo_html}
+            {back_html}
+            {content}
+            {footer_html}
+        </main>
     </body>
     </html>
     """

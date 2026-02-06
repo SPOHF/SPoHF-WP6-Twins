@@ -156,7 +156,7 @@ def verify_admin_auth(user: str = Depends(verify_auth)) -> str:
 def _export_info_html(export_meta: dict | None) -> str:
     """Generate HTML snippet showing export metadata."""
     if not export_meta:
-        return '<p style="color:#999; font-size:0.9em;">CSV exports not yet available.</p>'
+        return "<small>CSV exports not yet available.</small>"
     return ""
 
 
@@ -187,10 +187,10 @@ async def home(user: str = Depends(verify_auth)) -> str:
             export_ts = available_exports[table][:16].replace("T", " ")  # Date + time
             download_link = (
                 f'<a href="/download/{table}" title="Download CSV">CSV</a> '
-                f'<span style="color:#999; font-size:0.85em;">({export_ts})</span>'
+                f"<small>({export_ts})</small>"
             )
         else:
-            download_link = '<span style="color:#999;">-</span>'
+            download_link = "-"
         sensor_rows.append(
             f'<tr>'
             f'<td><a href="/table/{table}">{table}</a></td>'
@@ -249,45 +249,37 @@ async def home(user: str = Depends(verify_auth)) -> str:
     """
 
     extra_css = """
-        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-        th { background-color: #f5f5f5; }
-        tr:hover { background-color: #f9f9f9; }
         .user-info { float: right; color: #666; font-size: 0.9em; }
-        .section { margin-top: 40px; }
     """
 
     content = f"""
         <div class="user-info">Logged in as: {user}</div>
         <h1>WP6 Red - Sensor Dashboard</h1>
 
-        <div class="section">
+        <article>
             <h2>Light Analysis (DLI)</h2>
-            <p>Daily Light Integral analysis and optimization tools:</p>
-            <ul>
-                <li><a href="/dli">DLI Dashboard</a> - Overview and navigation</li>
-                <li><a href="/dli/chart">Historical DLI</a> - Daily DLI bar chart</li>
-                <li><a href="/dli/schedule">Schedule Analysis</a> - Predict plant light</li>
-            </ul>
-        </div>
+            <p>Daily Light Integral analysis and optimization tools.</p>
+            <a href="/dli" role="button">DLI Dashboard</a>
+        </article>
 
-        <div class="section">
+        <article>
             <h2>Custom Compare</h2>
-            <p><a href="/compare">Create a custom dual-axis chart</a>
+            <p>Create a custom dual-axis chart
             by selecting two sensor/measurement combinations.</p>
-        </div>
+            <a href="/compare" role="button">Compare</a>
+        </article>
 
-        <div class="section">
+        <article>
             <h2>Compare by Measurement Type</h2>
             <p>View all sensors measuring the same thing:</p>
             {measurement_html}
-        </div>
+        </article>
 
-        <div class="section">
+        <article>
             <h2>Browse by Sensor Type</h2>
             {table_html}
             {_export_info_html(export_meta)}
-        </div>
+        </article>
     """
 
     return render_page("WP6 Red - Sensor Dashboard", content, extra_css=extra_css)
@@ -338,7 +330,7 @@ async def measurement_view(
     fig = make_line_chart(df, title=f"{measurement} - All Sensors ({', '.join(tables)})")
     chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
 
-    stats_html = f'<p style="color: #666; font-size: 0.9em;">{len(df):,} data points</p>'
+    stats_html = f"<small>{len(df):,} data points</small>"
 
     return render_page(
         f"{measurement} - WP6 Red",
@@ -416,7 +408,7 @@ async def chart_all(
     fig = make_line_chart(df, title=f"{table} - All Devices")
     chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
 
-    stats_html = f'<p style="color: #666; font-size: 0.9em;">{len(df):,} data points</p>'
+    stats_html = f"<small>{len(df):,} data points</small>"
 
     return render_page(
         f"{table} - WP6 Red",
@@ -474,7 +466,7 @@ async def chart_device(
 
     chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
 
-    stats_html = f'<p style="color: #666; font-size: 0.9em;">{len(df):,} data points</p>'
+    stats_html = f"<small>{len(df):,} data points</small>"
 
     return render_page(
         f"{device_id} - WP6 Red",
@@ -495,10 +487,6 @@ async def compare_form(user: str = Depends(verify_auth)) -> str:
     devices = await db.get_all_devices()
     device_data = {did: info["measurements"] for did, info in devices.items()}
 
-    extra_css = """
-        fieldset { display: inline-block; margin-right: 16px; margin-bottom: 12px; }
-    """
-
     form_html = render_compare_form(device_data, action_url="/compare/chart")
     content = f"""
         <h1>Custom Compare</h1>
@@ -506,8 +494,7 @@ async def compare_form(user: str = Depends(verify_auth)) -> str:
         {form_html}
     """
 
-    return render_page("Custom Compare - WP6 Red", content, extra_css=extra_css,
-                       show_back_link=True)
+    return render_page("Custom Compare - WP6 Red", content, show_back_link=True)
 
 
 @app.get("/compare/chart", response_class=HTMLResponse)
@@ -572,7 +559,7 @@ async def compare_chart(
         fig = make_line_chart(df, title=left_label)
     chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
 
-    stats_html = f'<p style="color:#666; font-size:0.9em;">{len(df):,} data points</p>'
+    stats_html = f"<small>{len(df):,} data points</small>"
 
     return render_page(
         "Compare - WP6 Red",
@@ -637,50 +624,43 @@ async def dli_home(user: str = Depends(verify_auth)) -> str:
         trained_date = model.stats.training_date.strftime("%Y-%m-%d")
         r2 = model.stats.r2_score
         model_status = f"""
-            <p style="color: green; margin: 0;">Trained: {trained_date}</p>
-            <p style="color: #666; margin: 5px 0 10px 0;">R² = {r2:.3f}</p>
+            <p class="success">Trained: {trained_date}</p>
+            <small>R² = {r2:.3f}</small>
         """
     else:
-        model_status = '<p style="color: #999; margin-bottom: 10px;">Not trained</p>'
+        model_status = "<small>Not trained</small>"
 
     if user_is_admin:
         model_card = f"""
-            <div class="card">
+            <article>
                 <h3>Prediction Model</h3>
                 <p>Train ML model to predict indoor PAR from weather data.</p>
                 {model_status}
                 <a href="/dli/model" class="btn">Manage Model</a>
-            </div>
+            </article>
         """
     else:
         model_card = f"""
-            <div class="card card-disabled">
+            <article class="card-disabled">
                 <h3>Prediction Model</h3>
                 <p>ML model to predict indoor PAR from weather data.</p>
                 {model_status}
                 <span class="btn-disabled">Admin only</span>
-            </div>
+            </article>
         """
 
     extra_css = """
-        .card { border: 1px solid #ddd; border-radius: 8px; padding: 20px;
-                margin-bottom: 20px; }
-        .card h3 { margin-top: 0; color: #333; }
-        .card p { color: #666; margin-bottom: 10px; }
-        .card-disabled { background: #f9f9f9; opacity: 0.8; }
-        .card-disabled h3 { color: #999; }
         .grid { display: grid; gap: 20px;
                 grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-        .btn { display: inline-block; padding: 8px 16px; background: #0066cc;
-               color: white; text-decoration: none; border-radius: 4px;
+        .grid article { margin-bottom: 0; }
+        .grid article h3 { margin-top: 0; }
+        .card-disabled { opacity: 0.6; }
+        .btn { display: inline-block; padding: 8px 16px; background: var(--pico-primary-background);
+               color: var(--pico-primary-inverse); text-decoration: none; border-radius: 4px;
                margin-right: 8px; }
-        .btn:hover { background: #0055aa; text-decoration: none; }
+        .btn:hover { opacity: 0.85; text-decoration: none; }
         .btn-disabled { display: inline-block; padding: 8px 16px; background: #ccc;
                        color: #666; border-radius: 4px; font-size: 0.9em; }
-        .stats { display: flex; gap: 40px; margin: 20px 0; }
-        .stat { text-align: center; }
-        .stat-value { font-size: 2em; font-weight: bold; color: #0066cc; }
-        .stat-label { font-size: 0.9em; color: #666; }
     """
 
     content = f"""
@@ -688,17 +668,17 @@ async def dli_home(user: str = Depends(verify_auth)) -> str:
         <p>Daily Light Integral analysis for PAR sensors.</p>
 
         <div class="grid">
-            <div class="card">
+            <article>
                 <h3>Historical DLI</h3>
                 <p>Compare natural light vs total light (with lamps) over time.</p>
                 <a href="/dli/chart" class="btn">View Chart</a>
-            </div>
+            </article>
 
-            <div class="card">
+            <article>
                 <h3>Schedule Analysis</h3>
                 <p>Predict plant light based on schedule and weather data.</p>
                 <a href="/dli/schedule" class="btn">Analyze Schedule</a>
-            </div>
+            </article>
 
             {model_card}
         </div>
@@ -831,36 +811,28 @@ async def dli_chart(
     hours_avg = chart_df["total_hours"].mean() if "total_hours" in chart_df else 0
 
     extra_css = """
-        .stats-row { display: flex; gap: 30px; margin: 20px 0; flex-wrap: wrap; }
-        .stat-box { padding: 15px 20px; background: #f8f9fa; border-radius: 8px;
-                   text-align: center; min-width: 120px; }
-        .stat-box .value { font-size: 1.4em; font-weight: bold; color: #2c3e50; }
-        .stat-box .label { font-size: 0.85em; color: #7f8c8d; margin-top: 4px; }
         .chart-section { margin-bottom: 30px; }
-        table { border-collapse: collapse; width: 100%; margin-top: 10px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
-        th { background-color: #f5f5f5; }
-        tr:hover { background-color: #f9f9f9; }
+        td, th { text-align: center; }
     """
 
     stats_html = f"""
-        <div class="stats-row">
-            <div class="stat-box">
-                <div class="value">{total_avg:.1f}</div>
-                <div class="label">Avg Total DLI</div>
-            </div>
-            <div class="stat-box">
-                <div class="value">{natural_avg:.1f}</div>
-                <div class="label">Avg Natural DLI</div>
-            </div>
-            <div class="stat-box">
-                <div class="value">{hours_avg:.1f}h</div>
-                <div class="label">Avg Photoperiod</div>
-            </div>
-            <div class="stat-box">
-                <div class="value">{days_count}</div>
-                <div class="label">Days</div>
-            </div>
+        <div class="stats-grid cols-4">
+            <article>
+                <div class="stat-value">{total_avg:.1f}</div>
+                <small>Avg Total DLI</small>
+            </article>
+            <article>
+                <div class="stat-value">{natural_avg:.1f}</div>
+                <small>Avg Natural DLI</small>
+            </article>
+            <article>
+                <div class="stat-value">{hours_avg:.1f}h</div>
+                <small>Avg Photoperiod</small>
+            </article>
+            <article>
+                <div class="stat-value">{days_count}</div>
+                <small>Days</small>
+            </article>
         </div>
     """
 
@@ -890,11 +862,8 @@ async def dli_chart(
         """)
 
     table_html = f"""
-        <details style="margin-top: 20px;">
-            <summary style="cursor: pointer; font-weight: bold; padding: 10px;
-                          background: #f5f5f5; border-radius: 4px;">
-                View Data Table
-            </summary>
+        <details>
+            <summary>View Data Table</summary>
             <table>
                 <thead>
                     <tr>
@@ -1177,52 +1146,47 @@ async def dli_schedule(
         return ""
 
     extra_css = """
-        .controls { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 20px;
-                   padding: 15px; background: #f5f5f5; border-radius: 8px; }
-        .control-group { display: flex; align-items: center; gap: 8px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr);
-                     gap: 15px; margin: 20px 0; }
-        .stat-box { padding: 15px; background: #f9f9f9; border-radius: 8px; text-align: center; }
-        .stat-box .value { font-size: 1.5em; font-weight: bold; color: #0066cc; }
-        .stat-box .value .unit { font-size: 0.5em; font-weight: normal; color: #999; }
-        .stat-box .label { font-size: 0.85em; color: #666; }
-        .stat-box .sublabel { font-size: 0.75em; color: #999; }
+        .schedule-controls { padding: 0.75rem 1rem; }
+        .schedule-controls form { display: flex; gap: 1rem; align-items: end;
+                                  flex-wrap: wrap; margin-bottom: 0; }
+        .schedule-controls label { margin-bottom: 0; }
+        .stat-value .unit { font-size: 0.5em; font-weight: normal; color: #999; }
     """
 
     controls_html = f"""
-        <form method="get" class="controls">
-            <div class="control-group">
-                <label>Start:</label>
-                <input type="date" name="start_date" value="{start_date}"
-                       onchange="this.form.submit()">
-            </div>
-            <div class="control-group">
-                <label>End:</label>
-                <input type="date" name="end_date" value="{end_date}"
-                       onchange="this.form.submit()">
-            </div>
-        </form>
+        <article class="schedule-controls">
+            <form method="get">
+                <label>Start
+                    <input type="date" name="start_date" value="{start_date}"
+                           onchange="this.form.submit()">
+                </label>
+                <label>End
+                    <input type="date" name="end_date" value="{end_date}"
+                           onchange="this.form.submit()">
+                </label>
+            </form>
+        </article>
     """
 
     stats_html = f"""
         <div class="stats-grid">
-            <div class="stat-box">
-                <div class="value">{format_card_value(yesterday_vals)}</div>
-                <div class="label">Yesterday</div>
-                <div class="sublabel">{format_card_sublabel(yesterday_vals)}</div>
-            </div>
-            <div class="stat-box">
-                <div class="value">{format_card_value(today_vals, use_estimated=True)}</div>
-                <div class="label">Today</div>
-                <div class="sublabel">{format_card_sublabel(today_vals)}</div>
-            </div>
-            <div class="stat-box">
-                <div class="value">{format_card_value(tomorrow_vals)}</div>
-                <div class="label">Tomorrow</div>
-                <div class="sublabel">{format_card_sublabel(tomorrow_vals)}</div>
-            </div>
+            <article>
+                <div class="stat-value">{format_card_value(yesterday_vals)}</div>
+                <small>Yesterday</small><br>
+                <small>{format_card_sublabel(yesterday_vals)}</small>
+            </article>
+            <article>
+                <div class="stat-value">{format_card_value(today_vals, use_estimated=True)}</div>
+                <small>Today</small><br>
+                <small>{format_card_sublabel(today_vals)}</small>
+            </article>
+            <article>
+                <div class="stat-value">{format_card_value(tomorrow_vals)}</div>
+                <small>Tomorrow</small><br>
+                <small>{format_card_sublabel(tomorrow_vals)}</small>
+            </article>
         </div>
-        <p style="color: #999; font-size: 0.8em; margin-top: -10px;">* predicted ~ estimated</p>
+        <small>* predicted ~ estimated</small>
     """
 
     content = f"""
@@ -1230,11 +1194,11 @@ async def dli_schedule(
         {controls_html}
         {stats_html}
         {chart_html}
-        <p style="color: #666; font-size: 0.9em; margin-top: 10px;">
+        <small>
             A/P/N = Actual / Predicted / Natural DLI values per day.<br/>
             Natural light predictions are based on the current ML model.<br/>
-            Total predicted is yesterday's inferred lamp schedule + natural light.<br/>
-        </p>
+            Total predicted is yesterday's inferred lamp schedule + natural light.
+        </small>
     """
 
     return render_page(
@@ -1249,27 +1213,6 @@ async def dli_schedule(
 async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
     """View model status and training options."""
     model = get_model()
-
-    extra_css = """
-        .model-card { border: 1px solid #ddd; border-radius: 8px; padding: 20px;
-                     margin-bottom: 20px; }
-        .model-card h3 { margin-top: 0; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-                     gap: 15px; margin: 15px 0; }
-        .stat { padding: 10px; background: #f5f5f5; border-radius: 4px; text-align: center; }
-        .stat .value { font-size: 1.3em; font-weight: bold; color: #0066cc; }
-        .stat .label { font-size: 0.85em; color: #666; }
-        .coef-table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-        .coef-table th, .coef-table td { padding: 8px; text-align: left;
-                                         border-bottom: 1px solid #eee; }
-        .btn { display: inline-block; padding: 10px 20px; background: #0066cc;
-               color: white; text-decoration: none; border-radius: 4px; border: none;
-               cursor: pointer; font-size: 1em; }
-        .btn:hover { background: #0055aa; }
-        .btn-secondary { background: #666; }
-        .warning { color: #cc6600; }
-        .success { color: green; }
-    """
 
     if model.is_trained() and model.stats:
         stats = model.stats
@@ -1294,40 +1237,39 @@ async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
         model_type = "Ridge regression" if model_version >= 5 else "Linear regression"
 
         status_html = f"""
-            <div class="model-card">
+            <article>
                 <h3 class="success">Two-Stage Model Trained (Daily)</h3>
                 <p>OpenMeteo weather → s1000 daily lux → indoor PAR ({model_type})</p>
 
-                <div class="stats-grid">
-                    <div class="stat">
-                        <div class="value">{stats.r2_score:.3f}</div>
-                        <div class="label">Combined R²</div>
-                    </div>
-                    <div class="stat">
-                        <div class="value">{s1.r2_score:.3f}</div>
-                        <div class="label">Stage 1 R²</div>
-                    </div>
-                    <div class="stat">
-                        <div class="value">{s2.r2_score:.3f}</div>
-                        <div class="label">Stage 2 R²</div>
-                    </div>
-                    <div class="stat">
-                        <div class="value">{stats.n_samples:,}</div>
-                        <div class="label">Days</div>
-                    </div>
-                    <div class="stat">
-                        <div class="value">{getattr(stats, 'attenuation_factor', 1.0):.3f}</div>
-                        <div class="label">Attenuation</div>
-                    </div>
+                <div class="stats-grid cols-5">
+                    <article>
+                        <div class="stat-value">{stats.r2_score:.3f}</div>
+                        <small>Combined R²</small>
+                    </article>
+                    <article>
+                        <div class="stat-value">{s1.r2_score:.3f}</div>
+                        <small>Stage 1 R²</small>
+                    </article>
+                    <article>
+                        <div class="stat-value">{s2.r2_score:.3f}</div>
+                        <small>Stage 2 R²</small>
+                    </article>
+                    <article>
+                        <div class="stat-value">{stats.n_samples:,}</div>
+                        <small>Days</small>
+                    </article>
+                    <article>
+                        <div class="stat-value">\
+{getattr(stats, 'attenuation_factor', 1.0):.3f}</div>
+                        <small>Attenuation</small>
+                    </article>
                 </div>
 
                 <h4>Stage 1: Weather API → Local Lux (Daily)</h4>
                 <p>Calibrates OpenMeteo weather to s1000 daily lux sum
                    (R²={s1.r2_score:.3f}, RMSE={s1.rmse:.0f} lux/day)</p>
-                <p style="color: #666; font-size: 0.85em;">
-                    Features: {', '.join(s1_features)}
-                </p>
-                <table class="coef-table">
+                <small>Features: {', '.join(s1_features)}</small>
+                <table>
                     <tr><th>Feature</th><th>Coefficient</th></tr>
                     <tr><td>Intercept</td><td>{s1.intercept:+.4f}</td></tr>
                     {s1_coef_rows}
@@ -1336,16 +1278,14 @@ async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
                 <h4>Stage 2: Outdoor Lux → Indoor PAR (Daily)</h4>
                 <p>Greenhouse transmission model for daily totals
                    (R²={s2.r2_score:.3f}, RMSE={s2.rmse:.1f} μmol/m²/day)</p>
-                <p style="color: #666; font-size: 0.85em;">
-                    Features: {', '.join(s2_features)}
-                </p>
-                <table class="coef-table">
+                <small>Features: {', '.join(s2_features)}</small>
+                <table>
                     <tr><th>Feature</th><th>Coefficient</th></tr>
                     <tr><td>Intercept</td><td>{s2.intercept:+.4f}</td></tr>
                     {s2_coef_rows}
                 </table>
 
-                <p style="color: #666; font-size: 0.9em;">
+                <small>
                     Outdoor sensor: <strong>{stats.outdoor_sensor}</strong><br>
                     Indoor sensor: <strong>{stats.indoor_sensor}</strong><br>
                     Attenuation: <strong>{getattr(stats, 'attenuation_factor', 1.0):.4f}</strong>
@@ -1353,12 +1293,12 @@ async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
                     Trained: {stats.training_date.strftime('%Y-%m-%d %H:%M')} UTC<br>
                     Data range: {stats.date_range[0]} to {stats.date_range[1]}<br>
                     Model version: v{model_version}
-                </p>
-            </div>
+                </small>
+            </article>
         """
     else:
         status_html = """
-            <div class="model-card">
+            <article>
                 <h3 class="warning">No Model Trained</h3>
                 <p>The two-stage PAR prediction model has not been trained yet.</p>
                 <p>Training requires:</p>
@@ -1366,11 +1306,11 @@ async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
                     <li><strong>Stage 1</strong>: OpenMeteo weather data + s1000 lux readings</li>
                     <li><strong>Stage 2</strong>: s1000 lux + s2100-01-par indoor readings</li>
                 </ul>
-            </div>
+            </article>
         """
 
     train_form = """
-        <div class="model-card">
+        <article>
             <h3>Train Model</h3>
             <p>Trains a two-stage model:</p>
             <ol>
@@ -1378,12 +1318,12 @@ async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
                 <li><strong>Stage 2</strong>: s1000 lux → indoor PAR (greenhouse transmission)</li>
             </ol>
             <form method="post" action="/dli/model/train">
-                <button type="submit" class="btn">Train Model</button>
+                <button type="submit">Train Model</button>
             </form>
-            <p style="color: #666; font-size: 0.9em; margin-top: 10px;">
+            <small>
                 Uses all data from s1000 and s2100-01-par since 2025-10-24.
-            </p>
-        </div>
+            </small>
+        </article>
     """
 
     content = f"""
@@ -1391,7 +1331,7 @@ async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
         <p>Two-stage ML model: OpenMeteo forecast → local calibration → indoor PAR prediction.</p>
         {status_html}
         {train_form}
-        <p style="margin-top: 20px;">
+        <p>
             <a href="/dli/model/diagnostic">View training diagnostic</a> -
             investigate data alignment and correlation issues.
         </p>
@@ -1400,7 +1340,6 @@ async def dli_model_status(user: str = Depends(verify_admin_auth)) -> str:
     return render_page(
         "Light Model - WP6 Red",
         content,
-        extra_css=extra_css,
         show_back_link=True, back_url="/dli",
     )
 
@@ -1520,41 +1459,37 @@ async def dli_model_train(user: str = Depends(verify_admin_auth)) -> str:
     extra_css = """
         .success-card { border: 2px solid green; border-radius: 8px; padding: 20px;
                        background: #f0fff0; }
-        .stats { display: flex; gap: 30px; margin: 20px 0; }
-        .stat { text-align: center; }
-        .stat .value { font-size: 1.5em; font-weight: bold; color: #0066cc; }
-        .stat .label { font-size: 0.9em; color: #666; }
     """
 
     content = f"""
         <div class="success-card">
             <h1>Two-Stage Model Trained (Daily)</h1>
-            <div class="stats">
-                <div class="stat">
-                    <div class="value">{stats.r2_score:.3f}</div>
-                    <div class="label">Combined R²</div>
-                </div>
-                <div class="stat">
-                    <div class="value">{stats.stage1.r2_score:.3f}</div>
-                    <div class="label">Stage 1 R²</div>
-                </div>
-                <div class="stat">
-                    <div class="value">{stats.stage2.r2_score:.3f}</div>
-                    <div class="label">Stage 2 R²</div>
-                </div>
-                <div class="stat">
-                    <div class="value">{stats.n_samples:,}</div>
-                    <div class="label">Days</div>
-                </div>
-                <div class="stat">
-                    <div class="value">{stats.attenuation_factor:.3f}</div>
-                    <div class="label">Attenuation</div>
-                </div>
+            <div class="stats-grid cols-5">
+                <article>
+                    <div class="stat-value">{stats.r2_score:.3f}</div>
+                    <small>Combined R²</small>
+                </article>
+                <article>
+                    <div class="stat-value">{stats.stage1.r2_score:.3f}</div>
+                    <small>Stage 1 R²</small>
+                </article>
+                <article>
+                    <div class="stat-value">{stats.stage2.r2_score:.3f}</div>
+                    <small>Stage 2 R²</small>
+                </article>
+                <article>
+                    <div class="stat-value">{stats.n_samples:,}</div>
+                    <small>Days</small>
+                </article>
+                <article>
+                    <div class="stat-value">{stats.attenuation_factor:.3f}</div>
+                    <small>Attenuation</small>
+                </article>
             </div>
             <p><strong>Stage 1</strong>: OpenMeteo daily direct_radiation → s1000 daily lux</p>
             <p><strong>Stage 2</strong>: s1000 daily lux → s2100-01-par (above-lamp)
                → ×{stats.attenuation_factor:.3f} → plant-level estimate</p>
-            <p style="margin-top: 15px;">
+            <p>
                 Model saved and will be used for PAR predictions.
                 <a href="/dli/model">View full model details</a>
             </p>
@@ -1702,18 +1637,18 @@ async def dli_model_diagnostic(
                     <p>Derived from {NATURAL_LIGHT_SENSOR} (above lamp) and
                        {TOTAL_LIGHT_SENSOR} (plant level)</p>
                     <div class="stats-grid">
-                        <div class="stat-box">
-                            <div class="value">{days_with_lamp}/{total_profile_days}</div>
-                            <div class="label">Days with lamp detected</div>
-                        </div>
-                        <div class="stat-box">
-                            <div class="value">{median_lamp_power:.0f}</div>
-                            <div class="label">Median lamp PAR (μmol/m²/s)</div>
-                        </div>
-                        <div class="stat-box">
-                            <div class="value">{avg_lamp_hours:.1f}h</div>
-                            <div class="label">Avg lamp schedule</div>
-                        </div>
+                        <article>
+                            <div class="stat-value">{days_with_lamp}/{total_profile_days}</div>
+                            <small>Days with lamp detected</small>
+                        </article>
+                        <article>
+                            <div class="stat-value">{median_lamp_power:.0f}</div>
+                            <small>Median lamp PAR (μmol/m²/s)</small>
+                        </article>
+                        <article>
+                            <div class="stat-value">{avg_lamp_hours:.1f}h</div>
+                            <small>Avg lamp schedule</small>
+                        </article>
                     </div>
                 </div>
             """)
@@ -1721,8 +1656,8 @@ async def dli_model_diagnostic(
             stage2_sections.append("""
                 <div class="diag-section">
                     <h3>Lamp Profile Summary</h3>
-                    <p style="color: #999;">No overlapping days between sensors
-                       for lamp profile derivation.</p>
+                    <small>No overlapping days between sensors
+                       for lamp profile derivation.</small>
                 </div>
             """)
 
@@ -1767,10 +1702,10 @@ async def dli_model_diagnostic(
                 r_roof = r_roof if pd.notna(r_roof) else 0.0
                 n_roof = len(above_lamp_stage)
                 corr_parts.append(f"""
-                    <div class="stat-box">
-                        <div class="value">{r_roof:.3f}</div>
-                        <div class="label">Stage 2: s1000 → s2100-01 (r) - {n_roof} days</div>
-                    </div>
+                    <article>
+                        <div class="stat-value">{r_roof:.3f}</div>
+                        <small>Stage 2: s1000 → s2100-01 (r) - {n_roof} days</small>
+                    </article>
                 """)
 
             # s2100-01-par → s2100-02-par (attenuation correlation)
@@ -1796,20 +1731,20 @@ async def dli_model_diagnostic(
                 r_int = r_int if pd.notna(r_int) else 0.0
                 n_int = len(internal_stage)
                 corr_parts.append(f"""
-                    <div class="stat-box">
-                        <div class="value">{r_int:.3f}</div>
-                        <div class="label">Attenuation: s2100-01 → s2100-02 (r) - {n_int} days</div>
-                    </div>
+                    <article>
+                        <div class="stat-value">{r_int:.3f}</div>
+                        <small>Attenuation: s2100-01 → s2100-02 (r) - {n_int} days</small>
+                    </article>
                 """)
 
             # Show stored model attenuation factor if available
             model = get_model()
             if model.stats and model.stats.attenuation_factor != 1.0:
                 corr_parts.append(f"""
-                    <div class="stat-box">
-                        <div class="value">{model.stats.attenuation_factor:.3f}</div>
-                        <div class="label">Model attenuation factor</div>
-                    </div>
+                    <article>
+                        <div class="stat-value">{model.stats.attenuation_factor:.3f}</div>
+                        <small>Model attenuation factor</small>
+                    </article>
                 """)
 
             if corr_parts:
@@ -1945,39 +1880,38 @@ async def dli_model_diagnostic(
                 model_factor_html = ""
                 if model.stats and model.stats.attenuation_factor != 1.0:
                     model_factor_html = f"""
-                        <div class="stat-box">
-                            <div class="value">{model.stats.attenuation_factor:.3f}</div>
-                            <div class="label">Model factor (stored)</div>
-                        </div>
+                        <article>
+                            <div class="stat-value">{model.stats.attenuation_factor:.3f}</div>
+                            <small>Model factor (stored)</small>
+                        </article>
                     """
 
                 stage2_sections.append(f"""
                     <div class="diag-section">
                         <h3>Attenuation: s2100-01 → Plant-Level</h3>
-                        <p style="color: #666;">Ratio of lamp-corrected plant-level to
+                        <small>Ratio of lamp-corrected plant-level to
                            above-lamp daily PAR (natural light only).
                            Rolling median shows seasonal trend.
                            Red crosses = days &gt;2&sigma; below local trend
-                           (likely plant occlusion).</p>
-                        <div class="stats-grid" style="grid-template-columns:
-                            repeat(auto-fit, minmax(150px, 1fr));">
-                            <div class="stat-box">
-                                <div class="value">{median_ratio:.3f}</div>
-                                <div class="label">Live median</div>
-                            </div>
+                           (likely plant occlusion).</small>
+                        <div class="stats-grid cols-auto">
+                            <article>
+                                <div class="stat-value">{median_ratio:.3f}</div>
+                                <small>Live median</small>
+                            </article>
                             {model_factor_html}
-                            <div class="stat-box">
-                                <div class="value">{min_ratio:.3f} – {max_ratio:.3f}</div>
-                                <div class="label">Range (all days)</div>
-                            </div>
-                            <div class="stat-box">
-                                <div class="value">{trend_label}</div>
-                                <div class="label">Rolling median range</div>
-                            </div>
-                            <div class="stat-box">
-                                <div class="value warning">{n_outliers}</div>
-                                <div class="label">Occlusion days ({clean_n} clean)</div>
-                            </div>
+                            <article>
+                                <div class="stat-value">{min_ratio:.3f} – {max_ratio:.3f}</div>
+                                <small>Range (all days)</small>
+                            </article>
+                            <article>
+                                <div class="stat-value">{trend_label}</div>
+                                <small>Rolling median range</small>
+                            </article>
+                            <article>
+                                <div class="stat-value warning">{n_outliers}</div>
+                                <small>Occlusion days ({clean_n} clean)</small>
+                            </article>
                         </div>
                         {ratio_chart_html}
                     </div>
@@ -1987,8 +1921,8 @@ async def dli_model_diagnostic(
         stage2_sections.append("""
             <div class="diag-section">
                 <h3>Stage 2 Data</h3>
-                <p style="color: #999;">Missing sensor data for Stage 2 diagnostics.
-                   Need both s2100-01-par and s2100-02-par readings.</p>
+                <small>Missing sensor data for Stage 2 diagnostics.
+                   Need both s2100-01-par and s2100-02-par readings.</small>
             </div>
         """)
 
@@ -1998,12 +1932,6 @@ async def dli_model_diagnostic(
         .diag-section { margin: 20px 0; padding: 15px; background: #f9f9f9;
                        border-radius: 8px; }
         .diag-section h3 { margin-top: 0; }
-        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
-        .stat-box { padding: 15px; background: white; border-radius: 4px; text-align: center; }
-        .stat-box .value { font-size: 1.5em; font-weight: bold; color: #0066cc; }
-        .stat-box .label { font-size: 0.85em; color: #666; }
-        .warning { color: #cc6600; }
-        .success { color: green; }
     """
 
     warn_class = "warning" if days_with_few > 10 else ""
@@ -2011,34 +1939,34 @@ async def dli_model_diagnostic(
 
     content = f"""
         <h1>Model Training Diagnostic</h1>
-        <p style="color: #666;">Using <strong>direct_radiation</strong> from OpenMeteo</p>
+        <small>Using <strong>direct_radiation</strong> from OpenMeteo</small>
 
         <div class="diag-section">
             <h3>Raw Data Counts</h3>
-            <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
-                <div class="stat-box">
-                    <div class="value">{indoor_count:,}</div>
-                    <div class="label">Above-lamp PAR ({NATURAL_LIGHT_SENSOR})</div>
-                </div>
-                <div class="stat-box">
-                    <div class="value">{plant_level_count:,}</div>
-                    <div class="label">Plant-level PAR ({TOTAL_LIGHT_SENSOR})</div>
-                </div>
-                <div class="stat-box">
-                    <div class="value">{outdoor_count:,}</div>
-                    <div class="label">s1000 readings</div>
-                </div>
-                <div class="stat-box">
-                    <div class="value">{weather_count:,}</div>
-                    <div class="label">OpenMeteo hours</div>
-                </div>
+            <div class="stats-grid cols-4">
+                <article>
+                    <div class="stat-value">{indoor_count:,}</div>
+                    <small>Above-lamp PAR ({NATURAL_LIGHT_SENSOR})</small>
+                </article>
+                <article>
+                    <div class="stat-value">{plant_level_count:,}</div>
+                    <small>Plant-level PAR ({TOTAL_LIGHT_SENSOR})</small>
+                </article>
+                <article>
+                    <div class="stat-value">{outdoor_count:,}</div>
+                    <small>s1000 readings</small>
+                </article>
+                <article>
+                    <div class="stat-value">{weather_count:,}</div>
+                    <small>OpenMeteo hours</small>
+                </article>
             </div>
-            <p style="margin-top: 10px; color: #666;">
+            <small>
                 Above-lamp: {indoor_range}<br>
                 Plant-level: {plant_level_range}<br>
                 Outdoor: {outdoor_range}<br>
                 Weather: {weather_range}
-            </p>
+            </small>
         </div>
 
         <div class="diag-section">
@@ -2050,18 +1978,18 @@ async def dli_model_diagnostic(
         <div class="diag-section">
             <h3>Stage 1: OpenMeteo → s1000 Correlation</h3>
             <div class="stats-grid">
-                <div class="stat-box">
-                    <div class="value">{corr:.3f}</div>
-                    <div class="label">Hourly (r) - {len(stage1_merged)} samples</div>
-                </div>
-                <div class="stat-box">
-                    <div class="value {daily_class}">{daily_corr:.3f}</div>
-                    <div class="label">Daily totals (r) - {daily_samples} days</div>
-                </div>
-                <div class="stat-box">
-                    <div class="value {warn_class}">{days_with_few}/{total_days}</div>
-                    <div class="label">Days with &lt;20 readings</div>
-                </div>
+                <article>
+                    <div class="stat-value">{corr:.3f}</div>
+                    <small>Hourly (r) - {len(stage1_merged)} samples</small>
+                </article>
+                <article>
+                    <div class="stat-value {daily_class}">{daily_corr:.3f}</div>
+                    <small>Daily totals (r) - {daily_samples} days</small>
+                </article>
+                <article>
+                    <div class="stat-value {warn_class}">{days_with_few}/{total_days}</div>
+                    <small>Days with &lt;20 readings</small>
+                </article>
             </div>
         </div>
 
@@ -2070,7 +1998,7 @@ async def dli_model_diagnostic(
             {scatter_html}
         </div>
 
-        <hr style="margin: 40px 0; border: none; border-top: 2px solid #ddd;">
+        <hr>
         <h2>Stage 2 &amp; Attenuation</h2>
         {stage2_html}
     """

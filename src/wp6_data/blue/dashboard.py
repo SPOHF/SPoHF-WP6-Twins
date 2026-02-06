@@ -246,7 +246,7 @@ async def sync_status() -> str:
         """)
 
     table = f"""
-        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse;">
+        <table>
             <thead>
                 <tr>
                     <th>Endpoint</th>
@@ -268,9 +268,7 @@ async def sync_status() -> str:
     content = f"""
         <h1>Sync Status</h1>
         {table}
-        <p style="margin-top: 20px;">
-            <a href="/metrics">View Prometheus metrics</a>
-        </p>
+        <p><a href="/metrics">View Prometheus metrics</a></p>
     """
 
     return render_page("Sync Status - WP6 Blue", content, show_back_link=True)
@@ -419,7 +417,7 @@ async def compare_chart(
         fig = make_line_chart(df, title=left_label)
     chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
 
-    stats_html = f'<p style="color:#666; font-size:0.9em;">{len(df):,} data points</p>'
+    stats_html = f"<small>{len(df):,} data points</small>"
 
     return render_page(
         "Compare - WP6 Blue",
