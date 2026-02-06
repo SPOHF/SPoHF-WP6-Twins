@@ -20,6 +20,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from wp6_data.red.dli.aggregation import (
+    add_day_of_year_features,
+    align_outdoor_to_indoor_daily,
+    align_weather_to_outdoor_daily,
+    encode_day_of_year,
+)
+
 
 def _default_model_path() -> Path:
     """Get default model path in user's home directory."""
@@ -108,13 +115,7 @@ class TwoStageLightModel:
 
     def _add_day_of_year_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add cyclical day-of-year features (sin/cos encoding)."""
-        df = df.copy()
-        # Convert date to day of year
-        day_of_year = pd.to_datetime(df["date"]).dt.dayofyear
-        # Cyclical encoding for day of year (handles year wrap-around)
-        df["day_of_year_sin"] = np.sin(2 * np.pi * day_of_year / 365)
-        df["day_of_year_cos"] = np.cos(2 * np.pi * day_of_year / 365)
-        return df
+        return add_day_of_year_features(df, date_col="date")
 
     def train(
         self,
@@ -258,109 +259,13 @@ class TwoStageLightModel:
         Handles both single-radiation (solar_radiation) and multi-radiation
         (direct_radiation, diffuse_radiation) weather data formats.
         """
-        weather = weather_df.copy()
-        outdoor = outdoor_df.copy()
-
-        weather["datetime"] = pd.to_datetime(weather["datetime"], utc=True)
-        outdoor["time"] = pd.to_datetime(outdoor["time"], utc=True)
-
-        # Extract date
-        weather["date"] = weather["datetime"].dt.date
-        outdoor["date"] = outdoor["time"].dt.date
-
-        # Build aggregation dict based on available columns
-        agg_dict = {}
-
-        # Handle radiation columns - prefer direct_radiation over solar_radiation
-        # (they may both exist with the same data, so only use one)
-        if "direct_radiation" in weather.columns:
-            agg_dict["direct_radiation"] = "sum"
-        elif "solar_radiation" in weather.columns:
-            agg_dict["solar_radiation"] = "sum"
-
-        if "diffuse_radiation" in weather.columns:
-            agg_dict["diffuse_radiation"] = "sum"
-        if "cloud_cover" in weather.columns:
-            agg_dict["cloud_cover"] = "mean"
-
-        if not agg_dict:
-            raise ValueError("No radiation columns found in weather data")
-
-        # Aggregate weather to daily
-        weather_daily = weather.groupby("date").agg(agg_dict).reset_index()
-
-        # Rename columns to standard names
-        rename_map = {
-            "solar_radiation": "direct_radiation_sum",
-            "direct_radiation": "direct_radiation_sum",
-            "diffuse_radiation": "diffuse_radiation_sum",
-            "cloud_cover": "cloud_cover_avg",
-        }
-        weather_daily = weather_daily.rename(columns=rename_map)
-
-        # Aggregate outdoor lux to daily
-        outdoor_daily = outdoor.groupby("date").agg({
-            "lux": "sum",
-        }).reset_index()
-        outdoor_daily.columns = ["date", "lux_sum"]
-
-        # Merge
-        merged = weather_daily.merge(outdoor_daily, on="date", how="inner")
-
-        if merged.empty:
-            return merged
-
-        # Filter valid days (some light recorded)
-        merged = merged[merged["lux_sum"] > 1000]  # At least some daylight
-        if "direct_radiation_sum" in merged.columns:
-            merged = merged[merged["direct_radiation_sum"] > 0]
-
-        return merged
+        return align_weather_to_outdoor_daily(weather_df, outdoor_df)
 
     def _align_outdoor_to_indoor_daily(
         self, outdoor_df: pd.DataFrame, indoor_df: pd.DataFrame
     ) -> pd.DataFrame:
         """Align and aggregate s1000 + indoor PAR data to daily totals."""
-        outdoor = outdoor_df.copy()
-        indoor = indoor_df.copy()
-
-        outdoor["time"] = pd.to_datetime(outdoor["time"], utc=True)
-
-        # Handle different column names
-        if "time" in indoor.columns:
-            indoor["datetime"] = pd.to_datetime(indoor["time"], utc=True)
-        else:
-            indoor["datetime"] = pd.to_datetime(indoor["datetime"], utc=True)
-
-        if "value" in indoor.columns:
-            indoor["par"] = indoor["value"]
-
-        # Extract date
-        outdoor["date"] = outdoor["time"].dt.date
-        indoor["date"] = indoor["datetime"].dt.date
-
-        # Aggregate to daily
-        outdoor_daily = outdoor.groupby("date").agg({
-            "lux": "sum",
-        }).reset_index()
-        outdoor_daily.columns = ["date", "lux_sum"]
-
-        indoor_daily = indoor.groupby("date").agg({
-            "par": "sum",
-        }).reset_index()
-        indoor_daily.columns = ["date", "par_sum"]
-
-        # Merge
-        merged = outdoor_daily.merge(indoor_daily, on="date", how="inner")
-
-        if merged.empty:
-            return merged
-
-        # Filter valid days
-        merged = merged[merged["lux_sum"] > 1000]
-        merged = merged[merged["par_sum"] > 100]
-
-        return merged
+        return align_outdoor_to_indoor_daily(outdoor_df, indoor_df)
 
     def predict_daily(
         self,
@@ -388,8 +293,7 @@ class TwoStageLightModel:
             day_of_year = datetime.now().timetuple().tm_yday
 
         # Calculate cyclical day-of-year features
-        day_sin = np.sin(2 * np.pi * day_of_year / 365)
-        day_cos = np.cos(2 * np.pi * day_of_year / 365)
+        day_sin, day_cos = encode_day_of_year(day_of_year)
 
         # Build Stage 1 feature vector based on what was used during training
         feature_values = {

@@ -1,7 +1,96 @@
 """DLI (Daily Light Integral) calculation from PAR sensor data."""
 
+from collections.abc import Sequence
+from datetime import date
+
 import numpy as np
 import pandas as pd
+
+from wp6_data.red.dli.constants import (
+    DEFAULT_PHOTOPERIOD_THRESHOLD,
+    SECONDS_PER_HOUR,
+    UMOL_TO_MOL,
+)
+
+
+def calculate_dli_trendline(
+    dates: Sequence[date],
+    values: Sequence[float],
+) -> tuple[np.ndarray, float]:
+    """Calculate linear trendline for DLI values.
+
+    Args:
+        dates: Sequence of dates
+        values: Sequence of DLI values corresponding to dates
+
+    Returns:
+        Tuple of (trendline_y_values, slope_per_day)
+    """
+    if len(dates) < 2:
+        return np.array([]), 0.0
+
+    x_numeric = np.arange(len(dates))
+    coeffs = np.polyfit(x_numeric, values, 1)
+    trendline_y = np.polyval(coeffs, x_numeric)
+    slope_per_day = float(coeffs[0])
+
+    return trendline_y, slope_per_day
+
+
+def calculate_lamp_contribution(
+    total_dli: float | None,
+    natural_dli: float | None,
+) -> float | None:
+    """Calculate lamp DLI contribution (total - natural).
+
+    Args:
+        total_dli: Total DLI including lamps
+        natural_dli: Natural light DLI only
+
+    Returns:
+        Lamp contribution in DLI, or None if either input is None
+    """
+    if total_dli is None or natural_dli is None:
+        return None
+    return total_dli - natural_dli
+
+
+def estimate_hourly_natural_par(
+    daily_dli: float,
+    hour_radiation: float,
+    total_radiation: float,
+) -> float:
+    """Estimate natural PAR for a specific hour based on radiation distribution.
+
+    Args:
+        daily_dli: Predicted daily DLI (mol/m²/day)
+        hour_radiation: Solar radiation for this hour (W/m²)
+        total_radiation: Total daily solar radiation (W/m²)
+
+    Returns:
+        Estimated PAR in μmol/m²/s for the hour
+    """
+    if total_radiation <= 0:
+        return 0.0
+
+    hour_fraction = hour_radiation / total_radiation
+    # Convert DLI to hourly PAR: DLI (mol) * fraction * 1e6 / 3600
+    natural_par = (daily_dli * hour_fraction * UMOL_TO_MOL) / SECONDS_PER_HOUR
+    return natural_par
+
+
+def par_sum_to_dli(par_sum: float, seconds_per_reading: float = 600.0) -> float:
+    """Convert PAR sum to DLI.
+
+    Args:
+        par_sum: Sum of PAR readings (μmol/m²/s summed)
+        seconds_per_reading: Seconds per reading interval (default 600 = 10 min)
+
+    Returns:
+        DLI in mol/m²/day
+    """
+    # DLI = par_sum * interval_seconds / 1,000,000
+    return (par_sum * seconds_per_reading) / UMOL_TO_MOL
 
 
 def _photoperiod_seconds(
@@ -99,19 +188,18 @@ def calculate_daily_dli(df: pd.DataFrame) -> pd.DataFrame:
         # Trapezoidal integration: ∫PAR dt in μmol/m²
         # Then convert to mol/m²/day by dividing by 1,000,000
         integrated = np.trapezoid(par_values, time_seconds)
-        dli = integrated / 1_000_000
+        dli = integrated / UMOL_TO_MOL
 
         # Calculate average PAR (only during non-zero periods)
         non_zero = par_values[par_values > 0]
         avg_par = float(np.mean(non_zero)) if len(non_zero) > 0 else 0.0
 
-        # Photoperiod: total time where PAR > threshold (e.g., 10 μmol/m²/s)
-        threshold = 10
+        # Photoperiod: total time where PAR > threshold
         photoperiod_hours = _photoperiod_seconds(
             par_values,
             time_seconds,
-            threshold=threshold,
-        ) / 3600.0
+            threshold=DEFAULT_PHOTOPERIOD_THRESHOLD,
+        ) / SECONDS_PER_HOUR
 
         results.append({
             "date": date_val,

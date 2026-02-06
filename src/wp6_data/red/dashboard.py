@@ -8,7 +8,6 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
-import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -18,10 +17,23 @@ from fastapi.staticfiles import StaticFiles
 
 from wp6_data.red.db import MEASUREMENT_GROUPS, MEASUREMENTS_TO_TABLES, MySQLConnection
 from wp6_data.red.dli import (
+    DEFAULT_TRAINING_START,
+    NATURAL_LIGHT_SENSOR,
+    SECONDS_PER_HOUR,
+    TOTAL_LIGHT_SENSOR,
+    UMOL_TO_MOL,
     OpenMeteoClient,
+    align_weather_outdoor_hourly,
+    analyze_reporting_frequency,
+    calculate_correlation_comparison,
     calculate_daily_dli,
+    calculate_dli_trendline,
     calculate_hourly_par,
+    calculate_lamp_contribution,
+    estimate_hourly_natural_par,
+    estimate_remaining_dli,
     get_model,
+    infer_lamp_schedule_hourly,
 )
 from wp6_data.shared import (
     make_dual_axis_chart,
@@ -705,13 +717,9 @@ async def dli_chart(
 
     start, end, start_dt, end_dt = resolve_date_range(start, end)
 
-    # Fetch both sensors: natural light and total light
-    natural_sensor = "s2100-01-par"
-    total_sensor = "s2100-02-par"
-
     try:
         par_df = await db.get_par_readings(
-            device_ids=[natural_sensor, total_sensor], start=start_dt, end=end_dt
+            device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR], start=start_dt, end=end_dt
         )
     except Exception as e:
         return render_page("DLI Chart - WP6 Red", f"<h1>Error: {e}</h1>",
@@ -738,16 +746,16 @@ async def dli_chart(
 
     # Rename devices to friendly labels
     device_labels = {
-        natural_sensor: "Natural Light",
-        total_sensor: "Total Light",
+        NATURAL_LIGHT_SENSOR: "Natural Light",
+        TOTAL_LIGHT_SENSOR: "Total Light",
     }
     dli_df["source"] = dli_df["device"].map(device_labels).fillna(dli_df["device"])
 
     # Pivot data for cleaner charts
-    natural_data = dli_df[dli_df["device"] == natural_sensor][
+    natural_data = dli_df[dli_df["device"] == NATURAL_LIGHT_SENSOR][
         ["date", "dli", "photoperiod_hours"]
     ].rename(columns={"dli": "natural_dli", "photoperiod_hours": "natural_hours"})
-    total_data = dli_df[dli_df["device"] == total_sensor][
+    total_data = dli_df[dli_df["device"] == TOTAL_LIGHT_SENSOR][
         ["date", "dli", "photoperiod_hours"]
     ].rename(columns={"dli": "total_dli", "photoperiod_hours": "total_hours"})
 
@@ -775,10 +783,10 @@ async def dli_chart(
     # Add trendline for Total DLI
     total_valid = chart_df.dropna(subset=["total_dli"])
     if len(total_valid) >= 2:
-        x_numeric = np.arange(len(total_valid))
-        coeffs = np.polyfit(x_numeric, total_valid["total_dli"].values, 1)
-        trendline_y = np.polyval(coeffs, x_numeric)
-        slope_per_day = coeffs[0]
+        trendline_y, slope_per_day = calculate_dli_trendline(
+            total_valid["date"].tolist(),
+            total_valid["total_dli"].values,
+        )
         trend_label = f"Trend ({slope_per_day:+.2f}/day)"
         fig_dli.add_trace(go.Scatter(
             x=total_valid["date"], y=trendline_y,
@@ -862,11 +870,11 @@ async def dli_chart(
         total_hrs = f"{row['total_hours']:.1f}" if pd.notna(row.get("total_hours")) else "-"
 
         # Calculate lamp contribution
-        if pd.notna(row.get("total_dli")) and pd.notna(row.get("natural_dli")):
-            lamp_dli = row["total_dli"] - row["natural_dli"]
-            lamp_str = f"{lamp_dli:.1f}"
-        else:
-            lamp_str = "-"
+        lamp_dli = calculate_lamp_contribution(
+            row.get("total_dli") if pd.notna(row.get("total_dli")) else None,
+            row.get("natural_dli") if pd.notna(row.get("natural_dli")) else None,
+        )
+        lamp_str = f"{lamp_dli:.1f}" if lamp_dli is not None else "-"
 
         table_rows.append(f"""
             <tr>
@@ -978,23 +986,13 @@ async def dli_schedule(
                 # Calculate hourly averages from actual data
                 yesterday_hourly = calculate_hourly_par(yesterday_par_df)
 
-                # Distribute natural DLI across hours proportionally to radiation
-                for h in forecast.hourly:
-                    hour = h.datetime.hour
-                    if forecast.total_radiation > 0:
-                        hour_fraction = h.solar_radiation / forecast.total_radiation
-                        natural_par = (yesterday_natural_dli * hour_fraction * 1_000_000) / 3600
-                    else:
-                        natural_par = 0.0
-
-                    # Get actual PAR for this hour
-                    hour_data = yesterday_hourly[
-                        yesterday_hourly["datetime"].dt.hour == hour
-                    ]
-                    actual_par = hour_data["par_avg"].iloc[0] if not hour_data.empty else 0.0
-
-                    # Infer lamp contribution (clamp to 0)
-                    inferred_lamp_hourly[hour] = max(0.0, actual_par - natural_par)
+                # Infer lamp schedule using extracted function
+                inferred_lamp_hourly = infer_lamp_schedule_hourly(
+                    yesterday_hourly,
+                    yesterday_natural_dli,
+                    forecast.hourly,
+                    forecast.total_radiation,
+                )
         except Exception:
             pass  # Fall back to no lamp inference
 
@@ -1043,12 +1041,10 @@ async def dli_schedule(
                 day_natural_dli = model.predict_dli(forecast.total_radiation)
 
                 for h in forecast.hourly:
-                    # Calculate natural PAR for this hour
-                    if forecast.total_radiation > 0:
-                        hour_fraction = h.solar_radiation / forecast.total_radiation
-                        natural_par = (day_natural_dli * hour_fraction * 1_000_000) / 3600
-                    else:
-                        natural_par = 0.0
+                    # Calculate natural PAR for this hour using extracted function
+                    natural_par = estimate_hourly_natural_par(
+                        day_natural_dli, h.solar_radiation, forecast.total_radiation
+                    )
 
                     natural_records.append({"datetime": h.datetime, "par": natural_par})
 
@@ -1089,13 +1085,13 @@ async def dli_schedule(
     if predicted_df is not None and not predicted_df.empty:
         predicted_df["date"] = predicted_df["datetime"].dt.date
         for d, grp in predicted_df.groupby("date"):
-            dli = grp["par"].sum() * 3600 / 1_000_000
+            dli = grp["par"].sum() * SECONDS_PER_HOUR / UMOL_TO_MOL
             daily_dli.setdefault(d, {})["predicted"] = dli
 
     if natural_df is not None and not natural_df.empty:
         natural_df["date"] = natural_df["datetime"].dt.date
         for d, grp in natural_df.groupby("date"):
-            dli = grp["par"].sum() * 3600 / 1_000_000
+            dli = grp["par"].sum() * SECONDS_PER_HOUR / UMOL_TO_MOL
             daily_dli.setdefault(d, {})["natural"] = dli
 
     # Ensure today and tomorrow have predictions for cards (if not already in range)
@@ -1111,7 +1107,7 @@ async def dli_schedule(
                             pred_dli = nat_dli
                             for h in f.hourly:
                                 lamp = inferred_lamp_hourly.get(h.datetime.hour, 0.0)
-                                pred_dli += lamp * 3600 / 1_000_000
+                                pred_dli += lamp * SECONDS_PER_HOUR / UMOL_TO_MOL
                             daily_dli.setdefault(card_date, {})["predicted"] = pred_dli
                             daily_dli.setdefault(card_date, {})["natural"] = nat_dli
                             break
@@ -1123,11 +1119,8 @@ async def dli_schedule(
     today_vals_tmp = daily_dli.get(today, {})
     has_today_data = "actual" in today_vals_tmp and "predicted" in today_vals_tmp
     if has_today_data and predicted_df is not None and not predicted_df.empty:
-        today_predicted = predicted_df[predicted_df["date"] == today]
-        if not today_predicted.empty:
-            remaining = today_predicted[today_predicted["datetime"].dt.hour > current_hour]
-            remainder_dli = remaining["par"].sum() * 3600 / 1_000_000
-            daily_dli[today]["estimated"] = today_vals_tmp["actual"] + remainder_dli
+        remainder_dli = estimate_remaining_dli(predicted_df, today, current_hour)
+        daily_dli[today]["estimated"] = today_vals_tmp["actual"] + remainder_dli
 
     # Build chart
     title = f"Light Schedule - {start_date}" if start_date == end_date else \
@@ -1413,14 +1406,19 @@ async def dli_model_train(user: str = Depends(verify_admin_auth)) -> str:
             show_back_link=True, back_url="/dli/model",
         )
 
-    # Use all data since 2025-11-01 (devices up and running)
-    start_dt = datetime(2025, 11, 1, tzinfo=UTC)
+    # Use all data since DEFAULT_TRAINING_START (devices up and running)
+    start_dt = datetime(
+        DEFAULT_TRAINING_START.year,
+        DEFAULT_TRAINING_START.month,
+        DEFAULT_TRAINING_START.day,
+        tzinfo=UTC,
+    )
     end_dt = datetime.now(UTC)
 
-    # Fetch indoor PAR data (s2100-01-par - natural light, not under lamps)
+    # Fetch indoor PAR data (natural light, not under lamps)
     try:
         indoor_df = await db.get_par_readings(
-            device_ids=["s2100-01-par"], start=start_dt, end=end_dt
+            device_ids=[NATURAL_LIGHT_SENSOR], start=start_dt, end=end_dt
         )
     except Exception as e:
         return render_page(
@@ -1560,13 +1558,18 @@ async def dli_model_diagnostic(
         )
 
     # Use same date range as training
-    start_dt = datetime(2025, 11, 1, tzinfo=UTC)
+    start_dt = datetime(
+        DEFAULT_TRAINING_START.year,
+        DEFAULT_TRAINING_START.month,
+        DEFAULT_TRAINING_START.day,
+        tzinfo=UTC,
+    )
     end_dt = datetime.now(UTC)
 
     # Fetch all data sources
     try:
         indoor_df = await db.get_par_readings(
-            device_ids=["s2100-01-par"], start=start_dt, end=end_dt
+            device_ids=[NATURAL_LIGHT_SENSOR], start=start_dt, end=end_dt
         )
         outdoor_df = await db.get_weather_station_readings(start=start_dt, end=end_dt)
 
@@ -1602,16 +1605,11 @@ async def dli_model_diagnostic(
     weather_range = date_range_str(weather_df, "datetime")
 
     # Align data for scatter plot (Stage 1: weather vs outdoor)
-    weather_df["datetime"] = pd.to_datetime(weather_df["datetime"], utc=True)
-    weather_df["hour_key"] = weather_df["datetime"].dt.floor("h")
-
-    outdoor_df["time"] = pd.to_datetime(outdoor_df["time"], utc=True)
-    outdoor_df["hour_key"] = outdoor_df["time"].dt.floor("h")
-    outdoor_hourly = outdoor_df.groupby("hour_key").agg({"lux": "mean"}).reset_index()
-
-    stage1_merged = weather_df.merge(outdoor_hourly, on="hour_key", how="inner")
-    stage1_merged = stage1_merged[stage1_merged["lux"] > 10]
-    stage1_merged = stage1_merged[stage1_merged["solar_radiation"] > 0]
+    stage1_merged = align_weather_outdoor_hourly(
+        weather_df, outdoor_df, min_lux=10.0, min_radiation=0.0
+    )
+    if "solar_radiation" in stage1_merged.columns:
+        stage1_merged = stage1_merged[stage1_merged["solar_radiation"] > 0]
 
     # Create scatter plot
     import plotly.express as px
@@ -1626,40 +1624,21 @@ async def dli_model_diagnostic(
         )
         fig.update_layout(height=500)
         scatter_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
-
-        # Calculate correlation
-        corr = stage1_merged["solar_radiation"].corr(stage1_merged["lux"])
     else:
         scatter_html = "<p>No aligned data for scatter plot</p>"
-        corr = 0
 
-    # Check for gaps - count readings per day
-    outdoor_df["date"] = outdoor_df["time"].dt.date
-    daily_counts = outdoor_df.groupby("date").size()
-    days_with_few = (daily_counts < 20).sum()
-    total_days = len(daily_counts)
+    # Calculate correlation comparison using extracted function
+    corr_stats = calculate_correlation_comparison(stage1_merged, "solar_radiation", "lux")
+    corr = corr_stats["hourly_corr"]
+    daily_corr = corr_stats["daily_corr"]
+    daily_samples = corr_stats["daily_samples"]
 
-    # Test daily aggregation correlation
-    if not stage1_merged.empty:
-        stage1_merged["date"] = stage1_merged["hour_key"].dt.date
-        daily_agg = stage1_merged.groupby("date").agg({
-            "solar_radiation": "sum",
-            "lux": "sum",
-        }).reset_index()
-        daily_corr = daily_agg["solar_radiation"].corr(daily_agg["lux"])
-        daily_samples = len(daily_agg)
-    else:
-        daily_corr = 0
-        daily_samples = 0
-
-    # Check s1000 reporting frequency
-    if len(outdoor_df) > 1:
-        time_diffs = outdoor_df["time"].diff().dropna()
-        median_interval = time_diffs.median().total_seconds() / 60  # minutes
-        readings_per_hour = 60 / median_interval if median_interval > 0 else 0
-    else:
-        median_interval = 0
-        readings_per_hour = 0
+    # Analyze reporting frequency using extracted function
+    freq_stats = analyze_reporting_frequency(outdoor_df, "time")
+    median_interval = freq_stats["median_interval_minutes"]
+    readings_per_hour = freq_stats["readings_per_hour"]
+    days_with_few = freq_stats["days_with_few_readings"]
+    total_days = freq_stats["total_days"]
 
     # Sample timestamps to check alignment
     sample_weather = weather_df.head(5)[["datetime", "solar_radiation"]].to_html(

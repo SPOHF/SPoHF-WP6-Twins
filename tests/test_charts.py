@@ -11,7 +11,7 @@ def _sample_df():
         {
             "device": ["d1", "d1", "d2", "d2"],
             "sensor": ["temp", "temp", "temp", "temp"],
-            "time": pd.to_datetime(["2025-01-01", "2025-01-02", "2025-01-01", "2025-01-02"]),
+            "time": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-01", "2026-01-02"]),
             "value": [20.0, 21.0, 19.0, 20.5],
         }
     )
@@ -23,7 +23,7 @@ def _dual_axis_df():
         {
             "device": ["d1", "d1", "d1", "d1"],
             "sensor": ["temp", "temp", "humidity", "humidity"],
-            "time": pd.to_datetime(["2025-01-01", "2025-01-02", "2025-01-01", "2025-01-02"]),
+            "time": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-01", "2026-01-02"]),
             "value": [20.0, 21.0, 55.0, 60.0],
         }
     )
@@ -120,7 +120,7 @@ class TestMakeDualAxisChart:
             {
                 "device": ["d1", "d1", "d2", "d2", "d1", "d1", "d2", "d2"],
                 "sensor": ["temp"] * 4 + ["hum"] * 4,
-                "time": pd.to_datetime(["2025-01-01", "2025-01-02"] * 4),
+                "time": pd.to_datetime(["2026-01-01", "2026-01-02"] * 4),
                 "value": [20, 21, 19, 20, 55, 60, 50, 52],
             }
         )
@@ -133,7 +133,7 @@ def _left_df():
     return pd.DataFrame({
         "device": ["d1", "d1"],
         "sensor": ["temp", "temp"],
-        "time": pd.to_datetime(["2025-01-02", "2025-01-01"]),
+        "time": pd.to_datetime(["2026-01-02", "2026-01-01"]),
         "value": [21.0, 20.0],
     })
 
@@ -142,7 +142,7 @@ def _right_df():
     return pd.DataFrame({
         "device": ["d2", "d2"],
         "sensor": ["humidity", "humidity"],
-        "time": pd.to_datetime(["2025-01-01", "2025-01-02"]),
+        "time": pd.to_datetime(["2026-01-01", "2026-01-02"]),
         "value": [55.0, 60.0],
     })
 
