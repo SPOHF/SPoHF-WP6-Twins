@@ -15,9 +15,9 @@ from neo4j import GraphDatabase
 from wp6_data.shared import (
     make_dual_axis_chart,
     make_line_chart,
-    prepare_comparison,
+    render_chart_page,
     render_compare_form,
-    render_date_filter,
+    render_comparison_result,
     render_page,
     resolve_date_range,
 )
@@ -318,29 +318,12 @@ async def chart(
     sensor_list = [s.strip() for s in sensors.split(",")]
     df = fetch_data(sensor_tags=sensor_list, start=start_dt, end=end_dt)
 
-    filter_html = render_date_filter(start, end)
-
-    if df.empty:
-        return render_page(
-            f"{sensors} - WP6 Blue",
-            filter_html + "<h1>No data found</h1>",
-            show_back_link=True,
-        )
-
     if dual and len(sensor_list) == 2:
         fig = make_dual_axis_chart(df, sensor_list[0], sensor_list[1])
     else:
         fig = make_line_chart(df)
 
-    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
-
-    return render_page(
-        f"{sensors} - WP6 Blue",
-        filter_html + chart_html,
-        show_logo=False,
-        show_footer=False,
-        show_back_link=True,
-    )
+    return render_chart_page(df, fig, f"{sensors} - WP6 Blue", start, end)
 
 
 @app.get("/compare", response_class=HTMLResponse)
@@ -375,54 +358,25 @@ async def compare_chart(
     end: Annotated[date | None, Query()] = None,
 ) -> str:
     """Render a comparison chart for one or two device/sensor pairs."""
-    has_right = bool(right_device and right_measurement)
-
     start, end, start_dt, end_dt = resolve_date_range(start, end)
 
     left_df = fetch_data(sensor_tags=[left_measurement], start=start_dt, end=end_dt)
     if not left_df.empty:
         left_df = left_df[left_df["device"] == left_device]
 
-    if has_right:
+    if right_device and right_measurement:
         right_df = fetch_data(sensor_tags=[right_measurement], start=start_dt, end=end_dt)
         if not right_df.empty:
             right_df = right_df[right_df["device"] == right_device]
     else:
         right_df = pd.DataFrame(columns=["device", "sensor", "time", "value"])
 
-    left_label = f"{left_device} | {left_measurement}"
-    right_label = f"{right_device} | {right_measurement}" if has_right else ""
-    df, left_label, right_label = prepare_comparison(
-        left_df, right_df, left_label, right_label,
-    )
-
-    extra_params: dict[str, str] = {
-        "left_device": left_device,
-        "left_measurement": left_measurement,
-    }
-    if has_right:
-        extra_params["right_device"] = right_device
-        extra_params["right_measurement"] = right_measurement
-    filter_html = render_date_filter(start, end, extra_params=extra_params)
-
-    if df.empty:
-        return render_page(
-            "Compare - WP6 Blue", filter_html + "<h1>No data found</h1>",
-            show_back_link=True, back_url="/compare",
-        )
-
-    if has_right:
-        fig = make_dual_axis_chart(df, left_label, right_label)
-    else:
-        fig = make_line_chart(df, title=left_label)
-    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
-
-    stats_html = f"<small>{len(df):,} data points</small>"
-
-    return render_page(
+    return render_comparison_result(
+        left_df, right_df,
+        left_device, left_measurement,
+        right_device, right_measurement,
+        start, end,
         "Compare - WP6 Blue",
-        filter_html + stats_html + chart_html,
-        show_logo=False, show_footer=False, show_back_link=True, back_url="/compare",
     )
 
 

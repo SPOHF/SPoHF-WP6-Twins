@@ -3,9 +3,13 @@
 from datetime import date, timedelta
 from unittest.mock import patch
 
+import pandas as pd
+
 from wp6_data.shared.templates import (
     default_date_range,
+    render_chart_page,
     render_compare_form,
+    render_comparison_result,
     render_date_filter,
     render_page,
     resolve_date_range,
@@ -228,3 +232,132 @@ class TestRenderCompareForm:
         right_select_start = html.index('id="right_device"')
         right_select_chunk = html[right_select_start - 200 : right_select_start + 200]
         assert "— None —" in right_select_chunk
+
+
+def _sample_chart_df():
+    return pd.DataFrame(
+        {
+            "device": ["d1", "d1"],
+            "sensor": ["temp", "temp"],
+            "time": pd.to_datetime(["2026-01-01", "2026-01-02"]),
+            "value": [20.0, 21.0],
+        }
+    )
+
+
+def _make_fig(df):
+    from wp6_data.shared.charts import make_line_chart
+
+    return make_line_chart(df)
+
+
+class TestRenderChartPage:
+    def test_empty_df_returns_no_data(self):
+        empty = pd.DataFrame(columns=["device", "sensor", "time", "value"])
+        fig = _make_fig(empty)
+        html = render_chart_page(empty, fig, "Test", date(2026, 1, 1), date(2026, 1, 8))
+        assert "No data found" in html
+        assert "<title>Test</title>" in html
+
+    def test_non_empty_df_returns_chart(self):
+        df = _sample_chart_df()
+        fig = _make_fig(df)
+        html = render_chart_page(df, fig, "Test", date(2026, 1, 1), date(2026, 1, 8))
+        assert "plotly" in html.lower()
+        assert "2 data points" in html
+
+    def test_contains_date_filter(self):
+        df = _sample_chart_df()
+        fig = _make_fig(df)
+        html = render_chart_page(df, fig, "Test", date(2026, 1, 1), date(2026, 1, 8))
+        assert 'id="dateFilter"' in html
+        assert 'value="2026-01-01"' in html
+
+    def test_back_url(self):
+        df = _sample_chart_df()
+        fig = _make_fig(df)
+        html = render_chart_page(
+            df, fig, "Test", date(2026, 1, 1), date(2026, 1, 8), back_url="/custom",
+        )
+        assert 'href="/custom"' in html
+
+    def test_extra_params_forwarded(self):
+        df = _sample_chart_df()
+        fig = _make_fig(df)
+        html = render_chart_page(
+            df, fig, "Test", date(2026, 1, 1), date(2026, 1, 8),
+            extra_params={"sensor": "temp"},
+        )
+        assert 'name="sensor" value="temp"' in html
+
+    def test_empty_page_has_back_link(self):
+        empty = pd.DataFrame(columns=["device", "sensor", "time", "value"])
+        fig = _make_fig(empty)
+        html = render_chart_page(empty, fig, "Test", date(2026, 1, 1), date(2026, 1, 8))
+        assert "Back to Dashboard" in html
+
+    def test_chart_page_hides_logo_and_footer(self):
+        df = _sample_chart_df()
+        fig = _make_fig(df)
+        html = render_chart_page(df, fig, "Test", date(2026, 1, 1), date(2026, 1, 8))
+        assert '<div class="logo">' not in html
+        assert "<footer>" not in html
+
+
+class TestRenderComparisonResult:
+    def test_basic_rendering_with_both_sides(self):
+        left = pd.DataFrame({
+            "device": ["d1", "d1"],
+            "sensor": ["temp", "temp"],
+            "time": pd.to_datetime(["2026-01-01", "2026-01-02"]),
+            "value": [20.0, 21.0],
+        })
+        right = pd.DataFrame({
+            "device": ["d2", "d2"],
+            "sensor": ["humidity", "humidity"],
+            "time": pd.to_datetime(["2026-01-01", "2026-01-02"]),
+            "value": [55.0, 60.0],
+        })
+        html = render_comparison_result(
+            left, right, "d1", "temp", "d2", "humidity",
+            date(2026, 1, 1), date(2026, 1, 8), "Compare",
+        )
+        assert "plotly" in html.lower()
+        assert "4 data points" in html
+        assert 'name="left_device" value="d1"' in html
+        assert 'name="right_device" value="d2"' in html
+
+    def test_single_axis_when_right_empty(self):
+        left = pd.DataFrame({
+            "device": ["d1", "d1"],
+            "sensor": ["temp", "temp"],
+            "time": pd.to_datetime(["2026-01-01", "2026-01-02"]),
+            "value": [20.0, 21.0],
+        })
+        right = pd.DataFrame(columns=["device", "sensor", "time", "value"])
+        html = render_comparison_result(
+            left, right, "d1", "temp", "", "",
+            date(2026, 1, 1), date(2026, 1, 8), "Compare",
+        )
+        assert "plotly" in html.lower()
+        assert "2 data points" in html
+        # No right params in hidden fields
+        assert 'name="right_device"' not in html
+
+    def test_empty_data_shows_no_data(self):
+        empty = pd.DataFrame(columns=["device", "sensor", "time", "value"])
+        html = render_comparison_result(
+            empty, empty, "d1", "temp", "", "",
+            date(2026, 1, 1), date(2026, 1, 8), "Compare",
+        )
+        assert "No data found" in html
+
+    def test_custom_back_url(self):
+        left = _sample_chart_df()
+        right = pd.DataFrame(columns=["device", "sensor", "time", "value"])
+        html = render_comparison_result(
+            left, right, "d1", "temp", "", "",
+            date(2026, 1, 1), date(2026, 1, 8), "Compare",
+            back_url="/my-compare",
+        )
+        assert 'href="/my-compare"' in html

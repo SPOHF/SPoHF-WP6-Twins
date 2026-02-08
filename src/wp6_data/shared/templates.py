@@ -2,6 +2,9 @@
 
 from datetime import UTC, date, datetime, timedelta
 
+import pandas as pd
+import plotly.graph_objects as go
+
 
 def default_date_range() -> tuple[date, date]:
     """Return default date range: last 7 days."""
@@ -258,3 +261,123 @@ def render_page(
     </body>
     </html>
     """
+
+
+def render_chart_page(
+    df: pd.DataFrame,
+    fig: go.Figure,
+    title: str,
+    start: date,
+    end: date,
+    *,
+    back_url: str = "/",
+    extra_params: dict[str, str] | None = None,
+    extra_css: str = "",
+) -> str:
+    """Render a full chart page with date filter, empty-data fallback, stats, and layout.
+
+    Callers build their own ``fig`` (chart logic differs per dashboard), but pass
+    ``df`` so this helper can check emptiness and compute a data-point count.
+
+    Args:
+        df: DataFrame used to check emptiness and compute stats.
+        fig: Plotly Figure to render (ignored when *df* is empty).
+        title: Page ``<title>`` passed to :func:`render_page`.
+        start: Start date for the date-range filter.
+        end: End date for the date-range filter.
+        back_url: URL for the back link.
+        extra_params: Hidden form fields forwarded to :func:`render_date_filter`.
+        extra_css: Additional CSS rules.
+
+    Returns:
+        Complete HTML page string.
+    """
+    filter_html = render_date_filter(start, end, extra_params=extra_params)
+
+    if df.empty:
+        return render_page(
+            title,
+            filter_html + "<h1>No data found</h1>",
+            show_back_link=True,
+            back_url=back_url,
+        )
+
+    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+    stats_html = f"<small>{len(df):,} data points</small>"
+
+    return render_page(
+        title,
+        filter_html + stats_html + chart_html,
+        show_logo=False,
+        show_footer=False,
+        show_back_link=True,
+        back_url=back_url,
+        extra_css=extra_css,
+    )
+
+
+def render_comparison_result(
+    left_df: pd.DataFrame,
+    right_df: pd.DataFrame,
+    left_device: str,
+    left_measurement: str,
+    right_device: str,
+    right_measurement: str,
+    start: date,
+    end: date,
+    title: str,
+    *,
+    back_url: str = "/compare",
+) -> str:
+    """Render a comparison chart page for one or two device/measurement pairs.
+
+    Handles label creation, :func:`prepare_comparison`, chart type selection
+    (dual-axis vs single line), and delegates to :func:`render_chart_page`.
+
+    Args:
+        left_df: DataFrame for the left axis (device, sensor, time, value).
+        right_df: DataFrame for the right axis (may be empty).
+        left_device: Device identifier for the left series.
+        left_measurement: Measurement name for the left series.
+        right_device: Device identifier for the right series (empty string if none).
+        right_measurement: Measurement name for the right series (empty string if none).
+        start: Start date for the date-range filter.
+        end: End date for the date-range filter.
+        title: Page ``<title>``.
+        back_url: URL for the back link.
+
+    Returns:
+        Complete HTML page string.
+    """
+    from wp6_data.shared.charts import make_dual_axis_chart, make_line_chart, prepare_comparison
+
+    has_right = bool(right_device and right_measurement)
+
+    left_label = f"{left_device} | {left_measurement}"
+    right_label = f"{right_device} | {right_measurement}" if has_right else ""
+    df, left_label, right_label = prepare_comparison(
+        left_df, right_df, left_label, right_label,
+    )
+
+    extra_params: dict[str, str] = {
+        "left_device": left_device,
+        "left_measurement": left_measurement,
+    }
+    if has_right:
+        extra_params["right_device"] = right_device
+        extra_params["right_measurement"] = right_measurement
+
+    if has_right:
+        fig = make_dual_axis_chart(df, left_label, right_label)
+    else:
+        fig = make_line_chart(df, title=left_label)
+
+    return render_chart_page(
+        df,
+        fig,
+        title,
+        start,
+        end,
+        back_url=back_url,
+        extra_params=extra_params,
+    )

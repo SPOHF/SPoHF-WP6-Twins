@@ -42,8 +42,9 @@ from wp6_data.shared import (
     make_dual_axis_chart,
     make_line_chart,
     make_schedule_chart,
-    prepare_comparison,
+    render_chart_page,
     render_compare_form,
+    render_comparison_result,
     render_date_filter,
     render_page,
     resolve_date_range,
@@ -317,28 +318,10 @@ async def measurement_view(
             show_back_link=True,
         )
 
-    filter_html = render_date_filter(start, end)
-
-    if df.empty:
-        return render_page(
-            f"{measurement} - WP6 Red",
-            filter_html + "<h1>No data found</h1>",
-            show_back_link=True,
-        )
-
     tables = MEASUREMENTS_TO_TABLES[measurement]
     fig = make_line_chart(df, title=f"{measurement} - All Sensors ({', '.join(tables)})")
-    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
 
-    stats_html = f"<small>{len(df):,} data points</small>"
-
-    return render_page(
-        f"{measurement} - WP6 Red",
-        filter_html + stats_html + chart_html,
-        show_logo=False,
-        show_footer=False,
-        show_back_link=True,
-    )
+    return render_chart_page(df, fig, f"{measurement} - WP6 Red", start, end)
 
 
 @app.get("/table/{table}", response_class=HTMLResponse)
@@ -395,28 +378,10 @@ async def chart_all(
             back_url=f"/table/{table}",
         )
 
-    filter_html = render_date_filter(start, end)
-
-    if df.empty:
-        return render_page(
-            f"{table} - WP6 Red",
-            filter_html + "<h1>No data found</h1>",
-            show_back_link=True,
-            back_url=f"/table/{table}",
-        )
-
     fig = make_line_chart(df, title=f"{table} - All Devices")
-    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
 
-    stats_html = f"<small>{len(df):,} data points</small>"
-
-    return render_page(
-        f"{table} - WP6 Red",
-        filter_html + stats_html + chart_html,
-        show_logo=False,
-        show_footer=False,
-        show_back_link=True,
-        back_url=f"/table/{table}",
+    return render_chart_page(
+        df, fig, f"{table} - WP6 Red", start, end, back_url=f"/table/{table}",
     )
 
 
@@ -447,34 +412,15 @@ async def chart_device(
             back_url=f"/table/{table}",
         )
 
-    filter_html = render_date_filter(start, end)
-
-    if df.empty:
-        return render_page(
-            f"{device_id} - WP6 Red",
-            filter_html + "<h1>No data found</h1>",
-            show_back_link=True,
-            back_url=f"/table/{table}",
-        )
-
     # Check if we can do dual axis (2 different measurements)
-    sensors = df["sensor"].unique()
+    sensors = df["sensor"].unique() if not df.empty else []
     if len(sensors) == 2:
         fig = make_dual_axis_chart(df, sensors[0], sensors[1], title=f"{table} - {device_id}")
     else:
         fig = make_line_chart(df, title=f"{table} - {device_id}")
 
-    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
-
-    stats_html = f"<small>{len(df):,} data points</small>"
-
-    return render_page(
-        f"{device_id} - WP6 Red",
-        filter_html + stats_html + chart_html,
-        show_logo=False,
-        show_footer=False,
-        show_back_link=True,
-        back_url=f"/table/{table}",
+    return render_chart_page(
+        df, fig, f"{device_id} - WP6 Red", start, end, back_url=f"/table/{table}",
     )
 
 
@@ -532,39 +478,12 @@ async def compare_chart(
             show_back_link=True, back_url="/compare",
         )
 
-    left_label = f"{left_device} | {left_measurement}"
-    right_label = f"{right_device} | {right_measurement}" if has_right else ""
-    df, left_label, right_label = prepare_comparison(
-        left_df, right_df, left_label, right_label,
-    )
-
-    extra_params: dict[str, str] = {
-        "left_device": left_device,
-        "left_measurement": left_measurement,
-    }
-    if has_right:
-        extra_params["right_device"] = right_device
-        extra_params["right_measurement"] = right_measurement
-    filter_html = render_date_filter(start, end, extra_params=extra_params)
-
-    if df.empty:
-        return render_page(
-            "Compare - WP6 Red", filter_html + "<h1>No data found</h1>",
-            show_back_link=True, back_url="/compare",
-        )
-
-    if has_right:
-        fig = make_dual_axis_chart(df, left_label, right_label)
-    else:
-        fig = make_line_chart(df, title=left_label)
-    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
-
-    stats_html = f"<small>{len(df):,} data points</small>"
-
-    return render_page(
+    return render_comparison_result(
+        left_df, right_df,
+        left_device, left_measurement,
+        right_device, right_measurement,
+        start, end,
         "Compare - WP6 Red",
-        filter_html + stats_html + chart_html,
-        show_logo=False, show_footer=False, show_back_link=True, back_url="/compare",
     )
 
 
