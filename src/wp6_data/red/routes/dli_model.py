@@ -9,10 +9,13 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
 from wp6_data.red import deps
+from wp6_data.red.db import MySQLConnection
 from wp6_data.red.dli import (
     DEFAULT_TRAINING_START,
     NATURAL_LIGHT_SENSOR,
     TOTAL_LIGHT_SENSOR,
+    ModelStats,
+    OpenMeteoClient,
     align_outdoor_to_indoor_daily,
     align_weather_outdoor_hourly,
     analyze_reporting_frequency,
@@ -24,6 +27,58 @@ from wp6_data.red.dli import (
 from wp6_data.shared import render_page
 
 router = APIRouter(prefix="/dli/model")
+
+
+async def train_model_from_db(db: MySQLConnection, weather_client: OpenMeteoClient) -> ModelStats:
+    """Train the two-stage light prediction model from database data.
+
+    Fetches sensor data and weather data, trains the model, and saves it.
+    Returns ModelStats on success, raises on failure.
+    """
+    start_dt = datetime(
+        DEFAULT_TRAINING_START.year,
+        DEFAULT_TRAINING_START.month,
+        DEFAULT_TRAINING_START.day,
+        tzinfo=UTC,
+    )
+    end_dt = datetime.now(UTC)
+
+    above_lamp_df = await db.get_par_readings(
+        device_ids=[NATURAL_LIGHT_SENSOR], start=start_dt, end=end_dt
+    )
+    plant_level_df = await db.get_par_readings(
+        device_ids=[TOTAL_LIGHT_SENSOR], start=start_dt, end=end_dt
+    )
+
+    if above_lamp_df.empty:
+        raise ValueError("No indoor PAR data (s2100-01-par) found for training")
+
+    indoor_df = above_lamp_df
+
+    outdoor_df = await db.get_weather_station_readings(start=start_dt, end=end_dt)
+    if outdoor_df.empty:
+        raise ValueError("No weather station data (s1000) found for training")
+
+    weather_df = await weather_client.get_historical_dataframe_multi(
+        start_dt.date(),
+        end_dt.date(),
+        radiation_var="direct_radiation",
+        include_diffuse=True,
+    )
+    if weather_df.empty:
+        raise ValueError("No OpenMeteo weather data found for training")
+
+    model = get_model()
+    stats = model.train(
+        weather_df=weather_df,
+        outdoor_df=outdoor_df,
+        indoor_df=indoor_df,
+        indoor_sensor="s2100-01-par",
+        plant_level_df=plant_level_df if not plant_level_df.empty else None,
+        above_lamp_df=above_lamp_df,
+    )
+    model.save()
+    return stats
 
 
 @router.get("", response_class=HTMLResponse)
@@ -171,105 +226,12 @@ async def dli_model_train(user: str = Depends(deps.verify_admin_auth)) -> str:
             show_back_link=True, back_url="/dli/model",
         )
 
-    # Use all data since DEFAULT_TRAINING_START (devices up and running)
-    start_dt = datetime(
-        DEFAULT_TRAINING_START.year,
-        DEFAULT_TRAINING_START.month,
-        DEFAULT_TRAINING_START.day,
-        tzinfo=UTC,
-    )
-    end_dt = datetime.now(UTC)
-
-    # Fetch PAR data from both sensors for lamp correction
     try:
-        above_lamp_df = await deps.db.get_par_readings(
-            device_ids=[NATURAL_LIGHT_SENSOR], start=start_dt, end=end_dt
-        )
-        plant_level_df = await deps.db.get_par_readings(
-            device_ids=[TOTAL_LIGHT_SENSOR], start=start_dt, end=end_dt
-        )
+        stats = await train_model_from_db(deps.db, deps.get_weather_client())
     except Exception as e:
-        return render_page(
-            "Train Model - WP6 Red",
-            f"<h1>Database Error (indoor PAR)</h1><p>{e}</p>",
-            show_back_link=True, back_url="/dli/model",
-        )
-
-    if above_lamp_df.empty:
-        return render_page(
-            "Train Model - WP6 Red",
-            "<h1>No Indoor PAR Data</h1>"
-            "<p>No s2100-01-par readings found for the selected date range.</p>",
-            show_back_link=True, back_url="/dli/model",
-        )
-
-    # Stage 2 trains on s2100-01-par (above lamps, clean r=0.911 with s1000)
-    indoor_df = above_lamp_df
-    indoor_sensor_label = "s2100-01-par"
-
-    # Fetch outdoor weather station data (s1000 lux)
-    try:
-        outdoor_df = await deps.db.get_weather_station_readings(start=start_dt, end=end_dt)
-    except Exception as e:
-        return render_page(
-            "Train Model - WP6 Red",
-            f"<h1>Database Error (s1000)</h1><p>{e}</p>",
-            show_back_link=True, back_url="/dli/model",
-        )
-
-    if outdoor_df.empty:
-        return render_page(
-            "Train Model - WP6 Red",
-            "<h1>No Weather Station Data</h1>"
-            "<p>No s1000 lux readings found for the selected date range.</p>",
-            show_back_link=True, back_url="/dli/model",
-        )
-
-    # Fetch OpenMeteo historical weather data (direct + diffuse radiation for better model)
-    client = deps.get_weather_client()
-    try:
-        weather_df = await client.get_historical_dataframe_multi(
-            start_dt.date(), end_dt.date(),
-            radiation_var="direct_radiation",
-            include_diffuse=True,
-        )
-    except Exception as e:
-        return render_page(
-            "Train Model - WP6 Red",
-            f"<h1>Weather API Error</h1><p>{e}</p>",
-            show_back_link=True, back_url="/dli/model",
-        )
-
-    if weather_df.empty:
-        return render_page(
-            "Train Model - WP6 Red",
-            "<h1>No OpenMeteo Data</h1>"
-            "<p>Could not fetch weather data for the date range.</p>",
-            show_back_link=True, back_url="/dli/model",
-        )
-
-    # Train two-stage model
-    model = get_model()
-    try:
-        stats = model.train(
-            weather_df=weather_df,
-            outdoor_df=outdoor_df,
-            indoor_df=indoor_df,
-            indoor_sensor=indoor_sensor_label,
-            plant_level_df=plant_level_df if not plant_level_df.empty else None,
-            above_lamp_df=above_lamp_df,
-        )
-        model.save()
-    except ValueError as e:
         return render_page(
             "Train Model - WP6 Red",
             f"<h1>Training Failed</h1><p>{e}</p>",
-            show_back_link=True, back_url="/dli/model",
-        )
-    except Exception as e:
-        return render_page(
-            "Train Model - WP6 Red",
-            f"<h1>Training Error</h1><p>{e}</p>",
             show_back_link=True, back_url="/dli/model",
         )
 

@@ -2,12 +2,15 @@
 
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.routes import browse, charts, compare, dli, dli_model, export, health, home
+
+log = structlog.get_logger()
 
 
 @asynccontextmanager
@@ -21,6 +24,26 @@ async def lifespan(app: FastAPI):
         database=deps.DB_NAME,
     )
     await deps.db.connect()
+
+    # Train DLI model on startup if not already saved on disk
+    from wp6_data.red.dli import get_model
+
+    model = get_model()
+    if model.is_trained():
+        log.info("dli_model_loaded_from_disk")
+    else:
+        try:
+            stats = await dli_model.train_model_from_db(deps.db, deps.get_weather_client())
+            log.info(
+                "dli_model_trained",
+                r2=stats.r2_score,
+                r2_stage1=stats.stage1.r2_score,
+                r2_stage2=stats.stage2.r2_score,
+                n_samples=stats.n_samples,
+            )
+        except Exception:
+            log.warning("dli_model_training_failed", exc_info=True)
+
     yield
     await deps.db.close()
 
