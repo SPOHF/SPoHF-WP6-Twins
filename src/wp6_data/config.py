@@ -10,6 +10,7 @@ class Settings(BaseSettings):
         env_prefix="WP6_",
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     # SPoHF API
