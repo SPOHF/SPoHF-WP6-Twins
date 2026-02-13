@@ -79,12 +79,16 @@ red:
     database: ""
     user: ""
     # password from secret
-  # Secret for red-specific credentials (mysql password, auth users)
+  oidc:
+    issuer: "https://auth.fontysvenlo.dev/realms/spohf"
+    clientId: "wp6-red-dashboard"
+    adminGroup: "/wp6-admins"
   secrets:
     existingSecret: ""  # Name of existing secret (default: <release>-red-secrets)
     # Keys expected in secret:
     # - mysql-password: MySQL password
-    # - auth-users: Comma-separated users "user1:pass1,user2:pass2"
+    # - oidc-client-secret: Keycloak OIDC client secret
+    # - session-secret: Random secret for cookie sessions
   # CSV export job (runs nightly, generates downloadable CSVs)
   export:
     enabled: true

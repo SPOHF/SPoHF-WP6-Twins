@@ -5,10 +5,13 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.requests import Request
+from starlette.responses import RedirectResponse
 
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
-from wp6_data.red.routes import browse, charts, compare, dli, dli_model, export, health, home
+from wp6_data.red.routes import auth, browse, charts, compare, dli, dli_model, export, health, home
 
 log = structlog.get_logger()
 
@@ -50,11 +53,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="WP6 Red - Sensor Dashboard", lifespan=lifespan)
 
+app.add_middleware(SessionMiddleware, secret_key=deps.SESSION_SECRET)
+
 # Serve static files
 if (deps.PROJECT_ROOT / "static").exists():
     app.mount("/static", StaticFiles(directory=deps.PROJECT_ROOT / "static"), name="static")
 
+
+@app.exception_handler(deps.NotAuthenticated)
+async def not_authenticated_handler(request: Request, exc: deps.NotAuthenticated):
+    """Redirect unauthenticated users to the login page."""
+    return RedirectResponse(url=f"/login?next={request.url.path}")
+
+
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(home.router)
 app.include_router(browse.router)
 app.include_router(charts.router)

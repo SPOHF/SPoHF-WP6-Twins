@@ -8,6 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
+from starlette.requests import Request
 
 from wp6_data.red import deps
 from wp6_data.red.dli import (
@@ -30,14 +31,14 @@ router = APIRouter(prefix="/dli")
 
 
 @router.get("", response_class=HTMLResponse)
-async def dli_home(user: str = Depends(deps.verify_auth)) -> str:
+async def dli_home(request: Request, user: str = Depends(deps.verify_auth)) -> str:
     """DLI dashboard overview page."""
     if not deps.db:
         return render_page("DLI - WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
 
     # Get model status for the card
     model = get_model()
-    user_is_admin = deps.is_admin(user)
+    user_is_admin = deps.is_admin(request)
 
     # Build model card based on status and permissions
     if model.is_trained() and model.stats:

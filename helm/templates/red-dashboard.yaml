@@ -39,11 +39,22 @@ spec:
                 secretKeyRef:
                   name: {{ $redSecret }}
                   key: mysql-password
-            - name: WP6_RED_AUTH_USERS
+            - name: WP6_RED_OIDC_ISSUER
+              value: {{ .Values.red.oidc.issuer | quote }}
+            - name: WP6_RED_OIDC_CLIENT_ID
+              value: {{ .Values.red.oidc.clientId | quote }}
+            - name: WP6_RED_OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ $redSecret }}
-                  key: auth-users
+                  key: oidc-client-secret
+            - name: WP6_RED_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $redSecret }}
+                  key: session-secret
+            - name: WP6_RED_ADMIN_GROUP
+              value: {{ .Values.red.oidc.adminGroup | quote }}
             {{- if .Values.red.export.enabled }}
             - name: WP6_RED_EXPORT_DIR
               value: /data/exports
