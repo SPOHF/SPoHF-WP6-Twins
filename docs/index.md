@@ -71,4 +71,4 @@ see [architecture](architecture/index.md)
 
 ## Code repository
 
-github [SPoHF-WP6-Twins repository](https://github.com/lenntt/SPoHF-WP6-Twins/actions)
+github [SPoHF-WP6-Twins repository](https://github.com/SPoHF/SPoHF-WP6-Twins/)
