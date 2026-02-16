@@ -5,6 +5,14 @@ from datetime import UTC, date, datetime, timedelta
 import pandas as pd
 import plotly.graph_objects as go
 
+_dashboard_id = "blue"
+
+
+def configure_dashboard(dashboard_id: str) -> None:
+    """Set the dashboard identity (blue/red) for styling. Call once at startup."""
+    global _dashboard_id
+    _dashboard_id = dashboard_id
+
 
 def default_date_range() -> tuple[date, date]:
     """Return default date range: last 7 days."""
@@ -167,33 +175,223 @@ BASE_CSS = """
         --pico-form-element-spacing-vertical: 0.4rem;
         --pico-form-element-spacing-horizontal: 0.6rem;
         --pico-typography-spacing-vertical: 0.75rem;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+                     Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
     }
+
+    /* --- Dashboard identity: Blue --- */
+    [data-dashboard="blue"] {
+        --dashboard-primary: #2563eb;
+        --dashboard-primary-light: #3b82f6;
+        --dashboard-primary-dark: #1d4ed8;
+        --dashboard-accent: #0ea5e9;
+        --dashboard-gradient-start: #2563eb;
+        --dashboard-gradient-end: #0ea5e9;
+        --dashboard-surface: rgba(37, 99, 235, 0.04);
+        --dashboard-surface-hover: rgba(37, 99, 235, 0.08);
+    }
+    /* --- Dashboard identity: Red --- */
+    [data-dashboard="red"] {
+        --dashboard-primary: #dc2626;
+        --dashboard-primary-light: #ef4444;
+        --dashboard-primary-dark: #b91c1c;
+        --dashboard-accent: #f97316;
+        --dashboard-gradient-start: #dc2626;
+        --dashboard-gradient-end: #f97316;
+        --dashboard-surface: rgba(220, 38, 38, 0.04);
+        --dashboard-surface-hover: rgba(220, 38, 38, 0.08);
+    }
+    /* Map Pico vars to dashboard vars — :root bumps specificity to (0,2,0)
+       to beat Pico's :root:not([data-theme=dark]) */
+    :root[data-dashboard] {
+        --pico-primary: var(--dashboard-primary);
+        --pico-primary-hover: var(--dashboard-primary-dark);
+        --pico-primary-background: var(--dashboard-primary);
+        --pico-primary-hover-background: var(--dashboard-primary-dark);
+        --pico-primary-border: var(--dashboard-primary);
+        --pico-primary-hover-border: var(--dashboard-primary-dark);
+        --pico-primary-focus: var(--dashboard-primary-light);
+        --pico-primary-underline: var(--dashboard-primary-light);
+        --pico-primary-inverse: #fff;
+    }
+    /* Dark mode — lighter hover for contrast on dark bg */
+    [data-theme="dark"][data-dashboard] {
+        --pico-primary: var(--dashboard-primary-light);
+        --pico-primary-hover: var(--dashboard-primary);
+        --pico-primary-background: var(--dashboard-primary);
+        --pico-primary-hover-background: var(--dashboard-primary-dark);
+        --pico-primary-border: var(--dashboard-primary-light);
+        --pico-primary-hover-border: var(--dashboard-primary);
+        --pico-primary-focus: var(--dashboard-primary-light);
+        --pico-primary-underline: var(--dashboard-primary-light);
+        --pico-primary-inverse: #fff;
+    }
+    [data-theme="dark"][data-dashboard="blue"] {
+        --dashboard-surface: rgba(37, 99, 235, 0.08);
+        --dashboard-surface-hover: rgba(37, 99, 235, 0.14);
+    }
+    [data-theme="dark"][data-dashboard="red"] {
+        --dashboard-surface: rgba(220, 38, 38, 0.08);
+        --dashboard-surface-hover: rgba(220, 38, 38, 0.14);
+    }
+
+    /* --- Typography --- */
+    h1, h2, h3 { letter-spacing: -0.01em; }
     h1 { --pico-typography-spacing-vertical: 1rem; }
-    article { padding: 1rem; }
-    .date-filter { padding: 0.75rem 1rem; }
-    .date-filter form { margin-bottom: 0; }
-    .date-presets { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
-    .date-presets button { width: auto; padding: 0.25rem 0.75rem; margin-bottom: 0; }
-    .date-inputs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .date-inputs label { margin-bottom: 0; }
-    .date-inputs button { width: auto; padding: 0.25rem 0.75rem; margin-bottom: 0; }
+
+    /* --- Nav bar --- */
+    .dashboard-nav {
+        position: sticky; top: 0; z-index: 100;
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0.6rem 1.2rem;
+        border-bottom: 2px solid var(--dashboard-primary);
+        background: var(--pico-background-color);
+        backdrop-filter: blur(8px);
+    }
+    .dashboard-nav .brand {
+        font-size: 1.1rem; font-weight: 700; letter-spacing: -0.02em;
+        background: linear-gradient(135deg, var(--dashboard-gradient-start),
+                                             var(--dashboard-gradient-end));
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text; color: transparent;
+    }
+    .dashboard-nav .nav-links { display: flex; align-items: center; gap: 1rem; }
+    .dashboard-nav .nav-links a {
+        font-size: 0.85rem; text-decoration: none; opacity: 0.7;
+    }
+    .dashboard-nav .nav-links a:hover { opacity: 1; }
+    #theme-toggle {
+        background: var(--dashboard-surface);
+        border: 1.5px solid var(--dashboard-primary);
+        border-radius: 8px; padding: 0.3rem 0.55rem; cursor: pointer;
+        font-size: 1rem; line-height: 1;
+        color: var(--dashboard-primary);
+    }
+    #theme-toggle:hover {
+        background: var(--dashboard-surface-hover);
+    }
+    /* Show correct icon per theme */
+    .icon-sun { display: none; }
+    .icon-moon { display: inline; }
+    [data-theme="dark"] .icon-sun { display: inline; }
+    [data-theme="dark"] .icon-moon { display: none; }
+
+    /* --- Cards / articles --- */
+    article {
+        padding: 1rem; border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    article:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
+    }
+
+    /* --- Stats cards --- */
     .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
     .stats-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
     .stats-grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
     .stats-grid.cols-auto { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-    .stats-grid article { text-align: center; margin-bottom: 0; }
-    .stat-value { font-size: 1.5em; font-weight: bold; color: #0066cc; }
-    .success { color: green !important; }
-    .warning { color: #cc6600 !important; }
+    .stats-grid article {
+        text-align: center; margin-bottom: 0;
+        background: linear-gradient(135deg, var(--dashboard-gradient-start),
+                                             var(--dashboard-gradient-end));
+        color: #fff; border: none;
+    }
+    .stats-grid article:hover { transform: translateY(-2px); }
+    .stats-grid article small { color: rgba(255,255,255,0.85); }
+    .stat-value { font-size: 1.6em; font-weight: 800; color: #fff; }
+    .success { color: #22c55e !important; }
+    .warning { color: #f59e0b !important; }
+
+    /* --- Date filter --- */
+    .date-filter {
+        padding: 0.75rem 1rem;
+        border-left: 3px solid var(--dashboard-primary);
+        background: var(--dashboard-surface);
+        border-radius: 0 12px 12px 0;
+    }
+    .date-filter form { margin-bottom: 0; }
+    .date-presets { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+    .date-presets button { width: auto; padding: 0.25rem 0.75rem; margin-bottom: 0; }
+    .date-presets button:hover { transform: translateY(-1px); }
+    .date-inputs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .date-inputs label { margin-bottom: 0; }
+    .date-inputs button { width: auto; padding: 0.25rem 0.75rem; margin-bottom: 0; }
+
+    /* --- Tables --- */
+    thead {
+        background: var(--dashboard-primary);
+        color: #fff;
+    }
+    thead th { color: #fff; --pico-color: #fff; border-color: var(--dashboard-primary); }
+    tbody tr { transition: background 0.1s ease; }
+    tbody tr:hover { background: var(--dashboard-surface-hover); }
+
+    /* --- Compare form --- */
     .compare-axes { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
     .compare-selects { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
     .compare-selects label { margin-bottom: 0; }
+
+    /* --- Buttons --- */
+    button, [type="submit"] { transition: transform 0.1s ease; }
+    button:hover, [type="submit"]:hover { transform: translateY(-1px); }
+
+    /* --- Back link & logo --- */
     .back { margin-bottom: 20px; }
     .logo { margin-bottom: 20px; }
     .logo img { max-height: 80px; }
-    footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; }
-    .footer-logo { max-height: 60px; }
+
+    /* --- Footer --- */
+    footer {
+        margin-top: 40px; padding-top: 20px;
+        border-top: 1px solid var(--pico-muted-border-color);
+    }
+    .footer-logo { max-height: 60px; transition: opacity 0.15s ease; }
+    .footer-logo:hover { opacity: 0.7; }
+
+    /* --- Charts: dark mode invert --- */
+    [data-theme="dark"] .js-plotly-plot {
+        filter: invert(0.88) hue-rotate(180deg);
+    }
 """
+
+
+THEME_JS = """
+    (function() {
+        var t = localStorage.getItem('wp6-theme') || 'light';
+        document.documentElement.dataset.theme = t;
+    })();
+"""
+
+TOGGLE_JS = """
+    document.getElementById('theme-toggle').addEventListener('click', function() {
+        var html = document.documentElement;
+        var next = html.dataset.theme === 'dark' ? 'light' : 'dark';
+        html.dataset.theme = next;
+        localStorage.setItem('wp6-theme', next);
+    });
+"""
+
+_DASHBOARD_NAMES = {"blue": "SPoHF Blue", "red": "SPoHF Red"}
+
+
+def render_nav_bar() -> str:
+    """Render a sticky nav bar with dashboard name, home link, and dark mode toggle."""
+    name = _DASHBOARD_NAMES.get(_dashboard_id, "SPoHF")
+    return f"""
+    <nav class="dashboard-nav">
+        <a href="/" class="brand">{name}</a>
+        <div class="nav-links">
+            <a href="/">Home</a>
+            <a href="/compare">Compare</a>
+            <button id="theme-toggle" title="Toggle dark mode">
+                <span class="icon-sun">&#9788;</span>
+                <span class="icon-moon">&#9790;</span>
+            </button>
+        </div>
+    </nav>
+    """
 
 
 def render_page(
@@ -220,12 +418,6 @@ def render_page(
     Returns:
         Complete HTML document as string
     """
-    logo_html = (
-        '<div class="logo"><img src="/static/interreg.png" alt="Interreg Logo"></div>'
-        if show_logo
-        else ""
-    )
-
     back_html = (
         f'<div class="back"><a href="{back_url}">&larr; Back to Dashboard</a></div>'
         if show_back_link
@@ -240,24 +432,26 @@ def render_page(
 
     return f"""
     <!DOCTYPE html>
-    <html data-theme="light">
+    <html data-dashboard="{_dashboard_id}">
     <head>
         <title>{title}</title>
         <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
         <link rel="stylesheet"
               href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css">
+        <script>{THEME_JS}</script>
         <style>
             {BASE_CSS}
             {extra_css}
         </style>
     </head>
     <body>
+        {render_nav_bar()}
         <main>
-            {logo_html}
             {back_html}
             {content}
             {footer_html}
         </main>
+        <script>{TOGGLE_JS}</script>
     </body>
     </html>
     """

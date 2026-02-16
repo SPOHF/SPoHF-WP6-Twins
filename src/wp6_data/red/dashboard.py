@@ -9,6 +9,9 @@ from fastapi.staticfiles import StaticFiles
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.routes import browse, charts, compare, dli, dli_model, export, health, home
+from wp6_data.shared.templates import configure_dashboard
+
+configure_dashboard("red")
 
 log = structlog.get_logger()
 

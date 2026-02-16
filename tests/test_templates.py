@@ -130,14 +130,14 @@ class TestRenderPage:
         assert "<title>Test</title>" in html
         assert "<p>Hello</p>" in html
 
-    def test_logo_shown_by_default(self):
+    def test_nav_bar_rendered(self):
         html = render_page("T", "content")
-        assert "interreg.png" in html
-        assert '<div class="logo">' in html
+        assert "dashboard-nav" in html
+        assert "theme-toggle" in html
 
-    def test_logo_hidden(self):
-        html = render_page("T", "content", show_logo=False)
-        assert '<div class="logo">' not in html
+    def test_dashboard_identity_default(self):
+        html = render_page("T", "content")
+        assert 'data-dashboard="blue"' in html
 
     def test_footer_shown_by_default(self):
         html = render_page("T", "content")

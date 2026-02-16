@@ -26,7 +26,13 @@ def make_line_chart(df: pd.DataFrame, title: str = "Sensor Readings Over Time") 
         color="series",
         title=title,
     )
-    fig.update_layout(hovermode="x unified", height=600)
+    fig.update_layout(
+        template="plotly_white",
+        hovermode="x unified",
+        height=600,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
     return fig
 
 
@@ -72,7 +78,14 @@ def make_dual_axis_chart(
         )
 
     chart_title = title or f"{left} vs {right}"
-    fig.update_layout(title=chart_title, hovermode="x unified", height=600)
+    fig.update_layout(
+        template="plotly_white",
+        title=chart_title,
+        hovermode="x unified",
+        height=600,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
     fig.update_yaxes(title_text=left, secondary_y=False)
     fig.update_yaxes(title_text=right, secondary_y=True)
     return fig
@@ -114,10 +127,13 @@ def make_bar_chart(
     )
 
     fig.update_layout(
+        template="plotly_white",
         hovermode="x unified",
         height=500,
         yaxis_title=y_label or y,
         xaxis_title="",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
     )
 
     if text_auto:
@@ -188,12 +204,15 @@ def make_schedule_chart(
         )
 
     fig.update_layout(
+        template="plotly_white",
         title=title,
         hovermode="x unified",
         height=500,
         yaxis_title=y_label,
         xaxis_title="",
         legend={"yanchor": "top", "y": 0.99, "xanchor": "left", "x": 0.01},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
     )
 
     return fig
@@ -245,11 +264,14 @@ def make_stacked_area_chart(
         )
 
     fig.update_layout(
+        template="plotly_white",
         title=title,
         hovermode="x unified",
         height=500,
         yaxis_title=y_label,
         xaxis_title="",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
     )
 
     return fig
