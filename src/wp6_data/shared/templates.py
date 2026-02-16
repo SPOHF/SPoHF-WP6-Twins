@@ -243,7 +243,7 @@ def render_page(
     <html data-theme="light">
     <head>
         <title>{title}</title>
-        <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+        <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
         <link rel="stylesheet"
               href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css">
         <style>
