@@ -100,12 +100,14 @@ class SyncStateManager:
                 m.last_run_success = $success,
                 m.last_run_duration_seconds = $duration,
                 m.last_run_records = $records,
-                m.last_error = $error,
-                m.last_api_status = $api_status,
-                m.last_api_error_detail = $api_detail,
                 m.total_runs = coalesce(m.total_runs, 0) + 1,
                 m.total_failures = CASE WHEN $success THEN coalesce(m.total_failures, 0)
                                         ELSE coalesce(m.total_failures, 0) + 1 END
+            WITH m
+            WHERE NOT $success
+            SET m.last_error = $error,
+                m.last_api_status = $api_status,
+                m.last_api_error_detail = $api_detail
             """,
             endpoint=self._endpoint,
             success=success,

@@ -3,7 +3,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from wp6_data.blue import deps
 from wp6_data.shared import render_page
@@ -17,7 +17,7 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/metrics")
+@router.get("/metrics", response_class=PlainTextResponse)
 async def metrics() -> str:
     """Prometheus metrics endpoint for sync observability."""
     try:
