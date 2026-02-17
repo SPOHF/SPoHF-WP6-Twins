@@ -99,6 +99,22 @@ def render_date_filter(start: date, end: date, extra_params: dict[str, str] | No
     """
 
 
+def render_card(title: str, body: str, *, description: str = "") -> str:
+    """Render content wrapped in a styled article card."""
+    desc = f"<p>{description}</p>" if description else ""
+    return f"<article><h2>{title}</h2>{desc}{body}</article>"
+
+
+def render_table(headers: list[str], rows: list[list[str]]) -> str:
+    """Render an HTML table from headers and row data (cells may contain HTML)."""
+    thead = "<tr>" + "".join(f"<th>{h}</th>" for h in headers) + "</tr>"
+    tbody = "".join(
+        "<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>"
+        for row in rows
+    )
+    return f"<table><thead>{thead}</thead><tbody>{tbody}</tbody></table>"
+
+
 def render_compare_form(
     device_data: dict[str, list[str]],
     action_url: str = "/compare/chart",
