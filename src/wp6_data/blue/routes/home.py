@@ -37,7 +37,7 @@ async def home() -> str:
     # Devices table
     device_rows = [
         [
-            f'<a href="/chart/{",".join(sorted(info["tags"]))}">{device}</a>',
+            f'<a href="/device/{device}">{device}</a>',
             ", ".join(sorted(info["tags"])),
             f'{info["readings"]:,}',
         ]

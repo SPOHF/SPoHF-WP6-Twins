@@ -36,3 +36,25 @@ async def chart(
         fig = make_line_chart(df)
 
     return render_chart_page(df, fig, f"{sensors} - WP6 Blue", start, end)
+
+
+@router.get("/device/{device}", response_class=HTMLResponse)
+async def device_chart(
+    device: str,
+    start: Annotated[date | None, Query(description="Start date")] = None,
+    end: Annotated[date | None, Query(description="End date")] = None,
+) -> str:
+    """Render chart for all sensors of a specific device."""
+    start, end, start_dt, end_dt = resolve_date_range(start, end)
+
+    df = deps.fetch_data(
+        device_names=[device], start=start_dt, end=end_dt,
+    )
+
+    tags = sorted(df["sensor"].unique()) if not df.empty else []
+    if len(tags) == 2:
+        fig = make_dual_axis_chart(df, tags[0], tags[1])
+    else:
+        fig = make_line_chart(df, title=device)
+
+    return render_chart_page(df, fig, f"{device} - WP6 Blue", start, end)

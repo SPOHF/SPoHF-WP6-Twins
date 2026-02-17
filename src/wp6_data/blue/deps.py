@@ -28,6 +28,7 @@ def get_driver() -> GraphDatabase.driver.__class__:
 
 def fetch_data(
     sensor_tags: list[str] | None = None,
+    device_names: list[str] | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
     limit: int = 50000,
@@ -37,6 +38,8 @@ def fetch_data(
         conditions = []
         if sensor_tags:
             conditions.append("s.tag IN $tags")
+        if device_names:
+            conditions.append("d.device_name IN $devices")
         if start:
             conditions.append("r.datetime_measure >= $start")
         if end:
@@ -51,7 +54,12 @@ def fetch_data(
             LIMIT $limit
             """
         result = session.run(
-            query, tags=sensor_tags, start=start, end=end, limit=limit,
+            query,
+            tags=sensor_tags,
+            devices=device_names,
+            start=start,
+            end=end,
+            limit=limit,
         )
         records = []
         for r in result:
