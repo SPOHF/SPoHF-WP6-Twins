@@ -27,7 +27,7 @@ def parse_api_timestamp(ts_str: str) -> datetime:
 class SpoHFClient:
     """Async client for SPoHF sensor data API."""
 
-    def __init__(self, base_url: str, token: str, page_size: int = 100):
+    def __init__(self, base_url: str, token: str, page_size: int = 1000):
         self.base_url = base_url.rstrip("/")
         self.page_size = page_size
         self._headers = {

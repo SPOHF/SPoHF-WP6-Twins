@@ -108,6 +108,50 @@ class SyncOrchestrator:
 
         return stats
 
+    @staticmethod
+    def _determine_sync_mode(sync_mode: str, is_initial: bool) -> bool:
+        """Determine whether to use windowed sync.
+
+        Args:
+            sync_mode: Config value — "auto", "windowed", or "incremental"
+            is_initial: Whether this is the first sync for this endpoint
+
+        Returns:
+            True if windowed mode should be used
+        """
+        mode = sync_mode.lower()
+        if mode == "windowed":
+            return True
+        if mode == "incremental":
+            return False
+        return is_initial  # auto
+
+    @staticmethod
+    def _update_sensor_stats(
+        sensor_stats: dict[str, dict], tag: str, dt_iso: str
+    ) -> None:
+        """Update per-sensor min/max/count tracking."""
+        s = sensor_stats[tag]
+        s["count"] += 1
+        if s["min"] is None or dt_iso < s["min"]:
+            s["min"] = dt_iso
+        if s["max"] is None or dt_iso > s["max"]:
+            s["max"] = dt_iso
+
+    async def _flush_batch(
+        self, session: Any, batch: list[dict[str, Any]]
+    ) -> tuple[int, int]:
+        """Flush a batch of readings to Neo4j.
+
+        Returns:
+            Tuple of (upserted, created) counts. Returns (0, 0) for empty batch.
+        """
+        if not batch:
+            return 0, 0
+        upserted, created = await batch_upsert_readings(session, batch)
+        logger.debug("batch_flushed", upserted=upserted, created=created)
+        return upserted, created
+
     async def _sync_endpoint(self, endpoint: str) -> int:
         """Sync a single API endpoint.
 
@@ -124,21 +168,13 @@ class SyncOrchestrator:
                 self.settings.sync_lookback_hours
             )
 
-            # Determine sync mode: auto (based on state), windowed, or incremental
-            sync_mode = self.settings.sync_mode.lower()
-            if sync_mode == "windowed":
-                use_windowed = True
-            elif sync_mode == "incremental":
-                use_windowed = False
-            else:  # auto
-                use_windowed = is_initial
-
+            use_windowed = self._determine_sync_mode(self.settings.sync_mode, is_initial)
             logger.info(
                 "sync_starting",
                 endpoint=endpoint,
                 since=since.isoformat(),
                 mode="windowed" if use_windowed else "incremental",
-                forced=sync_mode != "auto",
+                forced=self.settings.sync_mode.lower() != "auto",
             )
 
             batch: list[dict[str, Any]] = []
@@ -180,16 +216,10 @@ class SyncOrchestrator:
             try:
                 async for reading in fetch_iter:
                     batch.append(self._reading_to_params(reading))
-
-                    # Track per-sensor stats
-                    tag = reading.sensor_tag
-                    dt = reading.datetime_measure.isoformat()
-                    s = sensor_stats[tag]
-                    s["count"] += 1
-                    if s["min"] is None or dt < s["min"]:
-                        s["min"] = dt
-                    if s["max"] is None or dt > s["max"]:
-                        s["max"] = dt
+                    self._update_sensor_stats(
+                        sensor_stats, reading.sensor_tag,
+                        reading.datetime_measure.isoformat(),
+                    )
 
                     # Track the latest timestamp we've seen
                     reading_ts = ensure_utc(reading.timestamp)
@@ -198,22 +228,15 @@ class SyncOrchestrator:
 
                     # Flush batch when full
                     if len(batch) >= BATCH_SIZE:
-                        upserted, created = await batch_upsert_readings(session, batch)
+                        upserted, created = await self._flush_batch(session, batch)
                         total_count += upserted
                         total_created += created
-                        logger.debug(
-                            "batch_flushed",
-                            upserted=upserted,
-                            created=created,
-                            total=total_count,
-                        )
                         batch = []
 
                 # Flush remaining records
-                if batch:
-                    upserted, created = await batch_upsert_readings(session, batch)
-                    total_count += upserted
-                    total_created += created
+                upserted, created = await self._flush_batch(session, batch)
+                total_count += upserted
+                total_created += created
 
                 # Update sync state if we processed any records
                 if total_count > 0:
