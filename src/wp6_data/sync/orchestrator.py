@@ -1,6 +1,7 @@
 """Main sync orchestration logic."""
 
 import re
+from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,6 +24,30 @@ def ensure_utc(dt: datetime) -> datetime:
 logger = structlog.get_logger()
 
 BATCH_SIZE = 1000  # Records per Neo4j transaction
+
+
+def _log_window_summary(
+    window_start: datetime,
+    window_records: int,
+    total_records: int,
+    sensor_stats: dict[str, dict],
+) -> None:
+    """Log a running summary after each sync window."""
+    sensors = {
+        tag: {
+            "count": s["count"],
+            "min_date": s["min"][:19] if s["min"] else None,
+            "max_date": s["max"][:19] if s["max"] else None,
+        }
+        for tag, s in sorted(sensor_stats.items())
+    }
+    logger.info(
+        "window_summary",
+        window=window_start.strftime("%Y-%m-%d"),
+        window_records=window_records,
+        total_records=total_records,
+        sensors=sensors,
+    )
 
 
 class SyncOrchestrator:
@@ -116,6 +141,14 @@ class SyncOrchestrator:
             latest_timestamp = since
             total_count = 0
 
+            # Per-sensor stats for windowed summary
+            sensor_stats: dict[str, dict] = defaultdict(
+                lambda: {"count": 0, "min": None, "max": None}
+            )
+
+            def on_window_complete(window_start: datetime, window_records: int, total: int):
+                _log_window_summary(window_start, window_records, total, sensor_stats)
+
             # Use windowed fetch for full historical sync, regular for incremental
             if use_windowed:
                 fetch_iter = self.client.fetch_all_windowed(
@@ -123,6 +156,7 @@ class SyncOrchestrator:
                     since,
                     max_windows=self.settings.sync_max_pages,
                     window_days=self.settings.sync_window_days,
+                    on_window_complete=on_window_complete,
                 )
             else:
                 fetch_iter = self.client.fetch_all_since(
@@ -134,6 +168,16 @@ class SyncOrchestrator:
             try:
                 async for reading in fetch_iter:
                     batch.append(self._reading_to_params(reading))
+
+                    # Track per-sensor stats
+                    tag = reading.sensor_tag
+                    dt = reading.datetime_measure.isoformat()
+                    s = sensor_stats[tag]
+                    s["count"] += 1
+                    if s["min"] is None or dt < s["min"]:
+                        s["min"] = dt
+                    if s["max"] is None or dt > s["max"]:
+                        s["max"] = dt
 
                     # Track the latest timestamp we've seen
                     reading_ts = ensure_utc(reading.timestamp)

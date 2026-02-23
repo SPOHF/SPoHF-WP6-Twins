@@ -1,6 +1,6 @@
 """SPoHF API client with pagination and retry logic."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -129,6 +129,7 @@ class SpoHFClient:
         since: datetime,
         max_windows: int = 1000,
         window_days: int = 1,
+        on_window_complete: Callable[[datetime, int, int], None] | None = None,
     ) -> AsyncIterator[SensorReading]:
         """Fetch all records using timestamp windows.
 
@@ -197,6 +198,8 @@ class SpoHFClient:
                         window_records=window_records,
                         total_records=total_yielded,
                     )
+                    if on_window_complete:
+                        on_window_complete(current_ts, window_records, total_yielded)
                     consecutive_empty = 0
                 else:
                     consecutive_empty += 1
