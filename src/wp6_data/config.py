@@ -25,8 +25,9 @@ class Settings(BaseSettings):
 
     # Sync behavior
     sync_lookback_hours: int = 24  # How far back on first run
-    sync_page_size: int = 100
-    sync_max_pages: int = 100  # Safety limit
+    sync_page_size: int = 1000
+    sync_max_pages: int = 10000  # Safety limit for pagination
+    sync_max_windows: int = 1000  # Safety limit for windowed mode
     sync_mode: str = "auto"  # "auto", "windowed", or "incremental"
     sync_window_days: int = 1  # Days per window in windowed mode (use 30 for monthly)
 

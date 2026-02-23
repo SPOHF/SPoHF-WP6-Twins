@@ -154,7 +154,7 @@ class SyncOrchestrator:
                 fetch_iter = self.client.fetch_all_windowed(
                     endpoint,
                     since,
-                    max_windows=self.settings.sync_max_pages,
+                    max_windows=self.settings.sync_max_windows,
                     window_days=self.settings.sync_window_days,
                     on_window_complete=on_window_complete,
                 )
