@@ -30,6 +30,8 @@ def _log_window_summary(
     window_start: datetime,
     window_records: int,
     total_records: int,
+    total_created: int,
+    total_duplicates: int,
     sensor_stats: dict[str, dict],
 ) -> None:
     """Log a running summary after each sync window."""
@@ -45,7 +47,9 @@ def _log_window_summary(
         "window_summary",
         window=window_start.strftime("%Y-%m-%d"),
         window_records=window_records,
-        total_records=total_records,
+        total_fetched=total_records,
+        total_created=total_created,
+        total_duplicates=total_duplicates,
         sensors=sensors,
     )
 
@@ -140,14 +144,22 @@ class SyncOrchestrator:
             batch: list[dict[str, Any]] = []
             latest_timestamp = since
             total_count = 0
+            total_created = 0
 
-            # Per-sensor stats for windowed summary
+            # Per-sensor stats (counts + date ranges)
             sensor_stats: dict[str, dict] = defaultdict(
                 lambda: {"count": 0, "min": None, "max": None}
             )
 
             def on_window_complete(window_start: datetime, window_records: int, total: int):
-                _log_window_summary(window_start, window_records, total, sensor_stats)
+                _log_window_summary(
+                    window_start,
+                    window_records,
+                    total,
+                    total_created,
+                    total_count - total_created,
+                    sensor_stats,
+                )
 
             # Use windowed fetch for full historical sync, regular for incremental
             if use_windowed:
@@ -186,15 +198,22 @@ class SyncOrchestrator:
 
                     # Flush batch when full
                     if len(batch) >= BATCH_SIZE:
-                        await batch_upsert_readings(session, batch)
-                        total_count += len(batch)
-                        logger.debug("batch_flushed", count=len(batch), total=total_count)
+                        upserted, created = await batch_upsert_readings(session, batch)
+                        total_count += upserted
+                        total_created += created
+                        logger.debug(
+                            "batch_flushed",
+                            upserted=upserted,
+                            created=created,
+                            total=total_count,
+                        )
                         batch = []
 
                 # Flush remaining records
                 if batch:
-                    await batch_upsert_readings(session, batch)
-                    total_count += len(batch)
+                    upserted, created = await batch_upsert_readings(session, batch)
+                    total_count += upserted
+                    total_created += created
 
                 # Update sync state if we processed any records
                 if total_count > 0:
@@ -212,6 +231,8 @@ class SyncOrchestrator:
                     "endpoint_synced",
                     endpoint=endpoint,
                     records=total_count,
+                    created=total_created,
+                    duplicates=total_count - total_created,
                     latest=latest_timestamp.isoformat(),
                 )
                 return total_count

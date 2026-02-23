@@ -49,22 +49,28 @@ ON CREATE SET
     reading.value = toFloat(r.value),
     reading.raw_value = r.value,
     reading.api_timestamp = datetime(r.api_timestamp),
-    reading.synced_at = datetime()
+    reading.synced_at = datetime(),
+    reading._created = true
 ON MATCH SET
     reading.value = toFloat(r.value),
     reading.raw_value = r.value,
     reading.api_timestamp = datetime(r.api_timestamp),
-    reading.updated_at = datetime()
+    reading.updated_at = datetime(),
+    reading._created = false
 MERGE (s)-[:RECORDED]->(reading)
 
-RETURN count(reading) AS upserted_count
+WITH reading
+RETURN
+    count(reading) AS upserted_count,
+    count(CASE WHEN reading._created THEN 1 END) AS created_count
+
 """
 
 
 async def batch_upsert_readings(
     session: AsyncSession,
     readings: list[dict[str, Any]],
-) -> int:
+) -> tuple[int, int]:
     """Upsert a batch of readings to Neo4j.
 
     Args:
@@ -74,11 +80,13 @@ async def batch_upsert_readings(
             - value, datetime_measure, api_timestamp
 
     Returns:
-        Number of readings upserted
+        Tuple of (total upserted, newly created)
     """
     if not readings:
-        return 0
+        return 0, 0
 
     result = await session.run(BATCH_UPSERT_QUERY, readings=readings)
     record = await result.single()
-    return record["upserted_count"] if record else 0
+    if not record:
+        return 0, 0
+    return record["upserted_count"], record["created_count"]
