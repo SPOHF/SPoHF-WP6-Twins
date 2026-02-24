@@ -42,7 +42,7 @@ async def home(user: str = Depends(deps.verify_auth)) -> str:
         ])
 
     sensor_table = render_table(
-        ["Sensor Type", "Devices", "Readings", "Measurements", "Download"],
+        ["Device Type", "Devices", "Readings", "Measurements", "Download"],
         sensor_rows,
     )
 
@@ -60,7 +60,7 @@ async def home(user: str = Depends(deps.verify_auth)) -> str:
         if measurement not in grouped_measurements
     ]
     measurement_table = render_table(
-        ["Measurement", "Available in Sensors"],
+        ["Measurement", "Available in Device"],
         measurement_rows,
     )
 
@@ -89,7 +89,7 @@ async def home(user: str = Depends(deps.verify_auth)) -> str:
                       description="View all sensors measuring the same thing:")}
 
         {render_card(
-            "Browse by Sensor Type",
+            "Browse by Device Type",
             sensor_table + deps._export_info_html(export_meta),
         )}
 
