@@ -94,7 +94,7 @@ async def home(user: str = Depends(deps.verify_auth)) -> str:
         )}
 
         <a href="/static/red/sensor_locations.docx" download role="button" class="outline"
-           style="width:100%">Download Sensor Locations (docx)</a>
+           style="width:100%">Download Sensor Device Identification (docx)</a>
     """
 
     return render_page("WP6 Red - Sensor Dashboard", content, extra_css=extra_css)
