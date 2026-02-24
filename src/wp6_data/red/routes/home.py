@@ -92,6 +92,9 @@ async def home(user: str = Depends(deps.verify_auth)) -> str:
             "Browse by Sensor Type",
             sensor_table + deps._export_info_html(export_meta),
         )}
+
+        <a href="/static/sensor_locations.docx" download role="button" class="outline"
+           style="width:100%">Download Sensor Locations (docx)</a>
     """
 
     return render_page("WP6 Red - Sensor Dashboard", content, extra_css=extra_css)
