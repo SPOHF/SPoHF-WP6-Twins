@@ -28,3 +28,6 @@ htmlcov/
 
 # Trained ML models
 .models/
+
+# Pesky temp microsoft files
+~$*.docx
