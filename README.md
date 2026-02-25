@@ -15,12 +15,14 @@ Both dashboards serve interactive Plotly charts via FastAPI.
 ## Quick Start
 
 ```bash
-cp .env.example .env       # Configure credentials
-uv sync                    # Install dependencies
-docker compose up -d       # Start Neo4j (for blue)
-uv run python -m wp6_data  # Run sync job
-uv run python -m wp6_data.blue.dashboard  # Blue dashboard on :8000
-uv run python -m wp6_data.red.dashboard   # Red dashboard on :8000
+uv sync                        # Install dependencies
+uv sync --extra dev            # Install with dev tools
+uv run ruff check src/ --fix   # Lint
+uv run pytest                  # Run tests
+uv run pytest tests/e2e/ -v    # Run end-to-end tests (requires running blue dashboard + neo4j)
+uv run python -m wp6_data      # Run sync job (requires env vars)
+uv run python -m wp6_data.blue.dashboard  # Run blue dashboard (port 8000)
+uv run python -m wp6_data.red.dashboard   # Run red dashboard (port 8000)
 ```
 
 ## Configuration
