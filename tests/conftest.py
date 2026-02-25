@@ -49,11 +49,8 @@ def mock_settings():
     s.neo4j_user = "neo4j"
     s.neo4j_password = "password"
     s.neo4j_database = "neo4j"
-    s.sync_lookback_hours = 24
     s.sync_page_size = 100
-    s.sync_max_pages = 10
-    s.sync_max_windows = 10
-    s.sync_mode = "auto"
+    s.sync_mode = "incremental"
     s.sync_window_days = 1
     s.endpoint_list = ["yookr-data"]
     return s

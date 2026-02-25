@@ -2,7 +2,8 @@
 
 import re
 from collections import defaultdict
-from datetime import UTC, datetime
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -24,6 +25,9 @@ def ensure_utc(dt: datetime) -> datetime:
 logger = structlog.get_logger()
 
 BATCH_SIZE = 1000  # Records per Neo4j transaction
+FULL_SYNC_START = datetime(2024, 1, 1, tzinfo=UTC)
+INCREMENTAL_LOOKBACK_DAYS = 30
+CONSECUTIVE_DUPE_WINDOW_THRESHOLD = 3
 
 
 def _log_window_summary(
@@ -52,6 +56,25 @@ def _log_window_summary(
         total_duplicates=total_duplicates,
         sensors=sensors,
     )
+
+
+def _generate_windows(
+    mode: str, window_days: int
+) -> Iterator[tuple[datetime, datetime]]:
+    """Generate (window_start, window_end) tuples, backwards from now.
+
+    Full mode: from now+1d back to 2024-01-01.
+    Incremental mode: from now+1d back by INCREMENTAL_LOOKBACK_DAYS.
+    """
+    end = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+
+    start = FULL_SYNC_START if mode == "full" else end - timedelta(days=INCREMENTAL_LOOKBACK_DAYS)
+
+    window_end = end
+    while window_end > start:
+        window_start = max(window_end - timedelta(days=window_days), start)
+        yield window_start, window_end
+        window_end = window_start
 
 
 class SyncOrchestrator:
@@ -109,24 +132,6 @@ class SyncOrchestrator:
         return stats
 
     @staticmethod
-    def _determine_sync_mode(sync_mode: str, is_initial: bool) -> bool:
-        """Determine whether to use windowed sync.
-
-        Args:
-            sync_mode: Config value — "auto", "windowed", or "incremental"
-            is_initial: Whether this is the first sync for this endpoint
-
-        Returns:
-            True if windowed mode should be used
-        """
-        mode = sync_mode.lower()
-        if mode == "windowed":
-            return True
-        if mode == "incremental":
-            return False
-        return is_initial  # auto
-
-    @staticmethod
     def _update_sensor_stats(
         sensor_stats: dict[str, dict], tag: str, dt_iso: str
     ) -> None:
@@ -153,93 +158,100 @@ class SyncOrchestrator:
         return upserted, created
 
     async def _sync_endpoint(self, endpoint: str) -> int:
-        """Sync a single API endpoint.
+        """Sync a single API endpoint using time windows.
 
-        Uses windowed fetching to get all historical data when doing initial sync,
-        or regular pagination for incremental syncs.
+        Generates windows backwards from now. In incremental mode, stops early
+        when consecutive windows contain only duplicate records.
 
         Returns:
-            Number of records synced
+            Number of records upserted
         """
         start_time = datetime.now(UTC)
+        mode = self.settings.sync_mode.lower()
+
         async with self.neo4j.session() as session:
             state = SyncStateManager(session, endpoint)
-            since, is_initial = await state.get_last_timestamp_with_status(
-                self.settings.sync_lookback_hours
-            )
 
-            use_windowed = self._determine_sync_mode(self.settings.sync_mode, is_initial)
             logger.info(
                 "sync_starting",
                 endpoint=endpoint,
-                since=since.isoformat(),
-                mode="windowed" if use_windowed else "incremental",
-                forced=self.settings.sync_mode.lower() != "auto",
+                mode=mode,
+                window_days=self.settings.sync_window_days,
             )
 
             batch: list[dict[str, Any]] = []
-            latest_timestamp = since
+            latest_timestamp: datetime | None = None
             total_count = 0
             total_created = 0
+            consecutive_dupe_windows = 0
 
-            # Per-sensor stats (counts + date ranges)
             sensor_stats: dict[str, dict] = defaultdict(
                 lambda: {"count": 0, "min": None, "max": None}
             )
 
-            def on_window_complete(window_start: datetime, window_records: int, total: int):
-                _log_window_summary(
-                    window_start,
-                    window_records,
-                    total,
-                    total_created,
-                    total_count - total_created,
-                    sensor_stats,
-                )
-
-            # Use windowed fetch for full historical sync, regular for incremental
-            if use_windowed:
-                fetch_iter = self.client.fetch_all_windowed(
-                    endpoint,
-                    since,
-                    max_windows=self.settings.sync_max_windows,
-                    window_days=self.settings.sync_window_days,
-                    on_window_complete=on_window_complete,
-                )
-            else:
-                fetch_iter = self.client.fetch_all_since(
-                    endpoint,
-                    since,
-                    self.settings.sync_max_pages,
-                )
+            windows = _generate_windows(mode, self.settings.sync_window_days)
 
             try:
-                async for reading in fetch_iter:
-                    batch.append(self._reading_to_params(reading))
-                    self._update_sensor_stats(
-                        sensor_stats, reading.sensor_tag,
-                        reading.datetime_measure.isoformat(),
+                for window_start, window_end in windows:
+                    window_upserted = 0
+                    window_created = 0
+
+                    async for reading in self.client.fetch_window(
+                        endpoint, window_start, window_end
+                    ):
+                        batch.append(self._reading_to_params(reading))
+                        self._update_sensor_stats(
+                            sensor_stats,
+                            reading.sensor_tag,
+                            reading.datetime_measure.isoformat(),
+                        )
+
+                        reading_ts = ensure_utc(reading.timestamp)
+                        if latest_timestamp is None or reading_ts > latest_timestamp:
+                            latest_timestamp = reading_ts
+
+                        if len(batch) >= BATCH_SIZE:
+                            upserted, created = await self._flush_batch(session, batch)
+                            total_count += upserted
+                            total_created += created
+                            window_upserted += upserted
+                            window_created += created
+                            batch = []
+
+                    # Flush remaining batch for this window
+                    upserted, created = await self._flush_batch(session, batch)
+                    total_count += upserted
+                    total_created += created
+                    window_upserted += upserted
+                    window_created += created
+                    batch = []
+
+                    _log_window_summary(
+                        window_start,
+                        window_upserted,
+                        total_count,
+                        total_created,
+                        total_count - total_created,
+                        sensor_stats,
                     )
 
-                    # Track the latest timestamp we've seen
-                    reading_ts = ensure_utc(reading.timestamp)
-                    if reading_ts > latest_timestamp:
-                        latest_timestamp = reading_ts
+                    # Incremental early-stop: if all records in window were dupes
+                    if mode == "incremental" and window_upserted > 0:
+                        if window_created == 0:
+                            consecutive_dupe_windows += 1
+                        else:
+                            consecutive_dupe_windows = 0
 
-                    # Flush batch when full
-                    if len(batch) >= BATCH_SIZE:
-                        upserted, created = await self._flush_batch(session, batch)
-                        total_count += upserted
-                        total_created += created
-                        batch = []
-
-                # Flush remaining records
-                upserted, created = await self._flush_batch(session, batch)
-                total_count += upserted
-                total_created += created
+                        if consecutive_dupe_windows >= CONSECUTIVE_DUPE_WINDOW_THRESHOLD:
+                            logger.info(
+                                "incremental_early_stop",
+                                endpoint=endpoint,
+                                consecutive_dupe_windows=consecutive_dupe_windows,
+                            )
+                            break
 
                 # Update sync state if we processed any records
-                if total_count > 0:
+                if total_count > 0 and latest_timestamp is not None:
                     await state.update_timestamp(latest_timestamp, total_count)
 
                 # Record successful run
@@ -256,12 +268,11 @@ class SyncOrchestrator:
                     records=total_count,
                     created=total_created,
                     duplicates=total_count - total_created,
-                    latest=latest_timestamp.isoformat(),
+                    latest=latest_timestamp.isoformat() if latest_timestamp else None,
                 )
                 return total_count
 
             except (httpx.HTTPStatusError, RetryError) as e:
-                # Extract API error details
                 duration = (datetime.now(UTC) - start_time).total_seconds()
                 api_status, api_detail, error_msg = self._extract_api_error(e)
 
@@ -292,7 +303,6 @@ class SyncOrchestrator:
         if isinstance(exc, httpx.HTTPStatusError):
             status = exc.response.status_code
             detail = exc.response.text[:500] if exc.response.text else None
-            # Extract just the status message for the error field
             match = re.search(r"(\d{3}\s+\w+[\w\s]*)", str(exc))
             msg = match.group(1) if match else str(exc)[:200]
             return status, detail, msg

@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import os
 import sys
 from typing import Any
 
@@ -41,19 +40,7 @@ def configure_logging(settings: Settings) -> None:
 
 def main() -> int:
     """Main entry point for sync job."""
-    api_token = os.environ.get("WP6_API_TOKEN")
-    neo4j_uri = os.environ.get("WP6_NEO4J_URI")
-    neo4j_password = os.environ.get("WP6_NEO4J_PASSWORD")
-
-    if api_token is None or neo4j_uri is None or neo4j_password is None:
-        raise ValueError("Missing one or more required environment variables: "\
-                         "WP6_API_TOKEN, WP6_NEO4J_URI, WP6_NEO4J_PASSWORD")
-
-    settings = Settings(
-        api_token=api_token,
-        neo4j_uri=neo4j_uri,
-        neo4j_password=neo4j_password,
-    )
+    settings = Settings()  # reads from .env + WP6_* env vars via pydantic-settings
 
     configure_logging(settings)
     logger = structlog.get_logger()
@@ -64,7 +51,7 @@ def main() -> int:
         api_base_url=settings.api_base_url,
         neo4j_host=settings.neo4j_uri.split("://")[-1].split(":")[0],
         endpoints=settings.endpoint_list,
-        lookback_hours=settings.sync_lookback_hours,
+        sync_mode=settings.sync_mode,
     )
 
     try:

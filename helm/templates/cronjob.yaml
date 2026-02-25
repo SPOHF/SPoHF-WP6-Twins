@@ -43,12 +43,10 @@ spec:
                     secretKeyRef:
                       name: {{ .Values.secrets.existingSecret | default (printf "%s-secrets" .Chart.Name) }}
                       key: neo4j-password
-                - name: WP6_SYNC_LOOKBACK_HOURS
-                  value: {{ .Values.sync.lookbackHours | quote }}
                 - name: WP6_SYNC_PAGE_SIZE
                   value: {{ .Values.sync.pageSize | quote }}
-                - name: WP6_SYNC_MAX_PAGES
-                  value: {{ .Values.sync.maxPages | quote }}
+                - name: WP6_SYNC_WINDOW_DAYS
+                  value: {{ .Values.sync.windowDays | quote }}
                 - name: WP6_ENDPOINTS
                   value: {{ .Values.sync.endpoints | quote }}
                 - name: WP6_SYNC_MODE

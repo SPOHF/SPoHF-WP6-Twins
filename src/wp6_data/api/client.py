@@ -1,7 +1,7 @@
 """SPoHF API client with pagination and retry logic."""
 
-from collections.abc import AsyncIterator, Callable
-from datetime import UTC, datetime, timedelta
+from collections.abc import AsyncIterator
+from datetime import datetime
 
 import httpx
 import structlog
@@ -44,13 +44,15 @@ class SpoHFClient:
         self,
         client: httpx.AsyncClient,
         endpoint: str,
-        timestamp: datetime,
+        timestamp_from: datetime,
+        timestamp_until: datetime,
         offset: int,
     ) -> ApiResponse:
         """Fetch a single page with retry logic."""
         url = f"{self.base_url}/api/v1/data/{endpoint}"
         params = {
-            "timestamp": timestamp.isoformat(),
+            "timestamp_from": timestamp_from.isoformat(),
+            "timestamp_until": timestamp_until.isoformat(),
             "size": str(int(self.page_size)),
             "from": str(int(offset)),
         }
@@ -68,18 +70,18 @@ class SpoHFClient:
         data = response.json()
         return ApiResponse.model_validate(data)
 
-    async def fetch_all_since(
+    async def fetch_window(
         self,
         endpoint: str,
-        since: datetime,
-        max_pages: int = 100,
+        timestamp_from: datetime,
+        timestamp_until: datetime,
     ) -> AsyncIterator[SensorReading]:
-        """Paginate through all records since timestamp.
+        """Paginate all records in one time window.
 
         Args:
             endpoint: API endpoint (e.g., "yookr-data")
-            since: Fetch records with timestamp >= this value
-            max_pages: Safety limit on pagination
+            timestamp_from: Start of window (inclusive)
+            timestamp_until: End of window (exclusive)
 
         Yields:
             SensorReading objects
@@ -89,9 +91,11 @@ class SpoHFClient:
             page_count = 0
             total_yielded = 0
 
-            while page_count < max_pages:
+            while True:
                 try:
-                    response = await self._fetch_page(client, endpoint, since, offset)
+                    response = await self._fetch_page(
+                        client, endpoint, timestamp_from, timestamp_until, offset
+                    )
                 except httpx.HTTPStatusError as e:
                     logger.error(
                         "api_error",
@@ -102,119 +106,24 @@ class SpoHFClient:
                     raise
 
                 if not response.results:
-                    logger.debug("no_more_results", endpoint=endpoint, offset=offset)
                     break
 
                 for reading in response.results:
                     yield reading
                     total_yielded += 1
 
-                # Check if we've reached the last page
+                page_count += 1
+
                 if response.count < self.page_size:
                     break
 
                 offset += self.page_size
-                page_count += 1
 
             logger.info(
-                "fetch_complete",
+                "fetch_window_complete",
                 endpoint=endpoint,
-                pages=page_count + 1,
+                window_from=timestamp_from.strftime("%Y-%m-%d"),
+                window_until=timestamp_until.strftime("%Y-%m-%d"),
+                pages=page_count,
                 records=total_yielded,
-            )
-
-    async def fetch_all_windowed(
-        self,
-        endpoint: str,
-        since: datetime,
-        max_windows: int = 1000,
-        window_days: int = 1,
-        on_window_complete: Callable[[datetime, int, int], None] | None = None,
-    ) -> AsyncIterator[SensorReading]:
-        """Fetch all records using timestamp windows.
-
-        The API returns max 10k records per timestamp window, but different
-        timestamp values access different data. This method iterates through
-        time windows to fetch all historical data.
-
-        Args:
-            endpoint: API endpoint (e.g., "yookr-data")
-            since: Start fetching from this timestamp
-            max_windows: Safety limit on number of windows
-            window_days: Days per window (1 for daily, 30 for monthly)
-
-        Yields:
-            SensorReading objects (may include duplicates across windows)
-        """
-        async with httpx.AsyncClient() as client:
-            # Always start from 2024-01-01 for windowed fetch to get all historical data
-            current_ts = datetime(2024, 1, 1, tzinfo=UTC)
-
-            # End at tomorrow to catch all data
-            end_ts = datetime.now(UTC) + timedelta(days=1)
-
-            window_count = 0
-            total_yielded = 0
-            consecutive_empty = 0
-
-            while current_ts < end_ts and window_count < max_windows:
-                # Fetch all pages for this daily window
-                offset = 0
-                window_records = 0
-
-                while True:
-                    try:
-                        response = await self._fetch_page(
-                            client, endpoint, current_ts, offset
-                        )
-                    except httpx.HTTPStatusError as e:
-                        logger.error(
-                            "api_error",
-                            endpoint=endpoint,
-                            status=e.response.status_code,
-                            detail=e.response.text[:200],
-                        )
-                        raise
-
-                    if not response.results:
-                        break
-
-                    for reading in response.results:
-                        yield reading
-                        total_yielded += 1
-                        window_records += 1
-
-                    if response.count < self.page_size:
-                        break
-                    offset += self.page_size
-
-                if window_records > 0:
-                    window_end = current_ts + timedelta(days=window_days - 1)
-                    logger.info(
-                        "window_progress",
-                        endpoint=endpoint,
-                        window_start=current_ts.strftime("%Y-%m-%d"),
-                        window_end=window_end.strftime("%Y-%m-%d"),
-                        window_records=window_records,
-                        total_records=total_yielded,
-                    )
-                    if on_window_complete:
-                        on_window_complete(current_ts, window_records, total_yielded)
-                    consecutive_empty = 0
-                else:
-                    consecutive_empty += 1
-
-                # Stop if we've had 3 consecutive empty windows
-                if consecutive_empty >= 3:
-                    break
-
-                # Move to next window
-                current_ts = current_ts + timedelta(days=window_days)
-                window_count += 1
-
-            logger.info(
-                "windowed_fetch_complete",
-                endpoint=endpoint,
-                windows=window_count,
-                total_records=total_yielded,
             )

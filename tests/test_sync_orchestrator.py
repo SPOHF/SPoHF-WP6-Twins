@@ -1,13 +1,18 @@
 """Tests for wp6_data.sync.orchestrator — patch SyncStateManager + batch_upsert + mock client."""
 
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
-from wp6_data.sync.orchestrator import SyncOrchestrator, ensure_utc
+from wp6_data.sync.orchestrator import (
+    CONSECUTIVE_DUPE_WINDOW_THRESHOLD,
+    SyncOrchestrator,
+    _generate_windows,
+    ensure_utc,
+)
 
 from .conftest import make_reading
 
@@ -26,22 +31,31 @@ class TestEnsureUtc:
         assert result is dt
 
 
-class TestDetermineSyncMode:
-    def test_windowed_forced(self):
-        assert SyncOrchestrator._determine_sync_mode("windowed", False) is True
+class TestGenerateWindows:
+    def test_full_mode_starts_from_2024(self):
+        windows = list(_generate_windows("full", 1))
+        # Last window (generated last, furthest back) should start at 2024-01-01
+        assert windows[-1][0] == datetime(2024, 1, 1, tzinfo=UTC)
 
-    def test_incremental_forced(self):
-        assert SyncOrchestrator._determine_sync_mode("incremental", True) is False
+    def test_incremental_mode_limited_lookback(self):
+        windows = list(_generate_windows("incremental", 1))
+        # Should have ~30 windows (INCREMENTAL_LOOKBACK_DAYS)
+        assert 29 <= len(windows) <= 31
 
-    def test_auto_initial_uses_windowed(self):
-        assert SyncOrchestrator._determine_sync_mode("auto", True) is True
+    def test_windows_go_backwards(self):
+        windows = list(_generate_windows("incremental", 1))
+        # First window should be most recent
+        assert windows[0][1] > windows[-1][1]
 
-    def test_auto_subsequent_uses_incremental(self):
-        assert SyncOrchestrator._determine_sync_mode("auto", False) is False
+    def test_windows_are_contiguous(self):
+        windows = list(_generate_windows("incremental", 1))
+        for i in range(len(windows) - 1):
+            assert windows[i][0] == windows[i + 1][1]
 
-    def test_case_insensitive(self):
-        assert SyncOrchestrator._determine_sync_mode("WINDOWED", False) is True
-        assert SyncOrchestrator._determine_sync_mode("Incremental", True) is False
+    def test_multi_day_windows(self):
+        windows = list(_generate_windows("incremental", 7))
+        for start, end in windows:
+            assert (end - start).days <= 7
 
 
 class TestUpdateSensorStats:
@@ -127,7 +141,7 @@ def _make_orchestrator(mock_settings):
 
 class TestSyncEndpoint:
     @pytest.mark.asyncio()
-    async def test_incremental_calls_fetch_all_since(self, mock_settings):
+    async def test_empty_sync_returns_zero(self, mock_settings):
         mock_settings.sync_mode = "incremental"
         orch = _make_orchestrator(mock_settings)
 
@@ -135,19 +149,14 @@ class TestSyncEndpoint:
         orch.neo4j.session.return_value.__aenter__ = AsyncMock(return_value=session)
         orch.neo4j.session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        # No readings returned
         async def empty_iter(*args, **kwargs):
             return
             yield  # noqa: E111 — make it an async generator
 
-        orch.client.fetch_all_since = empty_iter
+        orch.client.fetch_window = empty_iter
 
         with patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState:
             state_inst = AsyncMock()
-            state_inst.get_last_timestamp_with_status.return_value = (
-                datetime(2024, 1, 1, tzinfo=UTC),
-                False,
-            )
             MockState.return_value = state_inst
 
             with patch(
@@ -159,38 +168,6 @@ class TestSyncEndpoint:
 
         assert count == 0
         state_inst.record_run_result.assert_awaited_once()
-
-    @pytest.mark.asyncio()
-    async def test_windowed_calls_fetch_all_windowed(self, mock_settings):
-        mock_settings.sync_mode = "windowed"
-        orch = _make_orchestrator(mock_settings)
-
-        session = AsyncMock()
-        orch.neo4j.session.return_value.__aenter__ = AsyncMock(return_value=session)
-        orch.neo4j.session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        async def empty_iter(*args, **kwargs):
-            return
-            yield
-
-        orch.client.fetch_all_windowed = empty_iter
-
-        with patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState:
-            state_inst = AsyncMock()
-            state_inst.get_last_timestamp_with_status.return_value = (
-                datetime(2024, 1, 1, tzinfo=UTC),
-                True,
-            )
-            MockState.return_value = state_inst
-
-            with patch(
-                "wp6_data.sync.orchestrator.batch_upsert_readings",
-                new_callable=AsyncMock,
-                return_value=(0, 0),
-            ):
-                count = await orch._sync_endpoint("yookr-data")
-
-        assert count == 0
 
     @pytest.mark.asyncio()
     async def test_empty_sync_skips_timestamp_update(self, mock_settings):
@@ -205,14 +182,10 @@ class TestSyncEndpoint:
             return
             yield
 
-        orch.client.fetch_all_since = empty_iter
+        orch.client.fetch_window = empty_iter
 
         with patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState:
             state_inst = AsyncMock()
-            state_inst.get_last_timestamp_with_status.return_value = (
-                datetime(2024, 1, 1, tzinfo=UTC),
-                False,
-            )
             MockState.return_value = state_inst
 
             with patch(
@@ -241,14 +214,10 @@ class TestSyncEndpoint:
             )
             yield  # noqa: E111
 
-        orch.client.fetch_all_since = error_iter
+        orch.client.fetch_window = error_iter
 
         with patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState:
             state_inst = AsyncMock()
-            state_inst.get_last_timestamp_with_status.return_value = (
-                datetime(2024, 1, 1, tzinfo=UTC),
-                False,
-            )
             MockState.return_value = state_inst
 
             with pytest.raises(httpx.HTTPStatusError):
@@ -257,6 +226,49 @@ class TestSyncEndpoint:
         state_inst.record_run_result.assert_awaited_once()
         call_kwargs = state_inst.record_run_result.call_args.kwargs
         assert call_kwargs["success"] is False
+
+    @pytest.mark.asyncio()
+    async def test_incremental_early_stop_on_consecutive_dupes(self, mock_settings):
+        """When all records in consecutive windows are duplicates, stop early."""
+        mock_settings.sync_mode = "incremental"
+        orch = _make_orchestrator(mock_settings)
+
+        session = AsyncMock()
+        orch.neo4j.session.return_value.__aenter__ = AsyncMock(return_value=session)
+        orch.neo4j.session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        reading = make_reading()
+
+        async def one_reading_iter(*args, **kwargs):
+            yield reading
+
+        orch.client.fetch_window = one_reading_iter
+
+        with patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState:
+            state_inst = AsyncMock()
+            MockState.return_value = state_inst
+
+            with (
+                patch(
+                    "wp6_data.sync.orchestrator.batch_upsert_readings",
+                    new_callable=AsyncMock,
+                    return_value=(1, 0),  # upserted=1, created=0 → all dupes
+                ),
+                patch(
+                    "wp6_data.sync.orchestrator._generate_windows"
+                ) as mock_gen,
+            ):
+                # Generate more windows than the threshold
+                now = datetime.now(UTC)
+                mock_gen.return_value = iter([
+                    (now - timedelta(days=i + 1), now - timedelta(days=i))
+                    for i in range(10)
+                ])
+                count = await orch._sync_endpoint("yookr-data")
+
+        # Should have stopped after CONSECUTIVE_DUPE_WINDOW_THRESHOLD windows
+        # Each window upserts 1 record, so total = threshold * 1
+        assert count == CONSECUTIVE_DUPE_WINDOW_THRESHOLD
 
 
 # --- run() ---

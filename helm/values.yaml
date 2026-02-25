@@ -31,11 +31,10 @@ dashboard:
 sync:
   enabled: true
   schedule: "*/15 * * * *"  # Every 15 minutes
-  lookbackHours: 24
   pageSize: 1000
-  maxPages: 1000
   endpoints: "yookr-data"
-  mode: "auto"  # "auto", "windowed" (full historical), or "incremental"
+  mode: "incremental"  # "full" or "incremental"
+  windowDays: 1
   resources:
     requests:
       cpu: 100m
