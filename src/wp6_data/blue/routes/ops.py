@@ -223,15 +223,8 @@ def _build_coverage_html() -> str:
 
 
 @router.get("/status", response_class=HTMLResponse)
-async def status(rebuilt: int | None = Query(default=None)) -> str:
-    """Combined status page: sync status, data coverage, and maintenance."""
-    rebuilt_msg = ""
-    if rebuilt is not None:
-        rebuilt_msg = (
-            f'<p role="alert" style="color: var(--pico-ins-color);">'
-            f"Coverage index rebuilt: {rebuilt:,} entries.</p>"
-        )
-
+async def status() -> str:
+    """Combined status page: sync status and data coverage."""
     # Sync status section
     sync_table = _build_sync_table()
     sync_html = sync_table if sync_table else "<p>No sync metadata found.</p>"
@@ -241,22 +234,42 @@ async def status(rebuilt: int | None = Query(default=None)) -> str:
 
     content = f"""
         <h1>Status</h1>
-        {rebuilt_msg}
 
         {render_card("Sync Status", sync_html)}
 
         {render_card("Data Coverage", coverage_html,
                       description="Each block is one week. April 2024 to now.")}
-
-        {render_card(
-            "Maintenance",
-            '<form method="post" action="/rebuild-coverage">'
-            '<button type="submit">Rebuild Coverage Index</button></form>'
-            '<p><small><a href="/metrics">Prometheus metrics</a></small></p>',
-        )}
     """
 
     return render_page("Status - WP6 Blue", content, show_back_link=True, extra_css=COVERAGE_CSS)
+
+
+@router.get("/maintenance", response_class=HTMLResponse)
+async def maintenance(rebuilt: int | None = Query(default=None)) -> str:
+    """Hidden maintenance page for ops tools."""
+    rebuilt_msg = ""
+    if rebuilt is not None:
+        rebuilt_msg = (
+            f'<p role="alert" style="color: var(--pico-ins-color);">'
+            f"Coverage index rebuilt: {rebuilt:,} entries.</p>"
+        )
+
+    content = f"""
+        <h1>Maintenance</h1>
+        {rebuilt_msg}
+        {render_card(
+            "Coverage Index",
+            '<form method="post" action="/rebuild-coverage">'
+            '<button type="submit">Rebuild Coverage Index</button></form>',
+            description="Rebuild DailyCoverage nodes from all existing Readings.",
+        )}
+        {render_card(
+            "Metrics",
+            '<p><a href="/metrics">Prometheus metrics</a></p>',
+        )}
+    """
+
+    return render_page("Maintenance - WP6 Blue", content, show_back_link=True)
 
 
 @router.post("/rebuild-coverage")
@@ -272,4 +285,4 @@ async def rebuild_coverage() -> RedirectResponse:
         )
         record = result.single()
         count = record["total"] if record else 0
-    return RedirectResponse(url=f"/status?rebuilt={count}", status_code=303)
+    return RedirectResponse(url=f"/maintenance?rebuilt={count}", status_code=303)
