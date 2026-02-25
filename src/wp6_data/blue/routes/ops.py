@@ -275,7 +275,7 @@ async def maintenance(rebuilt: int | None = Query(default=None)) -> str:
 @router.post("/rebuild-coverage")
 async def rebuild_coverage() -> RedirectResponse:
     """Rebuild all DailyCoverage nodes from existing Readings."""
-    with deps.get_driver() as driver, driver.session() as session:
+    with deps._driver.session() as session:
         result = session.run(
             "MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading) "
             "WITH DISTINCT d.device_name AS dn, s.tag AS st, "

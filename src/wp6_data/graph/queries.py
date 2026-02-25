@@ -18,6 +18,9 @@ CONSTRAINTS = [
     # Index on Project name
     """CREATE INDEX project_name IF NOT EXISTS
        FOR (p:Project) ON (p.name)""",
+    # Composite index on Reading for efficient MERGE lookups
+    """CREATE INDEX reading_composite IF NOT EXISTS
+       FOR (r:Reading) ON (r.sensor_id, r.tag, r.datetime_measure)""",
     # Unique constraint on DailyCoverage (device + sensor + day)
     """CREATE CONSTRAINT daily_coverage_unique IF NOT EXISTS
        FOR (c:DailyCoverage) REQUIRE (c.device_name, c.sensor_tag, c.day) IS UNIQUE""",

@@ -20,10 +20,18 @@ NEO4J_URI = os.getenv("WP6_NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("WP6_NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("WP6_NEO4J_PASSWORD", "localdevpassword")
 
+# Module-level singleton driver — reuses connection pool across all requests
+_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
-def get_driver() -> GraphDatabase.driver.__class__:
-    """Get Neo4j driver instance."""
-    return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+
+def get_driver():
+    """Get the shared Neo4j driver instance."""
+    return _driver
+
+
+def close_driver():
+    """Close the shared Neo4j driver (call on app shutdown)."""
+    _driver.close()
 
 
 def fetch_data(
@@ -34,7 +42,7 @@ def fetch_data(
     limit: int = 50000,
 ) -> pd.DataFrame:
     """Fetch sensor readings from Neo4j."""
-    with get_driver() as driver, driver.session() as session:
+    with _driver.session() as session:
         conditions = []
         if sensor_tags:
             conditions.append("s.tag IN $tags")
@@ -80,7 +88,7 @@ def fetch_data(
 
 def fetch_available_sensors() -> list[dict[str, Any]]:
     """Get list of sensors with reading counts and date range."""
-    with get_driver() as driver, driver.session() as session:
+    with _driver.session() as session:
         result = session.run("""
                 MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
                 RETURN d.device_name AS device, s.tag AS sensor, count(r) AS readings,
@@ -101,7 +109,7 @@ def fetch_available_sensors() -> list[dict[str, Any]]:
 
 def fetch_daily_coverage() -> list[dict[str, Any]]:
     """Get distinct days with data per device+sensor from DailyCoverage nodes."""
-    with get_driver() as driver, driver.session() as session:
+    with _driver.session() as session:
         result = session.run("""
             MATCH (c:DailyCoverage)
             RETURN c.device_name AS device, c.sensor_tag AS sensor, c.day AS day
@@ -118,7 +126,7 @@ def fetch_daily_coverage() -> list[dict[str, Any]]:
 
 def fetch_sync_metrics() -> list[dict[str, Any]]:
     """Fetch sync metadata for all endpoints from Neo4j."""
-    with get_driver() as driver, driver.session() as session:
+    with _driver.session() as session:
         result = session.run("""
             MATCH (m:SyncMetadata)
             RETURN m.endpoint AS endpoint,
