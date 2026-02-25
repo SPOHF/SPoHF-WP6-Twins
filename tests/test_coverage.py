@@ -104,7 +104,8 @@ class TestRenderCoverageGrid:
         records = _days("d1", "temp", date(2024, 4, 1), 7)
         df = build_weekly_coverage(records, date(2024, 4, 1), date(2024, 4, 7))
         html = render_coverage_grid(df)
-        assert "temp / d1" in html
+        assert "d1" in html
+        assert "temp" in html
 
     def test_empty_df(self):
         import pandas as pd

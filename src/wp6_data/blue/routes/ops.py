@@ -16,16 +16,23 @@ from wp6_data.shared import (
 router = APIRouter()
 
 COVERAGE_CSS = """
-    .uptime-grid { display: flex; flex-direction: column; gap: 2px; overflow-x: auto; }
-    .uptime-row { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+    .uptime-grid { display: flex; flex-direction: column; gap: 0; overflow-x: auto; }
+    .uptime-grid details { margin: 0; }
+    .uptime-grid summary { cursor: pointer; list-style: none; }
+    .uptime-grid details[open] > summary { margin-bottom: 0; }
+    .uptime-grid summary::-webkit-details-marker { display: none; }
+    .uptime-row { display: flex; align-items: center; gap: 4px; min-height: 16px; }
     .uptime-header { margin-bottom: 2px; }
     .uptime-label {
-        min-width: 220px; max-width: 220px; font-size: 0.8rem;
+        min-width: 200px; max-width: 200px; font-size: 0.75rem;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        line-height: 1.2;
     }
+    .uptime-device { font-weight: bold; margin-top: 4px; }
+    .uptime-sensor { padding-left: 12px; }
     .uptime-blocks { display: flex; gap: 1px; align-items: center; }
     .uptime-block {
-        width: 8px; height: 18px; border-radius: 2px;
+        width: 8px; height: 14px; border-radius: 2px;
         cursor: default; flex-shrink: 0;
     }
     .uptime-block:hover { opacity: 0.75; transform: scaleY(1.3); }

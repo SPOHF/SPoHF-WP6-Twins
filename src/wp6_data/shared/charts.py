@@ -317,14 +317,14 @@ def build_weekly_coverage(
             columns=["device", "sensor", "week_start", "days_with_data", "status"]
         )
 
-    # Index: (sensor, device) → set of days
-    sorted_records = sorted(records, key=lambda r: (r["sensor"], r["device"]))
+    # Index: (device, sensor) → set of days
+    sorted_records = sorted(records, key=lambda r: (r["device"], r["sensor"]))
     coverage: dict[tuple[str, str], set[date]] = {}
-    for key, group in groupby(sorted_records, key=lambda r: (r["sensor"], r["device"])):
+    for key, group in groupby(sorted_records, key=lambda r: (r["device"], r["sensor"])):
         coverage[key] = {r["day"] for r in group}
 
     rows: list[dict] = []
-    for (sensor, device), day_set in sorted(coverage.items()):
+    for (device, sensor), day_set in sorted(coverage.items()):
         for week_start in weeks:
             week_end = week_start + timedelta(days=6)
             days_in_week = sum(
@@ -363,11 +363,10 @@ def render_coverage_grid(weekly_df: pd.DataFrame) -> str:
     label_map = {"good": "good", "partial": "some", "none": "no data"}
 
     weekly_df = weekly_df.copy()
-    weekly_df["label"] = weekly_df["sensor"] + " / " + weekly_df["device"]
-    labels = sorted(weekly_df["label"].unique())
 
     # Month markers from the weeks
     all_weeks = sorted(weekly_df["week_start"].unique())
+    devices = sorted(weekly_df["device"].unique())
 
     html_parts: list[str] = []
     html_parts.append('<div class="uptime-grid">')
@@ -388,19 +387,30 @@ def render_coverage_grid(weekly_df: pd.DataFrame) -> str:
         )
     html_parts.append("</div></div>")
 
-    for label in labels:
-        subset = weekly_df[weekly_df["label"] == label].sort_values("week_start")
-        html_parts.append('<div class="uptime-row">')
-        html_parts.append(f'<div class="uptime-label">{label}</div>')
-        html_parts.append('<div class="uptime-blocks">')
-        for _, row in subset.iterrows():
-            color = color_map[row["status"]]
-            status_label = label_map[row["status"]]
-            tip = f'{row["week_start"]}: {row["days_with_data"]}/7 days ({status_label})'
+    # Group by device: collapsible, expanded by default
+    for device in devices:
+        device_df = weekly_df[weekly_df["device"] == device]
+        sensors = sorted(device_df["sensor"].unique())
+        html_parts.append(
+            f'<details open>'
+            f'<summary class="uptime-label uptime-device">{device}</summary>'
+        )
+        for sensor in sensors:
+            subset = device_df[device_df["sensor"] == sensor].sort_values("week_start")
+            html_parts.append('<div class="uptime-row">')
             html_parts.append(
-                f'<div class="uptime-block" style="background:{color}" title="{tip}"></div>'
+                f'<div class="uptime-label uptime-sensor">{sensor}</div>'
             )
-        html_parts.append("</div></div>")
+            html_parts.append('<div class="uptime-blocks">')
+            for _, row in subset.iterrows():
+                color = color_map[row["status"]]
+                status_label = label_map[row["status"]]
+                tip = f'{row["week_start"]}: {row["days_with_data"]}/7 days ({status_label})'
+                html_parts.append(
+                    f'<div class="uptime-block" style="background:{color}" title="{tip}"></div>'
+                )
+            html_parts.append("</div></div>")
+        html_parts.append("</details>")
 
     html_parts.append("</div>")
     return "\n".join(html_parts)
