@@ -1,5 +1,6 @@
 """Shared Plotly chart helpers."""
 
+from datetime import date
 
 import pandas as pd
 import plotly.express as px
@@ -275,6 +276,134 @@ def make_stacked_area_chart(
     )
 
     return fig
+
+
+def build_weekly_coverage(
+    records: list[dict],
+    project_start: date | None = None,
+    project_end: date | None = None,
+) -> pd.DataFrame:
+    """Bucket daily coverage records into weekly blocks with a status colour.
+
+    Args:
+        records: List of dicts with keys: device, sensor, day (date objects).
+        project_start: First Monday of the timeline (default: 2024-04-01).
+        project_end: Last date of the timeline (default: today).
+
+    Returns:
+        DataFrame with columns: device, sensor, week_start, days_with_data, status
+        Status values: "none" (0 days), "partial" (1-4 days), "good" (5-7 days).
+    """
+    from datetime import timedelta
+    from itertools import groupby
+
+    if project_start is None:
+        project_start = date(2024, 4, 1)
+    if project_end is None:
+        project_end = date.today()
+
+    # Snap project_start to its Monday
+    project_start = project_start - timedelta(days=project_start.weekday())
+
+    # Build list of week-start Mondays
+    weeks: list[date] = []
+    w = project_start
+    while w <= project_end:
+        weeks.append(w)
+        w += timedelta(weeks=1)
+
+    if not records or not weeks:
+        return pd.DataFrame(
+            columns=["device", "sensor", "week_start", "days_with_data", "status"]
+        )
+
+    # Index: (sensor, device) → set of days
+    sorted_records = sorted(records, key=lambda r: (r["sensor"], r["device"]))
+    coverage: dict[tuple[str, str], set[date]] = {}
+    for key, group in groupby(sorted_records, key=lambda r: (r["sensor"], r["device"])):
+        coverage[key] = {r["day"] for r in group}
+
+    rows: list[dict] = []
+    for (sensor, device), day_set in sorted(coverage.items()):
+        for week_start in weeks:
+            week_end = week_start + timedelta(days=6)
+            days_in_week = sum(
+                1 for d in day_set if week_start <= d <= week_end
+            )
+            if days_in_week == 0:
+                status = "none"
+            elif days_in_week >= 5:
+                status = "good"
+            else:
+                status = "partial"
+            rows.append({
+                "device": device,
+                "sensor": sensor,
+                "week_start": week_start,
+                "days_with_data": days_in_week,
+                "status": status,
+            })
+
+    return pd.DataFrame(rows)
+
+
+def render_coverage_grid(weekly_df: pd.DataFrame) -> str:
+    """Render an uptime-status-page HTML grid from weekly coverage data.
+
+    Args:
+        weekly_df: DataFrame from build_weekly_coverage.
+
+    Returns:
+        HTML string with one row per sensor/device, coloured weekly blocks.
+    """
+    if weekly_df.empty:
+        return "<p>No coverage data.</p>"
+
+    color_map = {"good": "#22c55e", "partial": "#eab308", "none": "#ef4444"}
+    label_map = {"good": "good", "partial": "some", "none": "no data"}
+
+    weekly_df = weekly_df.copy()
+    weekly_df["label"] = weekly_df["sensor"] + " / " + weekly_df["device"]
+    labels = sorted(weekly_df["label"].unique())
+
+    # Month markers from the weeks
+    all_weeks = sorted(weekly_df["week_start"].unique())
+
+    html_parts: list[str] = []
+    html_parts.append('<div class="uptime-grid">')
+
+    # Month header row
+    html_parts.append('<div class="uptime-row uptime-header">')
+    html_parts.append('<div class="uptime-label"></div>')
+    html_parts.append('<div class="uptime-blocks">')
+    prev_month = None
+    for w in all_weeks:
+        month_label = ""
+        if prev_month is None or w.month != prev_month:
+            month_label = w.strftime("%b %y")
+            prev_month = w.month
+        html_parts.append(
+            f'<div class="uptime-month-mark">'
+            f'<span>{month_label}</span></div>'
+        )
+    html_parts.append("</div></div>")
+
+    for label in labels:
+        subset = weekly_df[weekly_df["label"] == label].sort_values("week_start")
+        html_parts.append('<div class="uptime-row">')
+        html_parts.append(f'<div class="uptime-label">{label}</div>')
+        html_parts.append('<div class="uptime-blocks">')
+        for _, row in subset.iterrows():
+            color = color_map[row["status"]]
+            status_label = label_map[row["status"]]
+            tip = f'{row["week_start"]}: {row["days_with_data"]}/7 days ({status_label})'
+            html_parts.append(
+                f'<div class="uptime-block" style="background:{color}" title="{tip}"></div>'
+            )
+        html_parts.append("</div></div>")
+
+    html_parts.append("</div>")
+    return "\n".join(html_parts)
 
 
 def prepare_comparison(

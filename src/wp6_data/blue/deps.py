@@ -79,14 +79,41 @@ def fetch_data(
 
 
 def fetch_available_sensors() -> list[dict[str, Any]]:
-    """Get list of sensors with reading counts."""
+    """Get list of sensors with reading counts and date range."""
     with get_driver() as driver, driver.session() as session:
         result = session.run("""
                 MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
-                RETURN d.device_name AS device, s.tag AS sensor, count(r) AS readings
+                RETURN d.device_name AS device, s.tag AS sensor, count(r) AS readings,
+                       min(r.datetime_measure) AS earliest,
+                       max(r.datetime_measure) AS latest
                 ORDER BY readings DESC
             """)
-        return [dict(r) for r in result]
+        records = []
+        for r in result:
+            rec = dict(r)
+            if rec.get("earliest"):
+                rec["earliest"] = rec["earliest"].to_native()
+            if rec.get("latest"):
+                rec["latest"] = rec["latest"].to_native()
+            records.append(rec)
+        return records
+
+
+def fetch_daily_coverage() -> list[dict[str, Any]]:
+    """Get distinct days with data per device+sensor from DailyCoverage nodes."""
+    with get_driver() as driver, driver.session() as session:
+        result = session.run("""
+            MATCH (c:DailyCoverage)
+            RETURN c.device_name AS device, c.sensor_tag AS sensor, c.day AS day
+            ORDER BY sensor, device, day
+        """)
+        records = []
+        for r in result:
+            rec = dict(r)
+            if rec.get("day"):
+                rec["day"] = rec["day"].to_native()
+            records.append(rec)
+        return records
 
 
 def fetch_sync_metrics() -> list[dict[str, Any]]:

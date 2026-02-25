@@ -1,14 +1,47 @@
-"""Blue dashboard operations endpoints: health, metrics, sync-status."""
+"""Blue dashboard operations endpoints: health, metrics, status."""
 
 from datetime import datetime
 
-from fastapi import APIRouter
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi import APIRouter, Query
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from wp6_data.blue import deps
-from wp6_data.shared import render_page
+from wp6_data.shared import (
+    build_weekly_coverage,
+    render_card,
+    render_coverage_grid,
+    render_page,
+)
 
 router = APIRouter()
+
+COVERAGE_CSS = """
+    .uptime-grid { display: flex; flex-direction: column; gap: 2px; overflow-x: auto; }
+    .uptime-row { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+    .uptime-header { margin-bottom: 2px; }
+    .uptime-label {
+        min-width: 220px; max-width: 220px; font-size: 0.8rem;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .uptime-blocks { display: flex; gap: 1px; align-items: center; }
+    .uptime-block {
+        width: 8px; height: 18px; border-radius: 2px;
+        cursor: default; flex-shrink: 0;
+    }
+    .uptime-block:hover { opacity: 0.75; transform: scaleY(1.3); }
+    .uptime-month-mark {
+        width: 8px; flex-shrink: 0; text-align: left; position: relative;
+    }
+    .uptime-month-mark span {
+        font-size: 0.6rem; position: absolute; top: 0; left: 0;
+        white-space: nowrap; color: var(--pico-muted-color);
+    }
+    .uptime-legend { display: flex; gap: 12px; margin-top: 10px; font-size: 0.8rem; }
+    .uptime-legend-item { display: flex; align-items: center; gap: 4px; }
+    .uptime-legend-swatch {
+        width: 12px; height: 12px; border-radius: 2px; display: inline-block;
+    }
+"""
 
 
 @router.get("/health")
@@ -81,22 +114,21 @@ async def metrics() -> str:
     return "\n".join(lines) + "\n"
 
 
-@router.get("/sync-status", response_class=HTMLResponse)
-async def sync_status() -> str:
-    """Human-readable sync status page."""
+def _build_sync_table() -> str | None:
+    """Build the sync status HTML table, or None if no data."""
     try:
         sync_metrics = deps.fetch_sync_metrics()
-    except Exception as e:
-        return render_page("Sync Status", f"<h1>Error fetching sync status</h1><pre>{e}</pre>")
+    except Exception:
+        return None
 
     if not sync_metrics:
-        return render_page("Sync Status", "<h1>No sync metadata found</h1>")
+        return None
 
     rows = []
     for m in sync_metrics:
         endpoint = m.get("endpoint", "unknown")
         success = m.get("last_run_success")
-        status_icon = "✅" if success else "❌"
+        status_icon = "OK" if success else "FAIL"
         last_run = m.get("last_run_at")
         last_run_str = last_run.strftime("%Y-%m-%d %H:%M:%S UTC") if last_run else "Never"
         duration = m.get("duration_seconds")
@@ -112,7 +144,6 @@ async def sync_status() -> str:
         if api_status:
             error_html += f"<br><small>HTTP {api_status}</small>"
         if api_detail:
-            # Truncate and escape for display
             detail_preview = api_detail[:200].replace("<", "&lt;").replace(">", "&gt;")
             error_html += (
                 f"<br><small><pre style='white-space:pre-wrap;'>{detail_preview}...</pre></small>"
@@ -131,7 +162,7 @@ async def sync_status() -> str:
             </tr>
         """)
 
-    table = f"""
+    return f"""
         <table>
             <thead>
                 <tr>
@@ -151,10 +182,87 @@ async def sync_status() -> str:
         </table>
     """
 
-    content = f"""
-        <h1>Sync Status</h1>
-        {table}
-        <p><a href="/metrics">View Prometheus metrics</a></p>
+
+def _build_coverage_html() -> str:
+    """Build the coverage timeline HTML section."""
+    records = deps.fetch_daily_coverage()
+    if not records:
+        return "<p>No coverage data. Run a sync or rebuild the coverage index.</p>"
+
+    weekly_df = build_weekly_coverage(records)
+    grid_html = render_coverage_grid(weekly_df)
+
+    good_pct = (
+        len(weekly_df[weekly_df["status"] == "good"]) / len(weekly_df) * 100
+        if len(weekly_df) > 0
+        else 0
+    )
+
+    legend_html = """
+    <div class="uptime-legend">
+        <div class="uptime-legend-item">
+            <span class="uptime-legend-swatch" style="background:#22c55e"></span> Good (5-7 days)
+        </div>
+        <div class="uptime-legend-item">
+            <span class="uptime-legend-swatch" style="background:#eab308"></span> Partial (1-4 days)
+        </div>
+        <div class="uptime-legend-item">
+            <span class="uptime-legend-swatch" style="background:#ef4444"></span> No data
+        </div>
+    </div>
     """
 
-    return render_page("Sync Status - WP6 Blue", content, show_back_link=True)
+    return f"<p>{good_pct:.0f}% good coverage.</p>" + grid_html + legend_html
+
+
+@router.get("/status", response_class=HTMLResponse)
+async def status(rebuilt: int | None = Query(default=None)) -> str:
+    """Combined status page: sync status, data coverage, and maintenance."""
+    rebuilt_msg = ""
+    if rebuilt is not None:
+        rebuilt_msg = (
+            f'<p role="alert" style="color: var(--pico-ins-color);">'
+            f"Coverage index rebuilt: {rebuilt:,} entries.</p>"
+        )
+
+    # Sync status section
+    sync_table = _build_sync_table()
+    sync_html = sync_table if sync_table else "<p>No sync metadata found.</p>"
+
+    # Coverage section
+    coverage_html = _build_coverage_html()
+
+    content = f"""
+        <h1>Status</h1>
+        {rebuilt_msg}
+
+        {render_card("Sync Status", sync_html)}
+
+        {render_card("Data Coverage", coverage_html,
+                      description="Each block is one week. April 2024 to now.")}
+
+        {render_card(
+            "Maintenance",
+            '<form method="post" action="/rebuild-coverage">'
+            '<button type="submit">Rebuild Coverage Index</button></form>'
+            '<p><small><a href="/metrics">Prometheus metrics</a></small></p>',
+        )}
+    """
+
+    return render_page("Status - WP6 Blue", content, show_back_link=True, extra_css=COVERAGE_CSS)
+
+
+@router.post("/rebuild-coverage")
+async def rebuild_coverage() -> RedirectResponse:
+    """Rebuild all DailyCoverage nodes from existing Readings."""
+    with deps.get_driver() as driver, driver.session() as session:
+        result = session.run(
+            "MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading) "
+            "WITH DISTINCT d.device_name AS dn, s.tag AS st, "
+            "date(r.datetime_measure) AS day "
+            "MERGE (c:DailyCoverage {device_name: dn, sensor_tag: st, day: day}) "
+            "RETURN count(c) AS total"
+        )
+        record = result.single()
+        count = record["total"] if record else 0
+    return RedirectResponse(url=f"/status?rebuilt={count}", status_code=303)

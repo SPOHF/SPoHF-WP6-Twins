@@ -12,7 +12,12 @@ from tenacity import RetryError
 
 from wp6_data.api import SensorReading, SpoHFClient
 from wp6_data.config import Settings
-from wp6_data.graph import CONSTRAINTS, Neo4jConnection, batch_upsert_readings
+from wp6_data.graph import (
+    CONSTRAINTS,
+    Neo4jConnection,
+    batch_upsert_readings,
+    upsert_daily_coverage,
+)
 from wp6_data.sync.state import SyncStateManager
 
 
@@ -154,6 +159,16 @@ class SyncOrchestrator:
         if not batch:
             return 0, 0
         upserted, created = await batch_upsert_readings(session, batch)
+        # Update DailyCoverage nodes for the days touched by this batch
+        coverage_keys = {
+            (r["device_name"], r["sensor_tag"], r["datetime_measure"][:10])
+            for r in batch
+        }
+        coverage_records = [
+            {"device_name": dn, "sensor_tag": st, "day": day}
+            for dn, st, day in coverage_keys
+        ]
+        await upsert_daily_coverage(session, coverage_records)
         logger.debug("batch_flushed", upserted=upserted, created=created)
         return upserted, created
 

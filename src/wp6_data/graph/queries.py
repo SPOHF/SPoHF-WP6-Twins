@@ -18,6 +18,9 @@ CONSTRAINTS = [
     # Index on Project name
     """CREATE INDEX project_name IF NOT EXISTS
        FOR (p:Project) ON (p.name)""",
+    # Unique constraint on DailyCoverage (device + sensor + day)
+    """CREATE CONSTRAINT daily_coverage_unique IF NOT EXISTS
+       FOR (c:DailyCoverage) REQUIRE (c.device_name, c.sensor_tag, c.day) IS UNIQUE""",
 ]
 
 # Batch upsert readings with full graph structure
@@ -90,3 +93,48 @@ async def batch_upsert_readings(
     if not record:
         return 0, 0
     return record["upserted_count"], record["created_count"]
+
+
+UPSERT_DAILY_COVERAGE_QUERY = """
+UNWIND $records AS r
+MERGE (c:DailyCoverage {device_name: r.device_name, sensor_tag: r.sensor_tag, day: date(r.day)})
+RETURN count(c) AS total
+"""
+
+REBUILD_DAILY_COVERAGE_QUERY = """
+MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
+WITH DISTINCT d.device_name AS dn, s.tag AS st, date(r.datetime_measure) AS day
+MERGE (c:DailyCoverage {device_name: dn, sensor_tag: st, day: day})
+RETURN count(c) AS total
+"""
+
+
+async def upsert_daily_coverage(
+    session: AsyncSession,
+    records: list[dict[str, str]],
+) -> int:
+    """Upsert DailyCoverage nodes for a batch of (device_name, sensor_tag, day) combos.
+
+    Args:
+        session: Neo4j async session
+        records: List of dicts with keys: device_name, sensor_tag, day (ISO date string)
+
+    Returns:
+        Number of DailyCoverage nodes touched
+    """
+    if not records:
+        return 0
+    result = await session.run(UPSERT_DAILY_COVERAGE_QUERY, records=records)
+    record = await result.single()
+    return record["total"] if record else 0
+
+
+async def rebuild_daily_coverage(session: AsyncSession) -> int:
+    """Rebuild all DailyCoverage nodes by scanning existing Readings.
+
+    Returns:
+        Total number of DailyCoverage nodes created/matched
+    """
+    result = await session.run(REBUILD_DAILY_COVERAGE_QUERY)
+    record = await result.single()
+    return record["total"] if record else 0

@@ -60,9 +60,10 @@ async def home() -> str:
         {render_card("Browse by Device", device_table)}
 
         {render_card(
-            "Operations",
-            '<a href="/sync-status" role="button">Sync Status</a>',
-            description="View sync status and metrics.",
+            "Status &amp; Coverage",
+            '<a href="/status" role="button">View Status</a>',
+            description="Sync status, data coverage timeline, "
+            "and maintenance tools.",
         )}
     """
 
