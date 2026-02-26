@@ -238,7 +238,7 @@ async def status() -> str:
         {render_card("Sync Status", sync_html)}
 
         {render_card("Data Coverage", coverage_html,
-                      description="Each block is one week. From start to now.")}
+                      description="Each block is one week. April 2024 to now.")}
     """
 
     return render_page("Status - WP6 Blue", content, show_back_link=True, extra_css=COVERAGE_CSS)
