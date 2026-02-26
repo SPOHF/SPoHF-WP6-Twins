@@ -43,7 +43,9 @@ from wp6_data.red.dli.model import (
 from wp6_data.red.dli.schedule import (
     distribute_dli_across_hours,
     estimate_remaining_dli,
+    fetch_weather_for_range,
     infer_lamp_schedule_hourly,
+    predict_natural_dli_from_weather,
     prepare_daily_dli_summary,
 )
 from wp6_data.red.dli.weather import OpenMeteoClient
@@ -75,7 +77,9 @@ __all__ = [
     # Schedule functions
     "distribute_dli_across_hours",
     "estimate_remaining_dli",
+    "fetch_weather_for_range",
     "infer_lamp_schedule_hourly",
+    "predict_natural_dli_from_weather",
     "prepare_daily_dli_summary",
     # Diagnostics functions
     "align_weather_outdoor_hourly",

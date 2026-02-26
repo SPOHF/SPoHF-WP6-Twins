@@ -1,11 +1,69 @@
 """Schedule analysis functions for DLI predictions."""
 
-from datetime import date
+from __future__ import annotations
+
+from datetime import date, timedelta
 
 import pandas as pd
 
 from wp6_data.red.dli.calculator import estimate_hourly_natural_par
 from wp6_data.red.dli.constants import SECONDS_PER_HOUR, UMOL_TO_MOL
+
+if False:  # TYPE_CHECKING
+    from wp6_data.red.dli.model import TwoStageLightModel
+    from wp6_data.red.dli.weather import DailyForecast, OpenMeteoClient
+
+
+async def fetch_weather_for_range(
+    client: OpenMeteoClient,
+    start_date: date,
+    end_date: date,
+) -> list[DailyForecast]:
+    """Fetch weather data for a date range, combining archive and forecast APIs.
+
+    Uses historical archive for past dates and forecast API for today/future.
+
+    Args:
+        client: OpenMeteo API client
+        start_date: Start of range (inclusive)
+        end_date: End of range (inclusive)
+
+    Returns:
+        List of DailyForecast objects covering the range
+    """
+    today = date.today()
+    forecasts: list[DailyForecast] = []
+
+    # Fetch historical weather for past dates
+    if start_date < today:
+        hist_end = min(end_date, today - timedelta(days=1))
+        historical = await client.get_historical(start_date, hist_end)
+        forecasts.extend(historical)
+
+    # Fetch forecast for today and future dates
+    if end_date >= today:
+        all_forecasts = await client.get_forecast(days=14)
+        for f in all_forecasts:
+            if f.date >= today and start_date <= f.date <= end_date:
+                forecasts.append(f)
+
+    return forecasts
+
+
+def predict_natural_dli_from_weather(
+    model: TwoStageLightModel,
+    forecasts: list[DailyForecast],
+) -> dict[date, float]:
+    """Predict natural DLI for each day from weather forecasts.
+
+    Args:
+        model: Trained two-stage light model
+        forecasts: List of daily weather forecasts
+
+    Returns:
+        Dict mapping date to predicted natural DLI (mol/m²/day)
+    """
+    return {f.date: model.predict_dli(f.total_radiation) for f in forecasts}
 
 
 def infer_lamp_schedule_hourly(
