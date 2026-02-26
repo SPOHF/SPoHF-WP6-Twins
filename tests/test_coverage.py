@@ -79,10 +79,10 @@ class TestBuildWeeklyCoverage:
         assert df["week_start"].nunique() == 5
 
     def test_default_project_start(self):
-        records = [{"device": "d1", "sensor": "temp", "day": date(2024, 4, 5)}]
-        df = build_weekly_coverage(records, project_end=date(2024, 4, 7))
-        # Default start is 2024-04-01 (Mon)
-        assert df.iloc[0]["week_start"] == date(2024, 4, 1)
+        records = [{"device": "d1", "sensor": "temp", "day": date(2024, 3, 5)}]
+        df = build_weekly_coverage(records, project_end=date(2024, 3, 7))
+        # Default start is 2024-03-01 (Fri), snapped to Monday 2024-02-26
+        assert df.iloc[0]["week_start"] == date(2024, 2, 26)
 
 
 class TestRenderCoverageGrid:

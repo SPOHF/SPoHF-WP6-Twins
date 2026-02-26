@@ -287,7 +287,7 @@ def build_weekly_coverage(
 
     Args:
         records: List of dicts with keys: device, sensor, day (date objects).
-        project_start: First Monday of the timeline (default: 2024-04-01).
+        project_start: First Monday of the timeline (default: 2024-03-01).
         project_end: Last date of the timeline (default: today).
 
     Returns:
@@ -298,7 +298,7 @@ def build_weekly_coverage(
     from itertools import groupby
 
     if project_start is None:
-        project_start = date(2024, 4, 1)
+        project_start = date(2024, 3, 1)
     if project_end is None:
         project_end = date.today()
 
