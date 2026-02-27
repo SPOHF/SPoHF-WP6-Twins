@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from wp6_data.red.dli.calculator import estimate_hourly_natural_par
+from wp6_data.red.dli.calculator import calculate_hourly_par, estimate_hourly_natural_par
 from wp6_data.red.dli.constants import SECONDS_PER_HOUR, UMOL_TO_MOL
 
 if False:  # TYPE_CHECKING
@@ -205,3 +205,92 @@ def estimate_remaining_dli(
     remainder_dli = remaining["par"].sum() * SECONDS_PER_HOUR / UMOL_TO_MOL
 
     return remainder_dli
+
+
+_MIN_HOURS_FOR_LAMP_INFERENCE = 6
+
+
+def try_infer_lamp_from_day(
+    par_df: pd.DataFrame,
+    target_date: date,
+    forecast_by_date: dict[date, object],
+    model: object,
+) -> dict[int, float] | None:
+    """Try to infer a lamp schedule from a specific day's actual PAR data.
+
+    Returns None if insufficient data or no weather available for that day.
+    """
+    if par_df.empty:
+        return None
+
+    par_copy = par_df.copy()
+    par_copy["time"] = pd.to_datetime(par_copy["time"], utc=True)
+    day_mask = par_copy["time"].dt.date == target_date
+    day_df = par_copy[day_mask]
+
+    if day_df.empty:
+        return None
+
+    hourly_df = calculate_hourly_par(day_df)
+    if len(hourly_df) < _MIN_HOURS_FOR_LAMP_INFERENCE:
+        return None
+
+    forecast = forecast_by_date.get(target_date)
+    if forecast is None:
+        return None
+
+    natural_dli = model.predict_dli(forecast.total_radiation)
+    return infer_lamp_schedule_hourly(
+        hourly_df, natural_dli, forecast.hourly, forecast.total_radiation
+    )
+
+
+def build_lamp_schedules(
+    par_df: pd.DataFrame,
+    forecasts: list,
+    forecast_by_date: dict[date, object],
+    model: object,
+    seed_schedule: dict[int, float],
+    lamp_ref_day: date,
+) -> tuple[dict[date, dict[int, float]], dict[int, float]]:
+    """Build per-day lamp schedules iteratively from previous day's data.
+
+    Returns (lamp_schedules, last_good_schedule).
+    """
+    lamp_schedules: dict[date, dict[int, float]] = {}
+    last_good_schedule = seed_schedule
+
+    for forecast in forecasts:
+        d = forecast.date
+        prev_day = d - timedelta(days=1)
+
+        if prev_day != lamp_ref_day:
+            inferred = try_infer_lamp_from_day(
+                par_df, prev_day, forecast_by_date, model
+            )
+            if inferred is not None:
+                last_good_schedule = inferred
+
+        lamp_schedules[d] = last_good_schedule
+
+    return lamp_schedules, last_good_schedule
+
+
+def compute_daily_predicted_dli(
+    forecasts: list,
+    natural_dli: dict[date, float],
+    lamp_schedules: dict[date, dict[int, float]],
+    fallback_schedule: dict[int, float],
+) -> dict[date, float]:
+    """Compute predicted total DLI per day (natural + lamp)."""
+    result: dict[date, float] = {}
+    for f in forecasts:
+        nat = natural_dli.get(f.date, 0.0)
+        lamp_sched = lamp_schedules.get(f.date, fallback_schedule)
+        lamp_dli = (
+            sum(lamp_sched.get(h.datetime.hour, 0.0) for h in f.hourly)
+            * SECONDS_PER_HOUR
+            / UMOL_TO_MOL
+        )
+        result[f.date] = nat + lamp_dli
+    return result
