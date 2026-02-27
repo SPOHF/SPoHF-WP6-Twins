@@ -803,11 +803,13 @@ async def dli_history(
             x=shared, y=act,
             name=m["actual_name"], mode="lines+markers",
             line={"color": "#3498db", "width": 2}, marker={"size": 6},
+            hovertemplate="%{y:.1f}<extra></extra>",
         ))
         fig_cmp.add_trace(go.Scatter(
             x=shared, y=pred,
             name=m["predicted_name"], mode="lines+markers",
             line={"color": "#e74c3c", "width": 2, "dash": "dash"}, marker={"size": 6},
+            hovertemplate="%{y:.1f}<extra></extra>",
         ))
         fig_cmp.add_trace(go.Scatter(
             x=list(shared) + list(reversed(shared)),
@@ -839,11 +841,11 @@ async def dli_history(
 
         fig_err = go.Figure()
         fig_err.add_trace(go.Bar(
-            x=shared, y=pct_errs, marker_color=bar_colors,
-            hovertemplate="%{x}<br>Error: %{y:.1f}%<extra></extra>",
+            x=shared, y=errs, marker_color=bar_colors,
+            hovertemplate="%{x}<br>Error: %{y:.1f} mol/m²/day<extra></extra>",
         ))
         fig_err.update_layout(
-            title="Daily Prediction Error", yaxis_title="Error (%)",
+            title="Daily Prediction Error", yaxis_title="Error (mol/m²/day)",
             height=300, hovermode="x unified", margin={"t": 60, "b": 40},
         )
         fig_err.add_hline(y=0, line_color="black", line_width=1)
