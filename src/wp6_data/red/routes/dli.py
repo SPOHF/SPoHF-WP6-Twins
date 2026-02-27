@@ -522,6 +522,8 @@ async def dli_schedule(
 
     # Add daily DLI annotations at noon of each day (at bottom to avoid legend)
     for d, values in sorted(daily_dli.items()):
+        if d < start_date or d > end_date:
+            continue
         noon = datetime(d.year, d.month, d.day, 12, tzinfo=UTC)
         parts = []
         if "actual" in values:
