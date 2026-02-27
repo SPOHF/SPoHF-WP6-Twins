@@ -1,4 +1,4 @@
-"""Red dashboard DLI endpoints: overview, chart, schedule, history."""
+"""Red dashboard DLI endpoints: overview, history, forecast, performance."""
 
 import os
 from datetime import UTC, date, datetime, timedelta
@@ -80,6 +80,7 @@ async def dli_home(user: str = Depends(deps.verify_auth)) -> str:
                 grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
         .grid article { margin-bottom: 0; }
         .grid article h3 { margin-top: 0; }
+        .card-primary { border: 2px solid var(--pico-primary-background); }
         .card-disabled { opacity: 0.6; }
         .btn { display: inline-block; padding: 8px 16px; background: var(--pico-primary-background);
                color: var(--pico-primary-inverse); text-decoration: none; border-radius: 4px;
@@ -95,21 +96,21 @@ async def dli_home(user: str = Depends(deps.verify_auth)) -> str:
 
         <div class="grid">
             <article>
-                <h3>Historical DLI</h3>
+                <h3>History</h3>
                 <p>Compare natural light vs total light (with lamps) over time.</p>
-                <a href="/dli/chart" class="btn">View Chart</a>
+                <a href="/dli/history" class="btn">View History</a>
             </article>
 
-            <article>
-                <h3>Schedule Analysis</h3>
+            <article class="card-primary">
+                <h3>Forecast</h3>
                 <p>Predict plant light based on schedule and weather data.</p>
-                <a href="/dli/schedule" class="btn">Analyze Schedule</a>
+                <a href="/dli/forecast" class="btn">View Forecast</a>
             </article>
 
             <article>
-                <h3>Prediction History</h3>
+                <h3>Performance</h3>
                 <p>Compare model predictions with actual sensor readings over time.</p>
-                <a href="/dli/history" class="btn">View Accuracy</a>
+                <a href="/dli/performance" class="btn">View Performance</a>
             </article>
 
             {model_card}
@@ -119,15 +120,15 @@ async def dli_home(user: str = Depends(deps.verify_auth)) -> str:
     return render_page("DLI Dashboard - WP6 Red", content, extra_css=extra_css, show_back_link=True)
 
 
-@router.get("/chart", response_class=HTMLResponse)
-async def dli_chart(
+@router.get("/history", response_class=HTMLResponse)
+async def dli_history(
     user: str = Depends(deps.verify_auth),
     start: Annotated[date | None, Query(description="Start date")] = None,
     end: Annotated[date | None, Query(description="End date")] = None,
 ) -> str:
     """DLI chart comparing natural light vs total light over time."""
     if not deps.db:
-        return render_page("DLI Chart - WP6 Red", "<h1>Database not connected</h1>",
+        return render_page("DLI History - WP6 Red", "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
     start, end, start_dt, end_dt = resolve_date_range(start, end)
@@ -137,14 +138,14 @@ async def dli_chart(
             device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR], start=start_dt, end=end_dt
         )
     except Exception as e:
-        return render_page("DLI Chart - WP6 Red", f"<h1>Error: {e}</h1>",
+        return render_page("DLI History - WP6 Red", f"<h1>Error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
     filter_html = render_date_filter(start, end)
 
     if par_df.empty:
         return render_page(
-            "DLI Chart - WP6 Red",
+            "DLI History - WP6 Red",
             filter_html + "<h1>No PAR data found</h1>",
             show_back_link=True, back_url="/dli",
         )
@@ -154,7 +155,7 @@ async def dli_chart(
 
     if dli_df.empty:
         return render_page(
-            "DLI Chart - WP6 Red",
+            "DLI History - WP6 Red",
             filter_html + "<h1>Insufficient data for DLI calculation</h1>",
             show_back_link=True, back_url="/dli",
         )
@@ -320,22 +321,22 @@ async def dli_chart(
     """
 
     return render_page(
-        "DLI Chart - WP6 Red",
+        "DLI History - WP6 Red",
         content,
         extra_css=extra_css,
         show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",
     )
 
 
-@router.get("/schedule", response_class=HTMLResponse)
-async def dli_schedule(
+@router.get("/forecast", response_class=HTMLResponse)
+async def dli_forecast(
     user: str = Depends(deps.verify_auth),
     start_date: Annotated[date | None, Query(description="Start date")] = None,
     end_date: Annotated[date | None, Query(description="End date")] = None,
 ) -> str:
     """Analyze light schedule with predictions based on inferred lamp schedule."""
     if not deps.db:
-        return render_page("Schedule Analysis - WP6 Red", "<h1>Database not connected</h1>",
+        return render_page("DLI Forecast - WP6 Red", "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
     # Default to today
@@ -365,7 +366,7 @@ async def dli_schedule(
             device_ids=[sensor], start=lamp_ref_start, end=lamp_ref_end
         )
     except Exception as e:
-        return render_page("Schedule Analysis - WP6 Red", f"<h1>Error: {e}</h1>",
+        return render_page("DLI Forecast - WP6 Red", f"<h1>Error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
     # Calculate lamp reference day's DLI (also used for yesterday card when applicable)
@@ -414,7 +415,7 @@ async def dli_schedule(
             device_ids=[sensor], start=range_start, end=range_end
         )
     except Exception as e:
-        return render_page("Schedule Analysis - WP6 Red", f"<h1>Error: {e}</h1>",
+        return render_page("DLI Forecast - WP6 Red", f"<h1>Error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
     # Prepare actual data for chart (raw readings)
@@ -654,7 +655,7 @@ async def dli_schedule(
     """
 
     content = f"""
-        <h1>Daily Light Integral (DLI) Analysis</h1>
+        <h1>DLI Forecast</h1>
         {controls_html}
         {stats_html}
         {chart_html}
@@ -666,28 +667,28 @@ async def dli_schedule(
     """
 
     return render_page(
-        "Daily Light Integral (DLI) - WP6 Red",
+        "DLI Forecast - WP6 Red",
         content,
         extra_css=extra_css,
         show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",
     )
 
 
-@router.get("/history", response_class=HTMLResponse)
-async def dli_history(
+@router.get("/performance", response_class=HTMLResponse)
+async def dli_performance(
     user: str = Depends(deps.verify_auth),
     start: Annotated[date | None, Query(description="Start date")] = None,
     end: Annotated[date | None, Query(description="End date")] = None,
 ) -> str:
     """Compare predicted DLI (model hindcast) with actual sensor readings."""
     if not deps.db:
-        return render_page("Prediction History - WP6 Red", "<h1>Database not connected</h1>",
+        return render_page("DLI Performance - WP6 Red", "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
     model = get_model()
     if not model.is_trained():
         return render_page(
-            "Prediction History - WP6 Red",
+            "DLI Performance - WP6 Red",
             "<h1>Model not trained</h1><p>Train the prediction model first.</p>",
             show_back_link=True, back_url="/dli",
         )
@@ -713,7 +714,7 @@ async def dli_history(
             device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR], start=lamp_ref_dt, end=end_dt
         )
     except Exception as e:
-        return render_page("Prediction History - WP6 Red", f"<h1>Error: {e}</h1>",
+        return render_page("DLI Performance - WP6 Red", f"<h1>Error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
     # Fetch weather data including lamp_ref_day for lamp inference
@@ -722,7 +723,7 @@ async def dli_history(
         forecasts = await fetch_weather_for_range(client, lamp_ref_day, end)
         predicted_natural = predict_natural_dli_from_weather(model, forecasts)
     except Exception as e:
-        return render_page("Prediction History - WP6 Red",
+        return render_page("DLI Performance - WP6 Red",
                           filter_html + f"<h1>Weather data error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
@@ -943,7 +944,7 @@ async def dli_history(
     """
 
     content = f"""
-        <h1>Prediction History</h1>
+        <h1>DLI Performance</h1>
         <p>Comparing model predictions with actual sensor readings.</p>
         {filter_html}
         <div class="mode-toggle">
@@ -962,7 +963,7 @@ async def dli_history(
     """
 
     return render_page(
-        "Prediction History - WP6 Red",
+        "DLI Performance - WP6 Red",
         content,
         extra_css=extra_css,
         show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",
