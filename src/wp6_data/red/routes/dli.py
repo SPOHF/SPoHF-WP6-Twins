@@ -31,6 +31,44 @@ from wp6_data.shared import make_schedule_chart, render_date_filter, render_page
 
 router = APIRouter(prefix="/dli")
 
+_MIN_HOURS_FOR_LAMP_INFERENCE = 6
+
+
+def _try_infer_from_day(
+    par_df: pd.DataFrame,
+    target_date: date,
+    forecast_by_date: dict[date, object],
+    model: object,
+) -> dict[int, float] | None:
+    """Try to infer a lamp schedule from a specific day's actual PAR data.
+
+    Returns None if insufficient data or no weather available for that day.
+    """
+    if par_df.empty:
+        return None
+
+    # Filter par_df to target_date
+    par_copy = par_df.copy()
+    par_copy["time"] = pd.to_datetime(par_copy["time"], utc=True)
+    day_mask = par_copy["time"].dt.date == target_date
+    day_df = par_copy[day_mask]
+
+    if day_df.empty:
+        return None
+
+    hourly_df = calculate_hourly_par(day_df)
+    if len(hourly_df) < _MIN_HOURS_FOR_LAMP_INFERENCE:
+        return None
+
+    forecast = forecast_by_date.get(target_date)
+    if forecast is None:
+        return None
+
+    natural_dli = model.predict_dli(forecast.total_radiation)
+    return infer_lamp_schedule_hourly(
+        hourly_df, natural_dli, forecast.hourly, forecast.total_radiation
+    )
+
 
 @router.get("", response_class=HTMLResponse)
 async def dli_home(user: str = Depends(deps.verify_auth)) -> str:
@@ -349,46 +387,52 @@ async def dli_schedule(
     sensor = os.getenv("WP6_RED_DLI_SCHEDULE_SENSOR", "s2100-02-par")
     yesterday = today - timedelta(days=1)
 
-    # Get yesterday's data for inferring lamp schedule
-    yesterday_start = datetime(yesterday.year, yesterday.month, yesterday.day, tzinfo=UTC)
-    yesterday_end = yesterday_start + timedelta(days=1) - timedelta(seconds=1)
+    # Reference day for lamp inference: the day before the viewed range,
+    # but never later than yesterday (we need a full day of actual data).
+    lamp_ref_day = min(start_date - timedelta(days=1), yesterday)
+
+    # Get reference day's data for inferring lamp schedule
+    lamp_ref_start = datetime(lamp_ref_day.year, lamp_ref_day.month, lamp_ref_day.day, tzinfo=UTC)
+    lamp_ref_end = lamp_ref_start + timedelta(days=1) - timedelta(seconds=1)
 
     try:
-        yesterday_par_df = await deps.db.get_par_readings(
-            device_ids=[sensor], start=yesterday_start, end=yesterday_end
+        lamp_ref_par_df = await deps.db.get_par_readings(
+            device_ids=[sensor], start=lamp_ref_start, end=lamp_ref_end
         )
     except Exception as e:
         return render_page("Schedule Analysis - WP6 Red", f"<h1>Error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
-    # Calculate yesterday's DLI
-    yesterday_dli = 0.0
-    if not yesterday_par_df.empty:
-        yesterday_daily = calculate_daily_dli(yesterday_par_df)
-        if not yesterday_daily.empty:
-            yesterday_dli = yesterday_daily["dli"].iloc[0]
+    # Calculate lamp reference day's DLI (also used for yesterday card when applicable)
+    lamp_ref_dli = 0.0
+    if not lamp_ref_par_df.empty:
+        lamp_ref_daily = calculate_daily_dli(lamp_ref_par_df)
+        if not lamp_ref_daily.empty:
+            lamp_ref_dli = lamp_ref_daily["dli"].iloc[0]
 
     # Get weather client and model
     client = deps.get_weather_client()
     model = get_model()
 
-    # Infer lamp schedule from yesterday (hourly: actual - predicted natural)
+    # Infer lamp schedule from reference day (hourly: actual - predicted natural)
     inferred_lamp_hourly: dict[int, float] = {}  # hour -> lamp PAR
-    yesterday_natural_dli = 0.0
-    if not yesterday_par_df.empty and model.is_trained():
+    lamp_ref_natural_dli = 0.0
+    lamp_ref_forecast = None
+    if not lamp_ref_par_df.empty and model.is_trained():
         try:
-            yesterday_weather = await client.get_historical(yesterday, yesterday)
-            if yesterday_weather:
-                forecast = yesterday_weather[0]
-                yesterday_natural_dli = model.predict_dli(forecast.total_radiation)
+            lamp_ref_weather = await client.get_historical(lamp_ref_day, lamp_ref_day)
+            if lamp_ref_weather:
+                forecast = lamp_ref_weather[0]
+                lamp_ref_forecast = forecast
+                lamp_ref_natural_dli = model.predict_dli(forecast.total_radiation)
 
                 # Calculate hourly averages from actual data
-                yesterday_hourly = calculate_hourly_par(yesterday_par_df)
+                lamp_ref_hourly = calculate_hourly_par(lamp_ref_par_df)
 
                 # Infer lamp schedule using extracted function
                 inferred_lamp_hourly = infer_lamp_schedule_hourly(
-                    yesterday_hourly,
-                    yesterday_natural_dli,
+                    lamp_ref_hourly,
+                    lamp_ref_natural_dli,
                     forecast.hourly,
                     forecast.total_radiation,
                 )
@@ -416,11 +460,31 @@ async def dli_schedule(
     # Get weather for date range (for predictions)
     predicted_df = None
     natural_df = None
+    lamp_schedules: dict[date, dict[int, float]] = {}
+    last_good_schedule = inferred_lamp_hourly  # seed from lamp_ref_day
 
     if model.is_trained():
         try:
             forecasts = await fetch_weather_for_range(client, start_date, end_date)
             daily_natural_dli = predict_natural_dli_from_weather(model, forecasts)
+
+            # Build per-day lamp schedules from previous day's actual data
+            forecast_by_date = {f.date: f for f in forecasts}
+            if lamp_ref_forecast is not None:
+                forecast_by_date[lamp_ref_day] = lamp_ref_forecast
+
+            for forecast in forecasts:
+                d = forecast.date
+                prev_day = d - timedelta(days=1)
+
+                if prev_day != lamp_ref_day:
+                    inferred = _try_infer_from_day(
+                        par_df, prev_day, forecast_by_date, model
+                    )
+                    if inferred is not None:
+                        last_good_schedule = inferred
+
+                lamp_schedules[d] = last_good_schedule
 
             predicted_records = []
             natural_records = []
@@ -437,7 +501,8 @@ async def dli_schedule(
                     natural_records.append({"datetime": h.datetime, "par": natural_par})
 
                     # Calculate predicted PAR = inferred lamp + natural
-                    lamp_par = inferred_lamp_hourly.get(h.datetime.hour, 0.0)
+                    day_lamp = lamp_schedules.get(forecast.date, last_good_schedule)
+                    lamp_par = day_lamp.get(h.datetime.hour, 0.0)
                     predicted_par = natural_par + lamp_par
                     predicted_records.append({"datetime": h.datetime, "par": predicted_par})
 
@@ -456,7 +521,30 @@ async def dli_schedule(
     daily_dli: dict[date, dict] = {}  # date -> {actual, predicted, natural}
     tomorrow = today + timedelta(days=1)
 
-    # Add yesterday's actual and natural DLI (already calculated above)
+    # Yesterday's DLI for the card: reuse lamp_ref data when it IS yesterday,
+    # otherwise fetch separately.
+    if lamp_ref_day == yesterday:
+        yesterday_dli = lamp_ref_dli
+        yesterday_natural_dli = lamp_ref_natural_dli
+    else:
+        yesterday_dli = 0.0
+        yesterday_natural_dli = 0.0
+        try:
+            y_start = datetime(yesterday.year, yesterday.month, yesterday.day, tzinfo=UTC)
+            y_end = y_start + timedelta(days=1) - timedelta(seconds=1)
+            y_par_df = await deps.db.get_par_readings(
+                device_ids=[sensor], start=y_start, end=y_end
+            )
+            if not y_par_df.empty:
+                y_daily = calculate_daily_dli(y_par_df)
+                if not y_daily.empty:
+                    yesterday_dli = y_daily["dli"].iloc[0]
+                y_weather = await client.get_historical(yesterday, yesterday)
+                if y_weather:
+                    yesterday_natural_dli = model.predict_dli(y_weather[0].total_radiation)
+        except Exception:
+            pass
+
     if yesterday_dli > 0:
         daily_dli[yesterday] = {"actual": yesterday_dli}
     if yesterday_natural_dli > 0:
@@ -492,9 +580,10 @@ async def dli_schedule(
                         if f.date == card_date:
                             nat_dli = model.predict_dli(f.total_radiation)
                             # Calculate predicted = natural + inferred lamp
+                            card_lamp = lamp_schedules.get(card_date, last_good_schedule)
                             pred_dli = nat_dli
                             for h in f.hourly:
-                                lamp = inferred_lamp_hourly.get(h.datetime.hour, 0.0)
+                                lamp = card_lamp.get(h.datetime.hour, 0.0)
                                 pred_dli += lamp * SECONDS_PER_HOUR / UMOL_TO_MOL
                             daily_dli.setdefault(card_date, {})["predicted"] = pred_dli
                             daily_dli.setdefault(card_date, {})["natural"] = nat_dli
