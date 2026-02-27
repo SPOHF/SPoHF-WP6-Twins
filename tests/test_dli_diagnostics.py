@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from wp6_data.red.dli.diagnostics import (
+from wp6_data.red.dli.lamp import (
     derive_daily_lamp_profile,
     subtract_lamp_from_sensor,
 )

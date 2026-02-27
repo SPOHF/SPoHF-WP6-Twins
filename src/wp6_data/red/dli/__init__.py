@@ -26,10 +26,7 @@ from wp6_data.red.dli.constants import (
     TOTAL_LIGHT_SENSOR,
     UMOL_TO_MOL,
 )
-from wp6_data.red.dli.diagnostics import (
-    align_weather_outdoor_hourly,
-    analyze_reporting_frequency,
-    calculate_correlation_comparison,
+from wp6_data.red.dli.lamp import (
     derive_daily_lamp_profile,
     subtract_lamp_from_sensor,
 )
@@ -87,10 +84,7 @@ __all__ = [
     "predict_natural_dli_from_weather",
     "prepare_daily_dli_summary",
     "try_infer_lamp_from_day",
-    # Diagnostics functions
-    "align_weather_outdoor_hourly",
-    "analyze_reporting_frequency",
-    "calculate_correlation_comparison",
+    # Lamp functions
     "derive_daily_lamp_profile",
     "subtract_lamp_from_sensor",
     # Model classes and functions
