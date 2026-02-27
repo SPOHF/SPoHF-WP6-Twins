@@ -317,8 +317,10 @@ BASE_CSS = """
     .stats-grid article:hover { transform: translateY(-2px); }
     .stats-grid article small { color: rgba(255,255,255,0.85); }
     .stat-value { font-size: 1.6em; font-weight: 800; color: #fff; }
-    .success { color: #22c55e !important; }
+    .success { color: #16a34a !important; }
     .warning { color: #f59e0b !important; }
+    [data-theme="dark"] .success { color: #4ade80 !important; }
+    [data-theme="dark"] .warning { color: #fbbf24 !important; }
 
     /* --- Date filter --- */
     .date-filter {
