@@ -794,9 +794,6 @@ async def dli_performance(
         mape = float(np.mean(abs_pct))
         mae = float(np.mean([abs(e) for e in errs]))
         bias = float(np.mean(errs))
-        ss_res = sum((a - p) ** 2 for a, p in zip(act, pred, strict=True))
-        ss_tot = sum((a - float(np.mean(act))) ** 2 for a in act)
-        r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
         # Line chart
         fig_cmp = go.Figure()
@@ -855,16 +852,11 @@ async def dli_performance(
         # Stats
         bias_lbl = "overprediction" if bias > 0 else "underprediction"
         stats = f"""
-            <div class="stats-grid cols-4">
+            <div class="stats-grid">
                 <article>
                     <div class="stat-value">{mape:.1f}%</div>
                     <small>Avg. Error</small><br>
                     <small>Mean absolute % error</small>
-                </article>
-                <article>
-                    <div class="stat-value">{r2:.3f}</div>
-                    <small>Correlation (R²)</small><br>
-                    <small>1.0 = perfect fit</small>
                 </article>
                 <article>
                     <div class="stat-value">{mae:.2f}</div>
