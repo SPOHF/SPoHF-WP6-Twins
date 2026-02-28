@@ -14,6 +14,13 @@ def configure_dashboard(dashboard_id: str) -> None:
     _dashboard_id = dashboard_id
 
 
+def utc_day_bounds(target_date: date) -> tuple[datetime, datetime]:
+    """Return inclusive UTC start/end datetimes for a calendar date."""
+    start = datetime(target_date.year, target_date.month, target_date.day, tzinfo=UTC)
+    end = start + timedelta(days=1) - timedelta(seconds=1)
+    return start, end
+
+
 def default_date_range() -> tuple[date, date]:
     """Return default date range: last 7 days."""
     end = date.today()

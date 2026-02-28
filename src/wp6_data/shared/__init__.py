@@ -20,6 +20,7 @@ from wp6_data.shared.templates import (
     render_page,
     render_table,
     resolve_date_range,
+    utc_day_bounds,
 )
 
 __all__ = [
@@ -40,4 +41,5 @@ __all__ = [
     "render_page",
     "render_table",
     "resolve_date_range",
+    "utc_day_bounds",
 ]
