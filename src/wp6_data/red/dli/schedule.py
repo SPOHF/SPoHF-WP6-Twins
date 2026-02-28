@@ -7,7 +7,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from wp6_data.red.dli.calculator import calculate_hourly_par, estimate_hourly_natural_par
-from wp6_data.red.dli.constants import SECONDS_PER_HOUR, UMOL_TO_MOL
+from wp6_data.red.dli.constants import READING_INTERVAL_SECONDS, SECONDS_PER_HOUR, UMOL_TO_MOL
 
 if False:  # TYPE_CHECKING
     from wp6_data.red.dli.model import TwoStageLightModel
@@ -150,9 +150,9 @@ def prepare_daily_dli_summary(
         actual_df["date"] = pd.to_datetime(actual_df["datetime"]).dt.date
         for d, grp in actual_df.groupby("date"):
             # Sum PAR readings and convert to DLI
-            # Assuming ~10min intervals = 600 seconds
+            # Assuming ~10min intervals
             par_sum = grp["par"].sum()
-            dli = par_sum * 600 / UMOL_TO_MOL
+            dli = par_sum * READING_INTERVAL_SECONDS / UMOL_TO_MOL
             daily_dli.setdefault(d, {})["actual"] = dli
 
     # Process predicted data

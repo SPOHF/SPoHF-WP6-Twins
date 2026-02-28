@@ -17,14 +17,20 @@ from wp6_data.red.dli.calculator import (
     par_sum_to_dli,
 )
 from wp6_data.red.dli.constants import (
+    DEFAULT_FORECAST_CENTER_DAYS,
+    DEFAULT_PERFORMANCE_LOOKBACK_DAYS,
     DEFAULT_PHOTOPERIOD_THRESHOLD,
     DEFAULT_TRAINING_START,
     MIN_INDOOR_PAR,
     MIN_OUTDOOR_LUX,
     NATURAL_LIGHT_SENSOR,
+    PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT,
+    PERFORMANCE_ERROR_WARN_THRESHOLD_PCT,
+    READING_INTERVAL_SECONDS,
     SECONDS_PER_HOUR,
     TOTAL_LIGHT_SENSOR,
     UMOL_TO_MOL,
+    WEATHER_STATION_SENSOR,
 )
 from wp6_data.red.dli.lamp import (
     derive_daily_lamp_profile,
@@ -53,13 +59,19 @@ from wp6_data.red.dli.weather import OpenMeteoClient
 __all__ = [
     # Constants
     "DEFAULT_PHOTOPERIOD_THRESHOLD",
+    "DEFAULT_FORECAST_CENTER_DAYS",
+    "DEFAULT_PERFORMANCE_LOOKBACK_DAYS",
     "DEFAULT_TRAINING_START",
     "MIN_INDOOR_PAR",
     "MIN_OUTDOOR_LUX",
     "NATURAL_LIGHT_SENSOR",
+    "PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT",
+    "PERFORMANCE_ERROR_WARN_THRESHOLD_PCT",
+    "READING_INTERVAL_SECONDS",
     "SECONDS_PER_HOUR",
     "TOTAL_LIGHT_SENSOR",
     "UMOL_TO_MOL",
+    "WEATHER_STATION_SENSOR",
     # Calculator functions
     "calculate_daily_dli",
     "calculate_dli_trendline",

@@ -13,6 +13,7 @@ from wp6_data.red.dli import (
     DEFAULT_TRAINING_START,
     NATURAL_LIGHT_SENSOR,
     TOTAL_LIGHT_SENSOR,
+    WEATHER_STATION_SENSOR,
     ModelStats,
     OpenMeteoClient,
     derive_daily_lamp_profile,
@@ -46,13 +47,13 @@ async def train_model_from_db(db: MySQLConnection, weather_client: OpenMeteoClie
     )
 
     if above_lamp_df.empty:
-        raise ValueError("No indoor PAR data (s2100-01-par) found for training")
+        raise ValueError(f"No indoor PAR data ({NATURAL_LIGHT_SENSOR}) found for training")
 
     indoor_df = above_lamp_df
 
     outdoor_df = await db.get_weather_station_readings(start=start_dt, end=end_dt)
     if outdoor_df.empty:
-        raise ValueError("No weather station data (s1000) found for training")
+        raise ValueError(f"No weather station data ({WEATHER_STATION_SENSOR}) found for training")
 
     weather_df = await weather_client.get_historical_dataframe_multi(
         start_dt.date(),
@@ -68,7 +69,7 @@ async def train_model_from_db(db: MySQLConnection, weather_client: OpenMeteoClie
         weather_df=weather_df,
         outdoor_df=outdoor_df,
         indoor_df=indoor_df,
-        indoor_sensor="s2100-01-par",
+        indoor_sensor=NATURAL_LIGHT_SENSOR,
         plant_level_df=plant_level_df if not plant_level_df.empty else None,
         above_lamp_df=above_lamp_df,
     )
@@ -106,7 +107,10 @@ async def dli_model_status(user: str = Depends(deps.verify_admin_auth)) -> str:
         status_html = f"""
             <article>
                 <h3 class="success">Two-Stage Model Trained (Daily)</h3>
-                <p>OpenMeteo weather → s1000 daily lux → indoor PAR ({model_type})</p>
+                <p>
+                    OpenMeteo weather → {WEATHER_STATION_SENSOR} daily lux
+                    → indoor PAR ({model_type})
+                </p>
 
                 <div class="stats-grid cols-5">
                     <article>
@@ -133,7 +137,7 @@ async def dli_model_status(user: str = Depends(deps.verify_admin_auth)) -> str:
                 </div>
 
                 <h4>Stage 1: Weather API → Local Lux (Daily)</h4>
-                <p>Calibrates OpenMeteo weather to s1000 daily lux sum
+                     <p>Calibrates OpenMeteo weather to {WEATHER_STATION_SENSOR} daily lux sum
                    (R²={s1.r2_score:.3f}, RMSE={s1.rmse:.0f} lux/day)</p>
                 <small>Features: {', '.join(s1_features)}</small>
                 <table>
@@ -164,31 +168,44 @@ async def dli_model_status(user: str = Depends(deps.verify_admin_auth)) -> str:
             </article>
         """
     else:
-        status_html = """
+        status_html = f"""
             <article>
                 <h3 class="warning">No Model Trained</h3>
                 <p>The two-stage PAR prediction model has not been trained yet.</p>
                 <p>Training requires:</p>
                 <ul>
-                    <li><strong>Stage 1</strong>: OpenMeteo weather data + s1000 lux readings</li>
-                    <li><strong>Stage 2</strong>: s1000 lux + s2100-01-par indoor readings</li>
+                    <li>
+                        <strong>Stage 1</strong>: OpenMeteo weather data +
+                        {WEATHER_STATION_SENSOR} lux readings
+                    </li>
+                    <li>
+                        <strong>Stage 2</strong>: {WEATHER_STATION_SENSOR} lux +
+                        {NATURAL_LIGHT_SENSOR} indoor readings
+                    </li>
                 </ul>
             </article>
         """
 
-    train_form = """
+    train_form = f"""
         <article>
             <h3>Train Model</h3>
             <p>Trains a two-stage model:</p>
             <ol>
-                <li><strong>Stage 1</strong>: OpenMeteo → s1000 lux (weather API calibration)</li>
-                <li><strong>Stage 2</strong>: s1000 lux → indoor PAR (greenhouse transmission)</li>
+                <li>
+                    <strong>Stage 1</strong>: OpenMeteo → {WEATHER_STATION_SENSOR} lux
+                    (weather API calibration)
+                </li>
+                <li>
+                    <strong>Stage 2</strong>: {WEATHER_STATION_SENSOR} lux → indoor PAR
+                    (greenhouse transmission)
+                </li>
             </ol>
             <form method="post" action="/dli/model/train">
                 <button type="submit">Train Model</button>
             </form>
             <small>
-                Uses all data from s1000 and s2100-01-par since 2025-10-24.
+                Uses all data from {WEATHER_STATION_SENSOR} and {NATURAL_LIGHT_SENSOR}
+                since {DEFAULT_TRAINING_START.isoformat()}.
             </small>
         </article>
     """
@@ -255,8 +272,12 @@ async def dli_model_train(user: str = Depends(deps.verify_admin_auth)) -> str:
                     <small>Attenuation</small>
                 </article>
             </div>
-            <p><strong>Stage 1</strong>: OpenMeteo daily direct_radiation → s1000 daily lux</p>
-            <p><strong>Stage 2</strong>: s1000 daily lux → s2100-01-par (above-lamp)
+                <p>
+                     <strong>Stage 1</strong>: OpenMeteo daily direct_radiation
+                     → {WEATHER_STATION_SENSOR} daily lux
+                </p>
+                <p><strong>Stage 2</strong>: {WEATHER_STATION_SENSOR} daily lux
+                    → {NATURAL_LIGHT_SENSOR} (above-lamp)
                → ×{stats.attenuation_factor:.3f} → plant-level estimate</p>
             <p>
                 Model saved and will be used for PAR predictions.
@@ -330,7 +351,7 @@ async def dli_model_diagnostic(
                 </article>
                 <article>
                     <div class="stat-value">{len(outdoor_df):,}</div>
-                    <small>s1000 readings</small>
+                    <small>{WEATHER_STATION_SENSOR} readings</small>
                 </article>
             </div>
             <small>
@@ -465,8 +486,12 @@ async def dli_model_diagnostic(
                     annotation_text=f"Global median: {median_ratio:.3f}",
                     annotation_position="top left",
                 )
+                ratio_title = (
+                    "Daily Attenuation Ratio "
+                    f"(lamp-corrected {TOTAL_LIGHT_SENSOR} / {NATURAL_LIGHT_SENSOR})"
+                )
                 fig_ratio.update_layout(
-                    title="Daily Attenuation Ratio (lamp-corrected s2100-02 / s2100-01)",
+                    title=ratio_title,
                     xaxis_title="",
                     yaxis_title="Ratio (corrected plant / above-lamp)",
                     height=400,
@@ -529,11 +554,11 @@ async def dli_model_diagnostic(
                 """
 
     else:
-        lamp_html = """
+        lamp_html = f"""
             <article>
                 <h3>Sensor Data</h3>
                 <small>Missing sensor data for diagnostics.
-                   Need both s2100-01-par and s2100-02-par readings.</small>
+                   Need both {NATURAL_LIGHT_SENSOR} and {TOTAL_LIGHT_SENSOR} readings.</small>
             </article>
         """
 

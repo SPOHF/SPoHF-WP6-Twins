@@ -11,7 +11,11 @@ from fastapi.responses import HTMLResponse
 
 from wp6_data.red import deps
 from wp6_data.red.dli import (
+    DEFAULT_FORECAST_CENTER_DAYS,
+    DEFAULT_PERFORMANCE_LOOKBACK_DAYS,
     NATURAL_LIGHT_SENSOR,
+    PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT,
+    PERFORMANCE_ERROR_WARN_THRESHOLD_PCT,
     SECONDS_PER_HOUR,
     TOTAL_LIGHT_SENSOR,
     UMOL_TO_MOL,
@@ -39,6 +43,13 @@ from wp6_data.shared import (
 )
 
 router = APIRouter(prefix="/dli")
+
+
+def _utc_day_bounds(target_date: date) -> tuple[datetime, datetime]:
+    """Return inclusive UTC start/end datetimes for a date."""
+    start = datetime(target_date.year, target_date.month, target_date.day, tzinfo=UTC)
+    end = start + timedelta(days=1) - timedelta(seconds=1)
+    return start, end
 
 
 @router.get("", response_class=HTMLResponse)
@@ -389,9 +400,9 @@ async def dli_forecast(
     # Default to a 5-day window centred on today (today-2 … today+2)
     today = date.today()
     if start_date is None:
-        start_date = today - timedelta(days=2)
+        start_date = today - timedelta(days=DEFAULT_FORECAST_CENTER_DAYS)
     if end_date is None:
-        end_date = today + timedelta(days=2)
+        end_date = today + timedelta(days=DEFAULT_FORECAST_CENTER_DAYS)
 
     # Ensure valid range
     if end_date < start_date:
@@ -405,8 +416,7 @@ async def dli_forecast(
     lamp_ref_day = min(start_date - timedelta(days=1), yesterday)
 
     # Get reference day's data for inferring lamp schedule
-    lamp_ref_start = datetime(lamp_ref_day.year, lamp_ref_day.month, lamp_ref_day.day, tzinfo=UTC)
-    lamp_ref_end = lamp_ref_start + timedelta(days=1) - timedelta(seconds=1)
+    lamp_ref_start, lamp_ref_end = _utc_day_bounds(lamp_ref_day)
 
     try:
         lamp_ref_par_df = await deps.db.get_par_readings(
@@ -453,9 +463,8 @@ async def dli_forecast(
             pass  # Fall back to no lamp inference
 
     # Get data for selected date range
-    range_start = datetime(start_date.year, start_date.month, start_date.day, tzinfo=UTC)
-    range_end = datetime(end_date.year, end_date.month, end_date.day, tzinfo=UTC)
-    range_end = range_end + timedelta(days=1) - timedelta(seconds=1)
+    range_start, _ = _utc_day_bounds(start_date)
+    _, range_end = _utc_day_bounds(end_date)
 
     try:
         par_df = await deps.db.get_par_readings(
@@ -535,8 +544,7 @@ async def dli_forecast(
         yesterday_dli = 0.0
         yesterday_natural_dli = 0.0
         try:
-            y_start = datetime(yesterday.year, yesterday.month, yesterday.day, tzinfo=UTC)
-            y_end = y_start + timedelta(days=1) - timedelta(seconds=1)
+            y_start, y_end = _utc_day_bounds(yesterday)
             y_par_df = await deps.db.get_par_readings(
                 device_ids=[sensor], start=y_start, end=y_end
             )
@@ -740,18 +748,18 @@ async def dli_performance(
             show_back_link=True, back_url="/dli",
         )
 
-    # Default to last 30 days, always exclude today (incomplete)
+    # Default to last N days, always exclude today (incomplete)
     today = date.today()
     yesterday = today - timedelta(days=1)
     if start is None:
-        start = today - timedelta(days=30)
+        start = today - timedelta(days=DEFAULT_PERFORMANCE_LOOKBACK_DAYS)
     if end is None:
         end = yesterday
     end = min(end, yesterday)
 
     lamp_ref_day = start - timedelta(days=1)
-    lamp_ref_dt = datetime(lamp_ref_day.year, lamp_ref_day.month, lamp_ref_day.day, tzinfo=UTC)
-    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+    lamp_ref_dt, _ = _utc_day_bounds(lamp_ref_day)
+    _, end_dt = _utc_day_bounds(end)
 
     filter_html = render_date_filter(start, end)
 
@@ -877,9 +885,9 @@ async def dli_performance(
         bar_colors = []
         for pct in pct_errs:
             ap = abs(pct)
-            if ap < 15:
+            if ap < PERFORMANCE_ERROR_WARN_THRESHOLD_PCT:
                 bar_colors.append("#22c55e")
-            elif ap < 30:
+            elif ap < PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT:
                 bar_colors.append("#f59e0b")
             else:
                 bar_colors.append("#ef4444")
@@ -924,7 +932,9 @@ async def dli_performance(
             idx = len(shared) - 1 - i
             a, p, err, pct = act[idx], pred[idx], errs[idx], pct_errs[idx]
             ap = abs(pct)
-            cls = "success" if ap < 15 else ("warning" if ap < 30 else "error-high")
+            cls = "success" if ap < PERFORMANCE_ERROR_WARN_THRESHOLD_PCT else (
+                "warning" if ap < PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT else "error-high"
+            )
             rows.append(f"""<tr>
                 <td>{d}</td><td>{a:.2f}</td><td>{p:.2f}</td>
                 <td>{err:+.2f}</td><td class="{cls}">{pct:+.1f}%</td>

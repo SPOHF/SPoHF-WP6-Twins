@@ -27,6 +27,7 @@ from wp6_data.red.dli.aggregation import (
     align_weather_to_outdoor_daily,
     encode_day_of_year,
 )
+from wp6_data.red.dli.constants import MIN_INDOOR_PAR, NATURAL_LIGHT_SENSOR, WEATHER_STATION_SENSOR
 
 
 def _default_model_path() -> Path:
@@ -59,8 +60,8 @@ class ModelStats:
     stage2: StageStats  # s1000 lux → indoor PAR (daily)
     training_date: datetime
     date_range: tuple[date, date]
-    outdoor_sensor: str = "s1000"
-    indoor_sensor: str = "s2100-01-par"
+    outdoor_sensor: str = WEATHER_STATION_SENSOR
+    indoor_sensor: str = NATURAL_LIGHT_SENSOR
     aggregation: str = "daily"
     model_version: int = 5
     attenuation_factor: float = 1.0
@@ -127,8 +128,8 @@ class TwoStageLightModel:
         weather_df: pd.DataFrame,
         outdoor_df: pd.DataFrame,
         indoor_df: pd.DataFrame,
-        outdoor_sensor: str = "s1000",
-        indoor_sensor: str = "s2100-01-par",
+        outdoor_sensor: str = WEATHER_STATION_SENSOR,
+        indoor_sensor: str = NATURAL_LIGHT_SENSOR,
         plant_level_df: pd.DataFrame | None = None,
         above_lamp_df: pd.DataFrame | None = None,
     ) -> ModelStats:
@@ -322,7 +323,7 @@ class TwoStageLightModel:
         # Merge and compute per-day ratio
         merged = above_daily.merge(plant_daily, on="date", how="inner")
         # Filter out days with negligible light
-        merged = merged[(merged["above_sum"] > 100) & (merged["plant_sum"] > 0)]
+        merged = merged[(merged["above_sum"] > MIN_INDOOR_PAR) & (merged["plant_sum"] > 0)]
 
         if merged.empty:
             return 1.0, 0

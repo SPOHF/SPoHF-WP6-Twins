@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -11,6 +10,7 @@ import pandas as pd
 import structlog
 from dotenv import load_dotenv
 
+from wp6_data.config import RedSettings
 from wp6_data.red.db import COMMON_MEASUREMENTS, SENSOR_TABLES
 
 log = structlog.get_logger()
@@ -51,18 +51,19 @@ async def export_table(
 
 async def run_export() -> None:
     """Run the full CSV export job."""
-    export_dir = Path(os.getenv("WP6_RED_EXPORT_DIR", "/tmp/exports"))
+    settings = RedSettings()
+    export_dir = Path(settings.export_dir)
     log.info("export_started", export_dir=str(export_dir))
 
     # Ensure export directory exists
     export_dir.mkdir(parents=True, exist_ok=True)
 
     # Connect to MySQL
-    db_host = os.getenv("WP6_RED_DB_HOST", "localhost")
-    db_port = int(os.getenv("WP6_RED_DB_PORT", "3306"))
-    db_name = os.getenv("WP6_RED_DB_NAME", "spohf2")
-    db_user = os.getenv("WP6_RED_DB_USER", "root")
-    db_password = os.getenv("WP6_RED_DB_PASSWORD", "")
+    db_host = settings.db_host
+    db_port = settings.db_port
+    db_name = settings.db_name
+    db_user = settings.db_user
+    db_password = settings.db_password
 
     pool = await aiomysql.create_pool(
         host=db_host,
