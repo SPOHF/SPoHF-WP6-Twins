@@ -1,6 +1,5 @@
 """Red dashboard DLI endpoints: overview, history, forecast, performance."""
 
-import os
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
@@ -387,18 +386,18 @@ async def dli_forecast(
         return render_page("DLI Forecast - WP6 Red", "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
-    # Default to today
+    # Default to a 5-day window centred on today (today-2 … today+2)
     today = date.today()
     if start_date is None:
-        start_date = today
+        start_date = today - timedelta(days=2)
     if end_date is None:
-        end_date = start_date
+        end_date = today + timedelta(days=2)
 
     # Ensure valid range
     if end_date < start_date:
         end_date = start_date
 
-    sensor = os.getenv("WP6_RED_DLI_SCHEDULE_SENSOR", "s2100-02-par")
+    sensor = TOTAL_LIGHT_SENSOR
     yesterday = today - timedelta(days=1)
 
     # Reference day for lamp inference: the day before the viewed range,
