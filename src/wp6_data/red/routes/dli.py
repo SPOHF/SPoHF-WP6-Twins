@@ -30,7 +30,14 @@ from wp6_data.red.dli import (
     predict_natural_dli_from_weather,
     try_infer_lamp_from_day,
 )
-from wp6_data.shared import make_schedule_chart, render_date_filter, render_page, resolve_date_range
+from wp6_data.shared import (
+    make_line_chart,
+    make_schedule_chart,
+    render_chart_page,
+    render_date_filter,
+    render_page,
+    resolve_date_range,
+)
 
 router = APIRouter(prefix="/dli")
 
@@ -96,6 +103,12 @@ async def dli_home(user: str = Depends(deps.verify_auth)) -> str:
 
         <div class="grid">
             <article>
+                <h3>PAR Chart</h3>
+                <p>Raw PAR readings: light above lamps vs under lamps.</p>
+                <a href="/dli/chart" class="btn">View Chart</a>
+            </article>
+
+            <article>
                 <h3>History</h3>
                 <p>Compare natural light vs total light (with lamps) over time.</p>
                 <a href="/dli/history" class="btn">View History</a>
@@ -118,6 +131,41 @@ async def dli_home(user: str = Depends(deps.verify_auth)) -> str:
     """
 
     return render_page("DLI Dashboard - WP6 Red", content, extra_css=extra_css, show_back_link=True)
+
+
+@router.get("/chart", response_class=HTMLResponse)
+async def dli_chart(
+    user: str = Depends(deps.verify_auth),
+    start: Annotated[date | None, Query(description="Start date")] = None,
+    end: Annotated[date | None, Query(description="End date")] = None,
+) -> str:
+    """Simple PAR chart showing light above lamps vs under lamps."""
+    if not deps.db:
+        return render_page("DLI Chart - WP6 Red", "<h1>Database not connected</h1>",
+                          show_back_link=True, back_url="/dli")
+
+    start, end, start_dt, end_dt = resolve_date_range(start, end)
+
+    try:
+        df = await deps.db.get_par_readings(
+            device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR], start=start_dt, end=end_dt
+        )
+    except Exception as e:
+        return render_page("DLI Chart - WP6 Red", f"<h1>Error: {e}</h1>",
+                          show_back_link=True, back_url="/dli")
+
+    # Rename device IDs to friendly labels for the chart legend
+    device_labels = {
+        NATURAL_LIGHT_SENSOR: "Above Lamps (natural)",
+        TOTAL_LIGHT_SENSOR: "Under Lamps (total)",
+    }
+    if not df.empty:
+        df = df.copy()
+        df["device"] = df["device"].map(device_labels).fillna(df["device"])
+
+    fig = make_line_chart(df, title="PAR - Above Lamps vs Under Lamps")
+
+    return render_chart_page(df, fig, "DLI Chart - WP6 Red", start, end, back_url="/dli")
 
 
 @router.get("/history", response_class=HTMLResponse)
