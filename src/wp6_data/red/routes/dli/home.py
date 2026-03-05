@@ -10,7 +10,7 @@ from wp6_data.shared import render_page
 router = APIRouter()
 
 
-@router.get("", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse)
 async def dli_home(user: str = Depends(deps.verify_auth)) -> str:
     """DLI dashboard overview page."""
     if not deps.db:

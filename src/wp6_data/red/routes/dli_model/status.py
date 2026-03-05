@@ -15,7 +15,7 @@ from wp6_data.shared import render_page
 router = APIRouter()
 
 
-@router.get("", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse)
 async def dli_model_status(user: str = Depends(deps.verify_admin_auth)) -> str:
     """View model status and training options."""
     model = get_model()
