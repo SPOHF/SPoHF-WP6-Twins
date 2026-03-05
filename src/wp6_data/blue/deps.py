@@ -1,4 +1,9 @@
-"""Blue dashboard dependencies: config, Neo4j helpers."""
+"""Blue dashboard dependencies: config, Neo4j helpers.
+
+All query functions accept an optional ``project`` parameter:
+- ``None`` (default) → exclude "yookr-direct" (SPoHF Datalake view)
+- A string → include only that project (used by the Yookr view)
+"""
 
 import os
 from datetime import datetime
@@ -23,6 +28,8 @@ NEO4J_PASSWORD = os.getenv("WP6_NEO4J_PASSWORD", "localdevpassword")
 # Module-level singleton driver — reuses connection pool across all requests
 _driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
+YOOKR_PROJECT = "yookr-direct"
+
 
 def get_driver():
     """Get the shared Neo4j driver instance."""
@@ -34,15 +41,37 @@ def close_driver():
     _driver.close()
 
 
+def _project_clause(project: str | None, *, device_var: str = "d") -> tuple[str, dict]:
+    """Build a Cypher project-filter fragment.
+
+    Returns (cypher_fragment, params_dict).
+    - project=None  → exclude yookr-direct
+    - project=<str> → include only that project
+    """
+    if project is not None:
+        return (
+            f"MATCH (p:Project {{name: $project}})-[:HAS_DEVICE]->({device_var})\n",
+            {"project": project},
+        )
+    return (
+        f"MATCH (p:Project)-[:HAS_DEVICE]->({device_var})\n"
+        f"WHERE p.name <> $excluded_project\n",
+        {"excluded_project": YOOKR_PROJECT},
+    )
+
+
 def fetch_data(
     sensor_tags: list[str] | None = None,
     device_names: list[str] | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
     limit: int = 50000,
+    project: str | None = None,
 ) -> pd.DataFrame:
     """Fetch sensor readings from Neo4j."""
     with _driver.session() as session:
+        proj_clause, proj_params = _project_clause(project)
+
         conditions = []
         if sensor_tags:
             conditions.append("s.tag IN $tags")
@@ -54,7 +83,9 @@ def fetch_data(
             conditions.append("r.datetime_measure <= $end")
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         query = f"""
-            MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
+            {proj_clause}
+            WITH d
+            MATCH (d)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
             {where}
             RETURN d.device_name AS device, s.tag AS sensor,
                    r.datetime_measure AS time, r.value AS value
@@ -63,6 +94,7 @@ def fetch_data(
             """
         result = session.run(
             query,
+            **proj_params,
             tags=sensor_tags,
             devices=device_names,
             start=start,
@@ -86,16 +118,23 @@ def fetch_data(
     return df
 
 
-def fetch_available_sensors() -> list[dict[str, Any]]:
+def fetch_available_sensors(project: str | None = None) -> list[dict[str, Any]]:
     """Get list of sensors with reading counts and date range."""
     with _driver.session() as session:
-        result = session.run("""
-                MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
+        proj_clause, proj_params = _project_clause(project)
+
+        result = session.run(
+            f"""
+                {proj_clause}
+                WITH d
+                MATCH (d)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
                 RETURN d.device_name AS device, s.tag AS sensor, count(r) AS readings,
                        min(r.datetime_measure) AS earliest,
                        max(r.datetime_measure) AS latest
                 ORDER BY readings DESC
-            """)
+            """,
+            **proj_params,
+        )
         records = []
         for r in result:
             rec = dict(r)
@@ -107,14 +146,22 @@ def fetch_available_sensors() -> list[dict[str, Any]]:
         return records
 
 
-def fetch_daily_coverage() -> list[dict[str, Any]]:
+def fetch_daily_coverage(project: str | None = None) -> list[dict[str, Any]]:
     """Get distinct days with data per device+sensor from DailyCoverage nodes."""
     with _driver.session() as session:
-        result = session.run("""
+        proj_clause, proj_params = _project_clause(project)
+
+        result = session.run(
+            f"""
+            {proj_clause}
+            WITH d
             MATCH (c:DailyCoverage)
+            WHERE c.device_name = d.device_name
             RETURN c.device_name AS device, c.sensor_tag AS sensor, c.day AS day
             ORDER BY sensor, device, day
-        """)
+        """,
+            **proj_params,
+        )
         records = []
         for r in result:
             rec = dict(r)
@@ -144,7 +191,6 @@ def fetch_sync_metrics() -> list[dict[str, Any]]:
         metrics = []
         for r in result:
             rec = dict(r)
-            # Convert neo4j datetime to python datetime
             if rec.get("last_run_at"):
                 rec["last_run_at"] = rec["last_run_at"].to_native()
             if rec.get("last_data_timestamp"):

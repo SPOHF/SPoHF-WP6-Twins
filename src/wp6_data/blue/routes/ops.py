@@ -1,11 +1,14 @@
 """Blue dashboard operations endpoints: health, metrics, status."""
 
 from datetime import datetime
+from types import ModuleType
+from typing import Annotated
 
 from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from wp6_data.blue import deps
+from wp6_data.blue.datasource import GetActiveSource
 from wp6_data.shared import (
     build_weekly_coverage,
     render_card,
@@ -190,9 +193,9 @@ def _build_sync_table() -> str | None:
     """
 
 
-def _build_coverage_html() -> str:
+def _build_coverage_html(source: ModuleType = deps) -> str:
     """Build the coverage timeline HTML section."""
-    records = deps.fetch_daily_coverage()
+    records = source.fetch_daily_coverage()
     if not records:
         return "<p>No coverage data. Run a sync or rebuild the coverage index.</p>"
 
@@ -223,14 +226,22 @@ def _build_coverage_html() -> str:
 
 
 @router.get("/status", response_class=HTMLResponse)
-async def status() -> str:
+async def status(
+    active_source: Annotated[tuple[ModuleType, str], GetActiveSource],
+) -> str:
     """Combined status page: sync status and data coverage."""
+    source, source_name = active_source
+    is_yookr = source_name == "yookr"
+
     # Sync status section
-    sync_table = _build_sync_table()
-    sync_html = sync_table if sync_table else "<p>No sync metadata found.</p>"
+    if is_yookr:
+        sync_html = "<p>Direct API — no sync needed.</p>"
+    else:
+        sync_table = _build_sync_table()
+        sync_html = sync_table if sync_table else "<p>No sync metadata found.</p>"
 
     # Coverage section
-    coverage_html = _build_coverage_html()
+    coverage_html = _build_coverage_html(source)
 
     content = f"""
         <h1>Status</h1>
@@ -241,12 +252,21 @@ async def status() -> str:
                       description="Each block is one week. From start of project to now.")}
     """
 
-    return render_page("Status - WP6 Blue", content, show_back_link=True, extra_css=COVERAGE_CSS)
+    return render_page(
+        "Status - WP6 Blue", content,
+        show_back_link=True, extra_css=COVERAGE_CSS, data_source=source_name,
+    )
 
 
 @router.get("/maintenance", response_class=HTMLResponse)
-async def maintenance(rebuilt: int | None = Query(default=None)) -> str:
+async def maintenance(
+    active_source: Annotated[tuple[ModuleType, str], GetActiveSource],
+    rebuilt: int | None = Query(default=None),
+) -> str:
     """Hidden maintenance page for ops tools."""
+    _source, source_name = active_source
+    is_yookr = source_name == "yookr"
+
     rebuilt_msg = ""
     if rebuilt is not None:
         rebuilt_msg = (
@@ -254,22 +274,34 @@ async def maintenance(rebuilt: int | None = Query(default=None)) -> str:
             f"Coverage index rebuilt: {rebuilt:,} entries.</p>"
         )
 
-    content = f"""
-        <h1>Maintenance</h1>
-        {rebuilt_msg}
-        {render_card(
+    coverage_card = (
+        render_card(
+            "Coverage Index",
+            "<p>Not available — direct API mode.</p>",
+        )
+        if is_yookr
+        else render_card(
             "Coverage Index",
             '<form method="post" action="/rebuild-coverage">'
             '<button type="submit">Rebuild Coverage Index</button></form>',
             description="Rebuild DailyCoverage nodes from all existing Readings.",
-        )}
+        )
+    )
+
+    content = f"""
+        <h1>Maintenance</h1>
+        {rebuilt_msg}
+        {coverage_card}
         {render_card(
             "Metrics",
             '<p><a href="/metrics">Prometheus metrics</a></p>',
         )}
     """
 
-    return render_page("Maintenance - WP6 Blue", content, show_back_link=True)
+    return render_page(
+        "Maintenance - WP6 Blue", content,
+        show_back_link=True, data_source=source_name,
+    )
 
 
 @router.post("/rebuild-coverage")

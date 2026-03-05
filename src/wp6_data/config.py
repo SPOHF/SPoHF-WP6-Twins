@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     # Endpoints to sync (comma-separated)
     endpoints: str = "yookr-data"
 
+    # Yookr API (direct sensor queries)
+    yookr_base_url: str = "https://api.yookr.org"
+    yookr_email: str = ""
+    yookr_password: str = ""
+
+    # Blue dashboard data source
+    blue_default_source: str = "spohf-datalake"  # "spohf-datalake" or "yookr"
+
     # Logging
     log_level: str = "INFO"
     log_format: str = "json"  # "json" or "console"

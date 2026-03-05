@@ -1,9 +1,12 @@
 """Blue dashboard home page."""
 
+from types import ModuleType
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
-from wp6_data.blue import deps
+from wp6_data.blue.datasource import GetActiveSource
 from wp6_data.shared import render_card, render_page, render_table
 from wp6_data.shared.auth import verify_session_user
 
@@ -11,9 +14,12 @@ router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 
 @router.get("/", response_class=HTMLResponse)
-async def home() -> str:
+async def home(
+    active_source: Annotated[tuple[ModuleType, str], GetActiveSource],
+) -> str:
     """Dashboard home page."""
-    sensors = deps.fetch_available_sensors()
+    source, source_name = active_source
+    sensors = source.fetch_available_sensors()
 
     # Group by sensor tag: total readings
     sensor_tags: dict[str, int] = {}
@@ -68,4 +74,4 @@ async def home() -> str:
         )}
     """
 
-    return render_page("WP6 Blue - Sensor Dashboard", content)
+    return render_page("WP6 Blue - Sensor Dashboard", content, data_source=source_name)

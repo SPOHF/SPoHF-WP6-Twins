@@ -1,13 +1,14 @@
 """Blue dashboard compare endpoints."""
 
 from datetime import date
+from types import ModuleType
 from typing import Annotated
 
 import pandas as pd
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 
-from wp6_data.blue import deps
+from wp6_data.blue.datasource import GetActiveSource
 from wp6_data.shared import (
     render_compare_form,
     render_comparison_result,
@@ -20,9 +21,12 @@ router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 
 @router.get("/compare", response_class=HTMLResponse)
-async def compare_form() -> str:
+async def compare_form(
+    active_source: Annotated[tuple[ModuleType, str], GetActiveSource],
+) -> str:
     """Form to select two device/sensor pairs for a custom dual-axis chart."""
-    sensors = deps.fetch_available_sensors()
+    source, source_name = active_source
+    sensors = source.fetch_available_sensors()
 
     # Build device -> [sensor tags] mapping
     device_data: dict[str, list[str]] = {}
@@ -38,11 +42,15 @@ async def compare_form() -> str:
         {form_html}
     """
 
-    return render_page("Custom Compare - WP6 Blue", content, show_back_link=True)
+    return render_page(
+        "Custom Compare - WP6 Blue", content,
+        show_back_link=True, data_source=source_name,
+    )
 
 
 @router.get("/compare/chart", response_class=HTMLResponse)
 async def compare_chart(
+    active_source: Annotated[tuple[ModuleType, str], GetActiveSource],
     left_device: str = Query(...),
     left_measurement: str = Query(...),
     right_device: str = Query(""),
@@ -51,14 +59,17 @@ async def compare_chart(
     end: Annotated[date | None, Query()] = None,
 ) -> str:
     """Render a comparison chart for one or two device/sensor pairs."""
+    source, source_name = active_source
     start, end, start_dt, end_dt = resolve_date_range(start, end)
 
-    left_df = deps.fetch_data(sensor_tags=[left_measurement], start=start_dt, end=end_dt)
+    left_df = source.fetch_data(sensor_tags=[left_measurement], start=start_dt, end=end_dt)
     if not left_df.empty:
         left_df = left_df[left_df["device"] == left_device]
 
     if right_device and right_measurement:
-        right_df = deps.fetch_data(sensor_tags=[right_measurement], start=start_dt, end=end_dt)
+        right_df = source.fetch_data(
+            sensor_tags=[right_measurement], start=start_dt, end=end_dt,
+        )
         if not right_df.empty:
             right_df = right_df[right_df["device"] == right_device]
     else:
@@ -70,4 +81,5 @@ async def compare_chart(
         right_device, right_measurement,
         start, end,
         "Compare - WP6 Blue",
+        data_source=source_name,
     )
