@@ -1,1 +1,1 @@
-"""WP6 Blue - Neo4j-backed sensor dashboard."""
+"""WP6 Blue - TimescaleDB-backed sensor dashboard."""

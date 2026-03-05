@@ -56,7 +56,7 @@ COVERAGE_CSS = """
 
 @router.get("/health")
 async def health() -> dict[str, str]:
-    """Health check endpoint for k8s probes (doesn't hit Neo4j)."""
+    """Health check endpoint for k8s probes."""
     return {"status": "ok"}
 
 
@@ -64,9 +64,9 @@ async def health() -> dict[str, str]:
 async def metrics() -> str:
     """Prometheus metrics endpoint for sync observability."""
     try:
-        sync_metrics = deps.fetch_sync_metrics()
+        sync_metrics = await deps.fetch_sync_metrics()
     except Exception:
-        # Return empty metrics if Neo4j is unavailable
+        # Return empty metrics if DB is unavailable
         return "# wp6_sync_up 0\n"
 
     lines = [
@@ -124,10 +124,10 @@ async def metrics() -> str:
     return "\n".join(lines) + "\n"
 
 
-def _build_sync_table() -> str | None:
+async def _build_sync_table(source: ModuleType = deps) -> str | None:
     """Build the sync status HTML table, or None if no data."""
     try:
-        sync_metrics = deps.fetch_sync_metrics()
+        sync_metrics = await source.fetch_sync_metrics()
     except Exception:
         return None
 
@@ -193,9 +193,9 @@ def _build_sync_table() -> str | None:
     """
 
 
-def _build_coverage_html(source: ModuleType = deps) -> str:
+async def _build_coverage_html(source: ModuleType = deps) -> str:
     """Build the coverage timeline HTML section."""
-    records = source.fetch_daily_coverage()
+    records = await source.fetch_daily_coverage()
     if not records:
         return "<p>No coverage data. Run a sync or rebuild the coverage index.</p>"
 
@@ -237,11 +237,11 @@ async def status(
     if is_yookr:
         sync_html = "<p>Direct API — no sync needed.</p>"
     else:
-        sync_table = _build_sync_table()
+        sync_table = await _build_sync_table(source)
         sync_html = sync_table if sync_table else "<p>No sync metadata found.</p>"
 
     # Coverage section
-    coverage_html = _build_coverage_html(source)
+    coverage_html = await _build_coverage_html(source)
 
     content = f"""
         <h1>Status</h1>
@@ -284,7 +284,7 @@ async def maintenance(
             "Coverage Index",
             '<form method="post" action="/rebuild-coverage">'
             '<button type="submit">Rebuild Coverage Index</button></form>',
-            description="Rebuild DailyCoverage nodes from all existing Readings.",
+            description="Rebuild daily_coverage table from all existing readings.",
         )
     )
 
@@ -306,15 +306,11 @@ async def maintenance(
 
 @router.post("/rebuild-coverage")
 async def rebuild_coverage() -> RedirectResponse:
-    """Rebuild all DailyCoverage nodes from existing Readings."""
-    with deps._driver.session() as session:
-        result = session.run(
-            "MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading) "
-            "WITH DISTINCT d.device_name AS dn, s.tag AS st, "
-            "date(r.datetime_measure) AS day "
-            "MERGE (c:DailyCoverage {device_name: dn, sensor_tag: st, day: day}) "
-            "RETURN count(c) AS total"
-        )
-        record = result.single()
-        count = record["total"] if record else 0
+    """Rebuild daily_coverage table from existing readings."""
+    from wp6_data.db import get_pool, rebuild_daily_coverage
+
+    pool = get_pool()
+    async with pool.connection() as conn:
+        count = await rebuild_daily_coverage(conn)
+        await conn.commit()
     return RedirectResponse(url=f"/maintenance?rebuilt={count}", status_code=303)

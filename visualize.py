@@ -4,43 +4,37 @@
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import psycopg
 from plotly.subplots import make_subplots
-from neo4j import GraphDatabase
+from psycopg.rows import dict_row
 
-# Neo4j connection
-URI = "bolt://localhost:7687"
-AUTH = ("neo4j", "localdevpassword")
+# TimescaleDB connection
+DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
 
 
 def fetch_sensor_data(sensor_tags: list[str] | None = None, limit: int = 10000) -> pd.DataFrame:
-    """Fetch sensor readings from Neo4j."""
-    with GraphDatabase.driver(URI, auth=AUTH) as driver:
-        with driver.session() as session:
-            # Build query
-            tag_filter = ""
-            if sensor_tags:
-                tag_filter = "WHERE s.tag IN $tags"
+    """Fetch sensor readings from TimescaleDB."""
+    conditions = []
+    params: dict = {"limit": limit}
+    if sensor_tags:
+        conditions.append("sensor_tag = ANY(%(tags)s)")
+        params["tags"] = sensor_tags
 
-            query = f"""
-            MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
-            {tag_filter}
-            RETURN
-                d.device_name AS device,
-                s.tag AS sensor,
-                r.datetime_measure AS time,
-                r.value AS value
-            ORDER BY r.datetime_measure
-            LIMIT $limit
-            """
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-            result = session.run(query, tags=sensor_tags, limit=limit)
-            records = []
-            for r in result:
-                rec = dict(r)
-                # Convert Neo4j DateTime to Python datetime
-                if rec.get("time"):
-                    rec["time"] = rec["time"].to_native()
-                records.append(rec)
+    query = f"""
+        SELECT device_name AS device, sensor_tag AS sensor,
+               time, value
+        FROM readings
+        {where}
+        ORDER BY time
+        LIMIT %(limit)s
+    """
+
+    with psycopg.connect(DSN, row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            records = cur.fetchall()
 
     df = pd.DataFrame(records)
     if not df.empty:
@@ -156,7 +150,7 @@ if __name__ == "__main__":
         # Single axis mode
         tags = args if args else None
 
-        print("Fetching data from Neo4j...")
+        print("Fetching data from TimescaleDB...")
         df = fetch_sensor_data(sensor_tags=tags)
         print(f"Got {len(df)} readings")
 

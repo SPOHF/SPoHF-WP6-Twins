@@ -1,4 +1,4 @@
-"""WP6 Blue Dashboard - Neo4j-backed sensor visualization."""
+"""WP6 Blue Dashboard - TimescaleDB-backed sensor visualization."""
 
 from contextlib import asynccontextmanager
 
@@ -10,7 +10,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from wp6_data.blue import deps
 from wp6_data.blue.routes import charts, compare, home, ops
-from wp6_data.config import OIDCSettings
+from wp6_data.config import OIDCSettings, Settings
 from wp6_data.shared.auth import NotAuthenticated, make_auth_router, startup_oidc
 from wp6_data.shared.templates import _current_user
 
@@ -20,8 +20,10 @@ oidc_settings = OIDCSettings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await startup_oidc(oidc_settings)
+    settings = Settings()
+    await deps.init_db(settings.tsdb_url)
     yield
-    deps.close_driver()
+    await deps.close_db()
 
 
 async def _set_user_context(request: Request, call_next):

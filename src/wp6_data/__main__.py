@@ -47,7 +47,7 @@ def configure_logging(settings: Settings) -> None:
 
 
 def _run_spohf_sync(settings: Settings, logger: Any) -> int:
-    """Run the SPoHF API → Neo4j sync."""
+    """Run the SPoHF API → TimescaleDB sync."""
     logger.info(
         "spohf_sync_starting",
         api_base_url=settings.api_base_url,
@@ -70,7 +70,7 @@ def _run_spohf_sync(settings: Settings, logger: Any) -> int:
 
 
 def _run_yookr_sync(settings: Settings, logger: Any) -> int:
-    """Run the Yookr API → Neo4j sync."""
+    """Run the Yookr API → TimescaleDB sync."""
     from wp6_data.sync.yookr_orchestrator import YookrSyncOrchestrator
 
     logger.info(
@@ -109,7 +109,7 @@ def main() -> int:
 
     logger.info(
         "sync_job_starting",
-        neo4j_host=settings.neo4j_uri.split("://")[-1].split(":")[0],
+        tsdb_url=settings.tsdb_url.split("@")[-1],  # hide credentials
         sync_mode=settings.sync_mode,
         run_spohf=run_spohf,
         run_yookr=run_yookr and yookr_configured,

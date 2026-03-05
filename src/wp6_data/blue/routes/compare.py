@@ -26,7 +26,7 @@ async def compare_form(
 ) -> str:
     """Form to select two device/sensor pairs for a custom dual-axis chart."""
     source, source_name = active_source
-    sensors = source.fetch_available_sensors()
+    sensors = await source.fetch_available_sensors()
 
     # Build device -> [sensor tags] mapping
     device_data: dict[str, list[str]] = {}
@@ -62,12 +62,12 @@ async def compare_chart(
     source, source_name = active_source
     start, end, start_dt, end_dt = resolve_date_range(start, end)
 
-    left_df = source.fetch_data(sensor_tags=[left_measurement], start=start_dt, end=end_dt)
+    left_df = await source.fetch_data(sensor_tags=[left_measurement], start=start_dt, end=end_dt)
     if not left_df.empty:
         left_df = left_df[left_df["device"] == left_device]
 
     if right_device and right_measurement:
-        right_df = source.fetch_data(
+        right_df = await source.fetch_data(
             sensor_tags=[right_measurement], start=start_dt, end=end_dt,
         )
         if not right_df.empty:

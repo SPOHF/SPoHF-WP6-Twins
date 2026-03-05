@@ -23,15 +23,11 @@ spec:
             - containerPort: 8000
               name: http
           env:
-            - name: WP6_NEO4J_URI
-              value: "bolt://{{ .Chart.Name }}-neo4j:7687"
-            - name: WP6_NEO4J_USER
-              value: "neo4j"
-            - name: WP6_NEO4J_PASSWORD
+            - name: WP6_TSDB_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret | default (printf "%s-secrets" .Chart.Name) }}
-                  key: neo4j-password
+                  key: tsdb-url
             - name: WP6_OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:

@@ -32,7 +32,7 @@ async def chart(
     start, end, start_dt, end_dt = resolve_date_range(start, end)
 
     sensor_list = [s.strip() for s in sensors.split(",")]
-    df = source.fetch_data(sensor_tags=sensor_list, start=start_dt, end=end_dt)
+    df = await source.fetch_data(sensor_tags=sensor_list, start=start_dt, end=end_dt)
 
     if dual and len(sensor_list) == 2:
         fig = make_dual_axis_chart(df, sensor_list[0], sensor_list[1])
@@ -55,7 +55,7 @@ async def device_chart(
     source, source_name = active_source
     start, end, start_dt, end_dt = resolve_date_range(start, end)
 
-    df = source.fetch_data(
+    df = await source.fetch_data(
         device_names=[device], start=start_dt, end=end_dt,
     )
 

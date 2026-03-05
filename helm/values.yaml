@@ -1,16 +1,14 @@
 # WP6 Data Sync - Helm Values
-# Syncs sensor data from SPoHF/Yookr API to Neo4j
+# Syncs sensor data from SPoHF/Yookr API to TimescaleDB
 
 image:
   repository: ""  # Required: e.g., ghcr.io/yourorg/wp6-data
   pullPolicy: Always
   tag: "latest"
 
-# Neo4j (deployed alongside)
-neo4j:
+# TimescaleDB (deployed alongside)
+timescaledb:
   enabled: true
-  auth:
-    password: ""  # Set via secret
 
 # Dashboard
 dashboard:
@@ -27,14 +25,27 @@ dashboard:
     enabled: true
     host: ""  # Required: e.g., wp6.example.com
 
-# Sync CronJob
+# SPoHF Sync CronJob (datalake API)
 sync:
   enabled: true
-  schedule: "*/15 * * * *"  # Every 15 minutes
+  schedule: "*/15 * * * *"
   pageSize: 1000
   endpoints: "yookr-data"
   mode: "incremental"  # "full" or "incremental"
   windowDays: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Yookr Sync CronJob (direct API)
+yookrSync:
+  enabled: true
+  schedule: "*/15 * * * *"
+  mode: "incremental"  # "full" or "incremental"
   resources:
     requests:
       cpu: 100m
@@ -56,6 +67,10 @@ secrets:
   neo4jPassword: ""
   oidcClientSecret: ""   # OIDC client secret for wp6-data client
   oidcSessionSecret: ""  # Random string for signing session cookies (generate with: python -c "import secrets; print(secrets.token_hex(32))")
+  tsdbUrl: ""        # e.g., postgresql://user:pass@host:5432/dbname
+  tsdbPassword: ""
+  yookrEmail: ""
+  yookrPassword: ""
 
 # Red Dashboard (MySQL backend with auth)
 red:

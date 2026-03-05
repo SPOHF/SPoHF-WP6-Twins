@@ -85,4 +85,15 @@ class YookrClient:
             resp = client.get(url, params=params)
 
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+
+        if len(data) >= limit:
+            logger.warning(
+                "yookr_limit_reached",
+                sensor_id=sensor_id,
+                limit=limit,
+                returned=len(data),
+                hint="results may be truncated — consider a smaller time range",
+            )
+
+        return data

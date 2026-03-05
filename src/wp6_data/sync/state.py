@@ -1,19 +1,20 @@
-"""Sync state management stored in Neo4j."""
+"""Sync state management stored in TimescaleDB."""
 
 from datetime import UTC, datetime, timedelta
 
-from neo4j import AsyncSession
+from psycopg import AsyncConnection
+from psycopg.rows import dict_row
 
 
 class SyncStateManager:
-    """Manage sync state using Neo4j SyncMetadata nodes.
+    """Manage sync state using the sync_metadata table.
 
     Stores last successful sync timestamp per endpoint to enable
     incremental syncing.
     """
 
-    def __init__(self, session: AsyncSession, endpoint: str):
-        self._session = session
+    def __init__(self, conn: AsyncConnection, endpoint: str):
+        self._conn = conn
         self._endpoint = endpoint
 
     async def get_last_timestamp(self, default_lookback_hours: int = 24) -> datetime:
@@ -33,19 +34,15 @@ class SyncStateManager:
         Returns:
             Tuple of (timestamp, is_initial_sync)
         """
-        result = await self._session.run(
-            """
-            MATCH (m:SyncMetadata {endpoint: $endpoint})
-            RETURN m.last_timestamp AS ts
-            """,
-            endpoint=self._endpoint,
-        )
-        record = await result.single()
+        async with self._conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                "SELECT last_timestamp FROM sync_metadata WHERE endpoint = %(endpoint)s",
+                {"endpoint": self._endpoint},
+            )
+            row = await cur.fetchone()
 
-        if record and record["ts"]:
-            # Neo4j returns neo4j.time.DateTime, convert to Python datetime
-            neo4j_dt = record["ts"]
-            return neo4j_dt.to_native(), False
+        if row and row["last_timestamp"]:
+            return row["last_timestamp"], False
 
         # Default: look back N hours from now (initial sync)
         return datetime.now(UTC) - timedelta(hours=default_lookback_hours), True
@@ -55,23 +52,19 @@ class SyncStateManager:
         timestamp: datetime,
         record_count: int,
     ) -> None:
-        """Update sync metadata after successful batch.
-
-        Args:
-            timestamp: The latest datetime_measure we synced
-            record_count: Number of records processed in this run
-        """
-        await self._session.run(
-            """
-            MERGE (m:SyncMetadata {endpoint: $endpoint})
-            SET m.last_timestamp = datetime($ts),
-                m.last_run_at = datetime(),
-                m.records_processed = $count
-            """,
-            endpoint=self._endpoint,
-            ts=timestamp.isoformat(),
-            count=record_count,
-        )
+        """Update sync metadata after successful batch."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO sync_metadata (endpoint, last_timestamp, last_run_at, last_run_records)
+                VALUES (%(endpoint)s, %(ts)s, NOW(), %(count)s)
+                ON CONFLICT (endpoint) DO UPDATE SET
+                    last_timestamp = %(ts)s,
+                    last_run_at = NOW(),
+                    last_run_records = %(count)s
+                """,
+                {"endpoint": self._endpoint, "ts": timestamp, "count": record_count},
+            )
 
     async def record_run_result(
         self,
@@ -83,37 +76,45 @@ class SyncStateManager:
         api_status: int | None = None,
         api_error_detail: str | None = None,
     ) -> None:
-        """Record the result of a sync run for observability.
-
-        Args:
-            success: Whether the sync completed successfully
-            duration_seconds: How long the sync took
-            record_count: Number of records processed
-            error: Error message if failed
-            api_status: HTTP status code if API error
-            api_error_detail: Response body snippet if API error
-        """
-        await self._session.run(
-            """
-            MERGE (m:SyncMetadata {endpoint: $endpoint})
-            SET m.last_run_at = datetime(),
-                m.last_run_success = $success,
-                m.last_run_duration_seconds = $duration,
-                m.last_run_records = $records,
-                m.total_runs = coalesce(m.total_runs, 0) + 1,
-                m.total_failures = CASE WHEN $success THEN coalesce(m.total_failures, 0)
-                                        ELSE coalesce(m.total_failures, 0) + 1 END
-            WITH m
-            WHERE NOT $success
-            SET m.last_error = $error,
-                m.last_api_status = $api_status,
-                m.last_api_error_detail = $api_detail
-            """,
-            endpoint=self._endpoint,
-            success=success,
-            duration=duration_seconds,
-            records=record_count,
-            error=error,
-            api_status=api_status,
-            api_detail=api_error_detail,
-        )
+        """Record the result of a sync run for observability."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO sync_metadata (
+                    endpoint, last_run_at, last_run_success,
+                    last_run_duration_sec, last_run_records,
+                    total_runs, total_failures,
+                    last_error, last_api_status, last_api_error_detail
+                )
+                VALUES (
+                    %(endpoint)s, NOW(), %(success)s,
+                    %(duration)s, %(records)s,
+                    1, %(failure_inc)s,
+                    %(error)s, %(api_status)s, %(api_detail)s
+                )
+                ON CONFLICT (endpoint) DO UPDATE SET
+                    last_run_at = NOW(),
+                    last_run_success = %(success)s,
+                    last_run_duration_sec = %(duration)s,
+                    last_run_records = %(records)s,
+                    total_runs = COALESCE(sync_metadata.total_runs, 0) + 1,
+                    total_failures = COALESCE(sync_metadata.total_failures, 0) + %(failure_inc)s,
+                    last_error = CASE WHEN %(success)s THEN sync_metadata.last_error
+                                      ELSE %(error)s END,
+                    last_api_status = CASE WHEN %(success)s THEN sync_metadata.last_api_status
+                                           ELSE %(api_status)s END,
+                    last_api_error_detail = CASE WHEN %(success)s
+                                                 THEN sync_metadata.last_api_error_detail
+                                                 ELSE %(api_detail)s END
+                """,
+                {
+                    "endpoint": self._endpoint,
+                    "success": success,
+                    "duration": duration_seconds,
+                    "records": record_count,
+                    "failure_inc": 0 if success else 1,
+                    "error": error,
+                    "api_status": api_status,
+                    "api_detail": api_error_detail,
+                },
+            )

@@ -19,7 +19,7 @@ async def home(
 ) -> str:
     """Dashboard home page."""
     source, source_name = active_source
-    sensors = source.fetch_available_sensors()
+    sensors = await source.fetch_available_sensors()
 
     # Group by sensor tag: total readings
     sensor_tags: dict[str, int] = {}

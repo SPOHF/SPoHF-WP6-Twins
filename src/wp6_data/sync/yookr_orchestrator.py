@@ -1,7 +1,7 @@
-"""Yookr API → Neo4j sync orchestrator.
+"""Yookr API → TimescaleDB sync orchestrator.
 
-Same graph format as the SPoHF sync (Device → Sensor → Reading), but fetches
-per-sensor from api.yookr.org instead of all-at-once from backoffice.spohf.com.
+Same table format as the SPoHF sync, but fetches per-sensor from
+api.yookr.org instead of all-at-once from backoffice.spohf.com.
 """
 
 from collections import defaultdict
@@ -11,11 +11,13 @@ from typing import Any
 import structlog
 
 from wp6_data.config import Settings
-from wp6_data.graph import (
-    CONSTRAINTS,
-    Neo4jConnection,
-    batch_upsert_readings,
+from wp6_data.db import (
+    close_pool,
+    ensure_schema,
+    get_pool,
+    init_pool,
     upsert_daily_coverage,
+    upsert_readings,
 )
 from wp6_data.sync.state import SyncStateManager
 from wp6_data.yookr.client import YookrClient
@@ -27,10 +29,24 @@ BATCH_SIZE = 1000
 ENDPOINT_NAME = "yookr-direct"
 FULL_SYNC_START = datetime(2024, 1, 1, tzinfo=UTC)
 INCREMENTAL_LOOKBACK_DAYS = 30
+WINDOW_DAYS = 30  # Fetch one month at a time per sensor
+
+
+def _generate_monthly_windows(
+    sync_from: datetime, sync_until: datetime,
+) -> list[tuple[datetime, datetime]]:
+    """Split a time range into ~30-day windows, oldest first."""
+    windows = []
+    window_start = sync_from
+    while window_start < sync_until:
+        window_end = min(window_start + timedelta(days=WINDOW_DAYS), sync_until)
+        windows.append((window_start, window_end))
+        window_start = window_end
+    return windows
 
 
 class YookrSyncOrchestrator:
-    """Sync sensor data from Yookr API → Neo4j."""
+    """Sync sensor data from Yookr API → TimescaleDB."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -39,12 +55,7 @@ class YookrSyncOrchestrator:
             settings.yookr_email,
             settings.yookr_password,
         )
-        self.neo4j = Neo4jConnection(
-            settings.neo4j_uri,
-            settings.neo4j_user,
-            settings.neo4j_password,
-            settings.neo4j_database,
-        )
+        self._dsn = settings.tsdb_url
         self.registry = SensorRegistry()
 
     async def run(self) -> dict[str, Any]:
@@ -59,12 +70,12 @@ class YookrSyncOrchestrator:
             "errors": [],
         }
 
+        pool = await init_pool(self._dsn)
         try:
-            await self.neo4j.connect()
-            await self.neo4j.ensure_schema(CONSTRAINTS)
+            await ensure_schema(pool)
 
-            async with self.neo4j.session() as session:
-                state = SyncStateManager(session, ENDPOINT_NAME)
+            async with pool.connection() as conn:
+                state = SyncStateManager(conn, ENDPOINT_NAME)
 
                 # Determine time range
                 mode = self.settings.sync_mode.lower()
@@ -89,66 +100,80 @@ class YookrSyncOrchestrator:
                     lambda: {"count": 0, "min": None, "max": None}
                 )
 
+                windows = _generate_monthly_windows(sync_from, sync_until)
+
                 for info in self.registry.all_sensors():
-                    try:
-                        readings = self.client.fetch_readings(
-                            info.sensor_id,
-                            gte=sync_from,
-                            lte=sync_until,
-                            limit=50000,
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "yookr_sensor_fetch_failed",
-                            sensor_id=info.sensor_id,
-                            sensor_tag=info.sensor_tag,
-                            device=info.device_name,
-                            error=str(e)[:200],
-                        )
-                        stats["sensors_failed"] += 1
-                        stats["errors"].append(
-                            f"{info.device_name}/{info.sensor_tag}: {e}"
-                        )
-                        continue
+                    sensor_total = 0
+                    sensor_failed = False
 
-                    if not readings:
-                        stats["sensors_synced"] += 1
-                        continue
-
-                    for r in readings:
-                        params = self._reading_to_params(info, r)
-                        batch.append(params)
-
-                        dt_iso = params["datetime_measure"]
-                        self._update_sensor_stats(
-                            sensor_stats, info.sensor_tag, dt_iso,
-                        )
-
-                        dt = datetime.fromisoformat(
-                            dt_iso.replace("Z", "+00:00")
-                        )
-                        if latest_timestamp is None or dt > latest_timestamp:
-                            latest_timestamp = dt
-
-                        if len(batch) >= BATCH_SIZE:
-                            upserted, created = await self._flush_batch(
-                                session, batch,
+                    for win_start, win_end in windows:
+                        try:
+                            readings = self.client.fetch_readings(
+                                info.sensor_id,
+                                gte=win_start,
+                                lte=win_end,
+                                limit=500000,
                             )
-                            stats["total_records"] += upserted
-                            stats["total_created"] += created
-                            batch = []
+                        except Exception as e:
+                            logger.warning(
+                                "yookr_sensor_fetch_failed",
+                                sensor_id=info.sensor_id,
+                                sensor_tag=info.sensor_tag,
+                                device=info.device_name,
+                                window=f"{win_start:%Y-%m-%d}..{win_end:%Y-%m-%d}",
+                                error=str(e)[:200],
+                            )
+                            sensor_failed = True
+                            stats["errors"].append(
+                                f"{info.device_name}/{info.sensor_tag} "
+                                f"({win_start:%Y-%m-%d}): {e}"
+                            )
+                            continue
 
-                    stats["sensors_synced"] += 1
-                    logger.debug(
-                        "yookr_sensor_synced",
+                        if not readings:
+                            continue
+
+                        sensor_total += len(readings)
+
+                        for r in readings:
+                            params = self._reading_to_params(info, r)
+                            batch.append(params)
+
+                            dt_iso = params["datetime_measure"]
+                            self._update_sensor_stats(
+                                sensor_stats, info.sensor_tag, dt_iso,
+                            )
+
+                            dt = datetime.fromisoformat(
+                                dt_iso.replace("Z", "+00:00")
+                            )
+                            if latest_timestamp is None or dt > latest_timestamp:
+                                latest_timestamp = dt
+
+                            if len(batch) >= BATCH_SIZE:
+                                upserted, created = await self._flush_batch(
+                                    conn, batch,
+                                )
+                                stats["total_records"] += upserted
+                                stats["total_created"] += created
+                                batch = []
+
+                    if sensor_failed:
+                        stats["sensors_failed"] += 1
+                    else:
+                        stats["sensors_synced"] += 1
+
+                    logger.info(
+                        "yookr_sensor_fetched",
                         sensor_tag=info.sensor_tag,
                         device=info.device_name,
-                        readings=len(readings),
+                        readings=sensor_total,
+                        windows=len(windows),
                     )
 
                 # Flush remaining
                 if batch:
-                    upserted, created = await self._flush_batch(session, batch)
+                    upserted, created = await self._flush_batch(conn, batch)
                     stats["total_records"] += upserted
                     stats["total_created"] += created
 
@@ -164,6 +189,7 @@ class YookrSyncOrchestrator:
                     duration_seconds=duration,
                     record_count=stats["total_records"],
                 )
+                await conn.commit()
 
                 stats["duration_seconds"] = duration
                 self._log_summary(stats, sensor_stats)
@@ -173,8 +199,9 @@ class YookrSyncOrchestrator:
             stats["errors"].append(str(e))
             # Try to record failure
             try:
-                async with self.neo4j.session() as session:
-                    state = SyncStateManager(session, ENDPOINT_NAME)
+                pool = get_pool()
+                async with pool.connection() as conn:
+                    state = SyncStateManager(conn, ENDPOINT_NAME)
                     await state.record_run_result(
                         success=False,
                         duration_seconds=(
@@ -183,11 +210,12 @@ class YookrSyncOrchestrator:
                         record_count=stats["total_records"],
                         error=str(e)[:200],
                     )
+                    await conn.commit()
             except Exception:
                 pass
             raise
         finally:
-            await self.neo4j.close()
+            await close_pool()
 
         return stats
 
@@ -195,7 +223,7 @@ class YookrSyncOrchestrator:
     def _reading_to_params(
         info: SensorInfo, reading: dict[str, Any],
     ) -> dict[str, Any]:
-        """Convert a Yookr API reading + CSV sensor info → Neo4j params."""
+        """Convert a Yookr API reading + CSV sensor info → query params."""
         dt = reading["datetimeMeasure"]
         return {
             "sensor_id": info.device_id,
@@ -209,12 +237,12 @@ class YookrSyncOrchestrator:
 
     @staticmethod
     async def _flush_batch(
-        session: Any, batch: list[dict[str, Any]],
+        conn: Any, batch: list[dict[str, Any]],
     ) -> tuple[int, int]:
-        """Flush a batch of readings to Neo4j."""
+        """Flush a batch of readings to TimescaleDB."""
         if not batch:
             return 0, 0
-        upserted, created = await batch_upsert_readings(session, batch)
+        upserted, created = await upsert_readings(conn, batch)
         coverage_keys = {
             (r["device_name"], r["sensor_tag"], r["datetime_measure"][:10])
             for r in batch
@@ -223,7 +251,8 @@ class YookrSyncOrchestrator:
             {"device_name": dn, "sensor_tag": st, "day": day}
             for dn, st, day in coverage_keys
         ]
-        await upsert_daily_coverage(session, coverage_records)
+        await upsert_daily_coverage(conn, coverage_records)
+        await conn.commit()
         logger.debug("batch_flushed", upserted=upserted, created=created)
         return upserted, created
 
