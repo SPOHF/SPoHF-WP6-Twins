@@ -31,3 +31,4 @@ htmlcov/
 
 # Pesky temp microsoft files
 ~$*.docx
+.env.yookr
