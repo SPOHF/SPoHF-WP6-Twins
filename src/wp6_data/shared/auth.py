@@ -106,17 +106,22 @@ def make_auth_router(settings: OIDCSettings) -> APIRouter:
 
         request.session["user"] = userinfo.get("preferred_username") or userinfo["sub"]
         request.session["groups"] = userinfo.get("groups", [])
+        request.session["id_token"] = token_resp.json().get("id_token", "")
 
         next_url = request.session.pop("next", "/")
         return RedirectResponse(url=next_url, status_code=302)
 
     @router.get("/logout")
     async def logout(request: Request):
+        id_token = request.session.pop("id_token", "")
         request.session.pop("user", None)
         request.session.pop("groups", None)
         end_session = _endpoints.get("end_session_endpoint", "")
         if end_session:
-            params = urlencode({"post_logout_redirect_uri": f"{settings.redirect_base}/"})
+            params = urlencode({
+                "post_logout_redirect_uri": f"{settings.redirect_base}/",
+                "id_token_hint": id_token,
+            })
             return RedirectResponse(url=f"{end_session}?{params}")
         return RedirectResponse(url="/auth/login")
 
