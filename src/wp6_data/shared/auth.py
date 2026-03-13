@@ -131,14 +131,18 @@ def verify_session_user(request: Request) -> str:
     return user
 
 
+def _is_in_admin_group(request: Request) -> bool:
+    return "/wp6-admins" in request.session.get("groups", [])
+
+
 def verify_session_admin(request: Request) -> str:
     """FastAPI dependency: returns username if user is in the wp6-admins group."""
     user = verify_session_user(request)
-    if "wp6-admins" not in request.session.get("groups", []):
+    if not _is_in_admin_group(request):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
 
 def is_admin(request: Request) -> bool:
     """Check if the current session user is in the wp6-admins group."""
-    return "wp6-admins" in request.session.get("groups", [])
+    return _is_in_admin_group(request)
