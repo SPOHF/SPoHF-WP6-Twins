@@ -54,6 +54,8 @@ secrets:
   existingSecret: ""  # Name of existing secret (default: <release>-secrets)
   apiToken: ""
   neo4jPassword: ""
+  oidcClientSecret: ""   # OIDC client secret for wp6-data client
+  oidcSessionSecret: ""  # Random string for signing session cookies (generate with: python -c "import secrets; print(secrets.token_hex(32))")
 
 # Red Dashboard (MySQL backend with auth)
 red:
@@ -78,12 +80,11 @@ red:
     database: ""
     user: ""
     # password from secret
-  # Secret for red-specific credentials (mysql password, auth users)
+  # Secret for red-specific credentials (mysql password)
   secrets:
     existingSecret: ""  # Name of existing secret (default: <release>-red-secrets)
     # Keys expected in secret:
     # - mysql-password: MySQL password
-    # - auth-users: Comma-separated users "user1:pass1,user2:pass2"
   # CSV export job (runs nightly, generates downloadable CSVs)
   export:
     enabled: true
