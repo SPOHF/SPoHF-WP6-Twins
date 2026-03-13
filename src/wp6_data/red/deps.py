@@ -8,8 +8,6 @@ from dotenv import load_dotenv
 from wp6_data.config import RedSettings
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.dli import OpenMeteoClient
-from wp6_data.shared.auth import verify_session_admin as verify_admin_auth
-from wp6_data.shared.auth import verify_session_user as verify_auth
 
 load_dotenv()
 

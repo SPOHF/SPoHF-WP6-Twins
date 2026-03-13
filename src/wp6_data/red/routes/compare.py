@@ -14,8 +14,9 @@ from wp6_data.shared import (
     render_page,
     resolve_date_range,
 )
+from wp6_data.shared.auth import verify_session_user
 
-router = APIRouter(dependencies=[Depends(deps.verify_auth)])
+router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 
 @router.get("/compare", response_class=HTMLResponse)

@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 
 from wp6_data.red import deps
+from wp6_data.shared.auth import verify_session_user
 
-router = APIRouter(dependencies=[Depends(deps.verify_auth)])
+router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 
 @router.get("/download/{table}")

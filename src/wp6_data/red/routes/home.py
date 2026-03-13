@@ -6,12 +6,13 @@ from fastapi.responses import HTMLResponse
 from wp6_data.red import deps
 from wp6_data.red.db import MEASUREMENT_GROUPS, MEASUREMENTS_TO_TABLES
 from wp6_data.shared import render_card, render_page, render_table
+from wp6_data.shared.auth import verify_session_user
 
-router = APIRouter(dependencies=[Depends(deps.verify_auth)])
+router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 
 @router.get("/", response_class=HTMLResponse)
-async def home(user: str = Depends(deps.verify_auth)) -> str:
+async def home(user: str = Depends(verify_session_user)) -> str:
     """Dashboard home page - list available sensors."""
     if not deps.db:
         return render_page("WP6 Red", "<h1>Database not connected</h1>")
