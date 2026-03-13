@@ -15,13 +15,12 @@ from wp6_data.shared import (
     resolve_date_range,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(deps.verify_auth)])
 
 
 @router.get("/chart/{table}", response_class=HTMLResponse)
 async def chart_all(
     table: str,
-    user: str = Depends(deps.verify_auth),
     limit: int = Query(50000, description="Max records to fetch"),
     start: Annotated[date | None, Query(description="Start date (default: 7 days ago)")] = None,
     end: Annotated[date | None, Query(description="End date (default: today)")] = None,
@@ -53,7 +52,6 @@ async def chart_all(
 async def chart_device(
     table: str,
     device_id: str,
-    user: str = Depends(deps.verify_auth),
     limit: int = Query(50000, description="Max records to fetch"),
     start: Annotated[date | None, Query(description="Start date (default: 7 days ago)")] = None,
     end: Annotated[date | None, Query(description="End date (default: today)")] = None,

@@ -15,11 +15,11 @@ from wp6_data.shared import (
     resolve_date_range,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(deps.verify_auth)])
 
 
 @router.get("/compare", response_class=HTMLResponse)
-async def compare_form(user: str = Depends(deps.verify_auth)) -> str:
+async def compare_form() -> str:
     """Form to select two device/measurement pairs for a custom dual-axis chart."""
     if not deps.db:
         return render_page("WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
@@ -43,7 +43,6 @@ async def compare_chart(
     left_measurement: str = Query(...),
     right_device: str = Query(""),
     right_measurement: str = Query(""),
-    user: str = Depends(deps.verify_auth),
     start: Annotated[date | None, Query()] = None,
     end: Annotated[date | None, Query()] = None,
 ) -> str:

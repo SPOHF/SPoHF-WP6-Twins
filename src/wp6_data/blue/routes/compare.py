@@ -4,7 +4,7 @@ from datetime import date
 from typing import Annotated
 
 import pandas as pd
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 
 from wp6_data.blue import deps
@@ -14,8 +14,9 @@ from wp6_data.shared import (
     render_page,
     resolve_date_range,
 )
+from wp6_data.shared.auth import verify_session_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 
 @router.get("/compare", response_class=HTMLResponse)

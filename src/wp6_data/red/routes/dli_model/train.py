@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
 from wp6_data.red import deps
@@ -74,7 +74,7 @@ async def train_model_from_db(db: MySQLConnection, weather_client: OpenMeteoClie
 
 
 @router.post("/train", response_class=HTMLResponse)
-async def dli_model_train(user: str = Depends(deps.verify_admin_auth)) -> str:
+async def dli_model_train() -> str:
     """Train the two-stage light prediction model."""
     if not deps.db:
         return render_page(

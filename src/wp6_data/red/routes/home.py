@@ -7,7 +7,7 @@ from wp6_data.red import deps
 from wp6_data.red.db import MEASUREMENT_GROUPS, MEASUREMENTS_TO_TABLES
 from wp6_data.shared import render_card, render_page, render_table
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(deps.verify_auth)])
 
 
 @router.get("/", response_class=HTMLResponse)

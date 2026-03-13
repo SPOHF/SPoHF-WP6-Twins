@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pandas as pd
 import plotly.graph_objects as go
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
 from wp6_data.red import deps
@@ -23,9 +23,7 @@ router = APIRouter()
 
 
 @router.get("/diagnostic", response_class=HTMLResponse)
-async def dli_model_diagnostic(
-    user: str = Depends(deps.verify_admin_auth),
-) -> str:
+async def dli_model_diagnostic() -> str:
     """Diagnostic view to investigate model training data."""
     if not deps.db:
         return render_page(
