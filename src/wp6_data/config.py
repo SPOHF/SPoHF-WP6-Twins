@@ -41,6 +41,23 @@ class Settings(BaseSettings):
         return [e.strip() for e in self.endpoints.split(",") if e.strip()]
 
 
+class OIDCSettings(BaseSettings):
+    """OIDC settings shared by both dashboards, loaded from WP6_OIDC_* environment variables."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="WP6_OIDC_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    issuer: str = "https://auth.fontysvenlo.dev/realms/spohf"
+    client_id: str = "wp6-data"
+    client_secret: str = ""  # Required at startup - set via WP6_OIDC_CLIENT_SECRET
+    session_secret: str = ""  # Required at startup - set via WP6_OIDC_SESSION_SECRET
+    redirect_base: str = ""  # Public base URL of the app, e.g. https://wp6-red.example.com
+
+
 class RedSettings(BaseSettings):
     """WP6 Red dashboard settings loaded from WP6_RED_* environment variables."""
 
@@ -56,8 +73,5 @@ class RedSettings(BaseSettings):
     db_name: str = "spohf2"
     db_user: str = "root"
     db_password: str = ""
-
-    auth_users: str = ""
-    admin_users: str = "admin"
 
     export_dir: str = "/data/exports"
