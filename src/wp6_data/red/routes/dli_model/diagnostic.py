@@ -300,4 +300,5 @@ async def dli_model_diagnostic() -> str:
         "Model Diagnostic - WP6 Red",
         content,
         show_back_link=True, back_url="/dli/model",
+        user=user,
     )

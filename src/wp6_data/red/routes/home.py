@@ -64,12 +64,7 @@ async def home(user: str = Depends(deps.verify_auth)) -> str:
         measurement_rows,
     )
 
-    extra_css = """
-        .user-info { float: right; color: #666; font-size: 0.9em; }
-    """
-
     content = f"""
-        <div class="user-info">Logged in as: {user}</div>
         <h1>WP6 Red - Sensor Dashboard</h1>
 
         {render_card(
@@ -97,4 +92,4 @@ async def home(user: str = Depends(deps.verify_auth)) -> str:
            style="width:100%">Download Sensor Device Identification (docx)</a>
     """
 
-    return render_page("WP6 Red - Sensor Dashboard", content, extra_css=extra_css)
+    return render_page("WP6 Red - Sensor Dashboard", content)

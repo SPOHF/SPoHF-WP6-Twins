@@ -5,12 +5,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from wp6_data.blue import deps
 from wp6_data.blue.routes import charts, compare, home, ops
 from wp6_data.config import OIDCSettings
 from wp6_data.shared.auth import NotAuthenticated, make_auth_router, startup_oidc
+from wp6_data.shared.templates import _current_user
 
 oidc_settings = OIDCSettings()
 
@@ -22,7 +24,16 @@ async def lifespan(app: FastAPI):
     deps.close_driver()
 
 
+async def _set_user_context(request: Request, call_next):
+    token = _current_user.set(request.session.get("user"))
+    try:
+        return await call_next(request)
+    finally:
+        _current_user.reset(token)
+
+
 app = FastAPI(title="WP6 Blue - Sensor Dashboard", lifespan=lifespan)
+app.add_middleware(BaseHTTPMiddleware, dispatch=_set_user_context)
 app.add_middleware(SessionMiddleware, secret_key=oidc_settings.session_secret)
 
 
