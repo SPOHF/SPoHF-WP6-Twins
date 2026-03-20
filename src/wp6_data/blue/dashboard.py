@@ -3,7 +3,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -43,6 +43,10 @@ app.add_middleware(SessionMiddleware, secret_key=oidc_settings.session_secret)
 async def not_authenticated_handler(request: Request, _: NotAuthenticated) -> RedirectResponse:
     request.session["next"] = str(request.url)
     return RedirectResponse(url="/auth/login")
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(deps.PROJECT_ROOT / "static" / "favicon.ico")
 
 # Serve static files (logo, etc.) from project root
 if (deps.PROJECT_ROOT / "static").exists():
