@@ -119,6 +119,9 @@ def main() -> int:
 
     try:
         if run_spohf:
+            if not settings.api_token:
+                logger.error("spohf_sync_failed", reason="WP6_API_TOKEN is required for SPoHF sync")
+                return 1
             exit_code |= _run_spohf_sync(settings, logger)
 
         if run_yookr and yookr_configured:

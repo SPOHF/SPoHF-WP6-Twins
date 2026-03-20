@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # SPoHF API
     api_base_url: str = "https://backoffice.spohf.com"
-    api_token: str  # Required - bearer token
+    api_token: str = ""  # SPoHF API bearer token (required for datalake sync)
 
     # TimescaleDB
     tsdb_url: str = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
