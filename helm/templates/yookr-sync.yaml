@@ -27,6 +27,11 @@ spec:
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               command: ["python", "-m", "wp6_data", "--yookr"]
               env:
+                - name: WP6_API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secrets.existingSecret | default (printf "%s-secrets" .Chart.Name) }}
+                      key: api-token
                 - name: WP6_TSDB_URL
                   valueFrom:
                     secretKeyRef:
