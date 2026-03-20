@@ -1,80 +1,92 @@
-"""Blue dashboard dependencies: config, Neo4j helpers."""
+"""Blue dashboard dependencies: config, TimescaleDB helpers.
 
-import os
+All query functions accept an optional ``project`` parameter:
+- ``None`` (default) → exclude "yookr-direct" (SPoHF Datalake view)
+- A string → include only that project (used by the Yookr view)
+"""
+
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from dotenv import load_dotenv
-from neo4j import GraphDatabase
+from psycopg.rows import dict_row
 
-load_dotenv()
+from wp6_data.db import close_pool, get_pool, init_pool
 
 # Serve static files (logo, etc.) from project root
 # __file__ is src/wp6_data/blue/deps.py, so .parent x4 gets to wp6-data/
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 
-# Neo4j connection from environment
-NEO4J_URI = os.getenv("WP6_NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER = os.getenv("WP6_NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("WP6_NEO4J_PASSWORD", "localdevpassword")
-
-# Module-level singleton driver — reuses connection pool across all requests
-_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+YOOKR_PROJECT = "yookr-direct"
 
 
-def get_driver():
-    """Get the shared Neo4j driver instance."""
-    return _driver
+async def init_db(dsn: str) -> None:
+    """Initialise the connection pool (call on app startup)."""
+    from wp6_data.db.schema import ensure_schema
+
+    pool = await init_pool(dsn)
+    await ensure_schema(pool)
 
 
-def close_driver():
-    """Close the shared Neo4j driver (call on app shutdown)."""
-    _driver.close()
+async def close_db() -> None:
+    """Close the connection pool (call on app shutdown)."""
+    await close_pool()
 
 
-def fetch_data(
+def _project_filter(project: str | None) -> tuple[str, dict[str, Any]]:
+    """Build a SQL WHERE fragment for project filtering.
+
+    Returns (sql_fragment, params_dict).
+    - project=None  → exclude yookr-direct
+    - project=<str> → include only that project
+    """
+    if project is not None:
+        return "project = %(project)s", {"project": project}
+    return "project != %(excluded_project)s", {"excluded_project": YOOKR_PROJECT}
+
+
+async def fetch_data(
     sensor_tags: list[str] | None = None,
     device_names: list[str] | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
-    limit: int = 50000,
+    limit: int = 500000,
+    project: str | None = None,
 ) -> pd.DataFrame:
-    """Fetch sensor readings from Neo4j."""
-    with _driver.session() as session:
-        conditions = []
-        if sensor_tags:
-            conditions.append("s.tag IN $tags")
-        if device_names:
-            conditions.append("d.device_name IN $devices")
-        if start:
-            conditions.append("r.datetime_measure >= $start")
-        if end:
-            conditions.append("r.datetime_measure <= $end")
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        query = f"""
-            MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
-            {where}
-            RETURN d.device_name AS device, s.tag AS sensor,
-                   r.datetime_measure AS time, r.value AS value
-            ORDER BY r.datetime_measure
-            LIMIT $limit
-            """
-        result = session.run(
-            query,
-            tags=sensor_tags,
-            devices=device_names,
-            start=start,
-            end=end,
-            limit=limit,
-        )
-        records = []
-        for r in result:
-            rec = dict(r)
-            if rec.get("time"):
-                rec["time"] = rec["time"].to_native()
-            records.append(rec)
+    """Fetch sensor readings from TimescaleDB."""
+    pool = get_pool()
+    proj_clause, params = _project_filter(project)
+
+    conditions = [proj_clause]
+    if sensor_tags:
+        conditions.append("sensor_tag = ANY(%(tags)s)")
+        params["tags"] = sensor_tags
+    if device_names:
+        conditions.append("device_name = ANY(%(devices)s)")
+        params["devices"] = device_names
+    if start:
+        conditions.append("time >= %(start)s")
+        params["start"] = start
+    if end:
+        conditions.append("time <= %(end)s")
+        params["end"] = end
+
+    where = " AND ".join(conditions)
+    params["limit"] = limit
+
+    query = f"""
+        SELECT device_name AS device, sensor_tag AS sensor,
+               time, value
+        FROM readings
+        WHERE {where}
+        ORDER BY time
+        LIMIT %(limit)s
+    """
+
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(query, params)
+        records = await cur.fetchall()
 
     if not records:
         return pd.DataFrame(columns=["device", "sensor", "time", "value"])
@@ -86,68 +98,81 @@ def fetch_data(
     return df
 
 
-def fetch_available_sensors() -> list[dict[str, Any]]:
+async def fetch_available_sensors(project: str | None = None) -> list[dict[str, Any]]:
     """Get list of sensors with reading counts and date range."""
-    with _driver.session() as session:
-        result = session.run("""
-                MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
-                RETURN d.device_name AS device, s.tag AS sensor, count(r) AS readings,
-                       min(r.datetime_measure) AS earliest,
-                       max(r.datetime_measure) AS latest
-                ORDER BY readings DESC
-            """)
-        records = []
-        for r in result:
-            rec = dict(r)
-            if rec.get("earliest"):
-                rec["earliest"] = rec["earliest"].to_native()
-            if rec.get("latest"):
-                rec["latest"] = rec["latest"].to_native()
-            records.append(rec)
-        return records
+    pool = get_pool()
+    proj_clause, params = _project_filter(project)
+
+    query = f"""
+        SELECT device_name AS device, sensor_tag AS sensor,
+               count(*) AS readings,
+               min(time) AS earliest,
+               max(time) AS latest
+        FROM readings
+        WHERE {proj_clause}
+        GROUP BY device_name, sensor_tag
+        ORDER BY readings DESC
+    """
+
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(query, params)
+        return await cur.fetchall()
 
 
-def fetch_daily_coverage() -> list[dict[str, Any]]:
-    """Get distinct days with data per device+sensor from DailyCoverage nodes."""
-    with _driver.session() as session:
-        result = session.run("""
-            MATCH (c:DailyCoverage)
-            RETURN c.device_name AS device, c.sensor_tag AS sensor, c.day AS day
-            ORDER BY sensor, device, day
-        """)
-        records = []
-        for r in result:
-            rec = dict(r)
-            if rec.get("day"):
-                rec["day"] = rec["day"].to_native()
-            records.append(rec)
-        return records
+async def fetch_daily_coverage(project: str | None = None) -> list[dict[str, Any]]:
+    """Get distinct days with data per device+sensor from daily_coverage table."""
+    pool = get_pool()
+    proj_clause, params = _project_filter(project)
+
+    query = f"""
+        SELECT dc.device_name AS device, dc.sensor_tag AS sensor, dc.day
+        FROM daily_coverage dc
+        WHERE EXISTS (
+            SELECT 1 FROM readings r
+            WHERE r.device_name = dc.device_name
+              AND r.sensor_tag = dc.sensor_tag
+              AND {proj_clause}
+            LIMIT 1
+        )
+        ORDER BY dc.sensor_tag, dc.device_name, dc.day
+    """
+
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(query, params)
+        return await cur.fetchall()
 
 
-def fetch_sync_metrics() -> list[dict[str, Any]]:
-    """Fetch sync metadata for all endpoints from Neo4j."""
-    with _driver.session() as session:
-        result = session.run("""
-            MATCH (m:SyncMetadata)
-            RETURN m.endpoint AS endpoint,
-                   m.last_run_at AS last_run_at,
-                   m.last_run_success AS last_run_success,
-                   m.last_run_duration_seconds AS duration_seconds,
-                   m.last_run_records AS records,
-                   m.last_error AS error,
-                   m.last_api_status AS api_status,
-                   m.last_api_error_detail AS api_error_detail,
-                   m.total_runs AS total_runs,
-                   m.total_failures AS total_failures,
-                   m.last_timestamp AS last_data_timestamp
-        """)
-        metrics = []
-        for r in result:
-            rec = dict(r)
-            # Convert neo4j datetime to python datetime
-            if rec.get("last_run_at"):
-                rec["last_run_at"] = rec["last_run_at"].to_native()
-            if rec.get("last_data_timestamp"):
-                rec["last_data_timestamp"] = rec["last_data_timestamp"].to_native()
-            metrics.append(rec)
-        return metrics
+async def fetch_sync_metrics(project: str | None = None) -> list[dict[str, Any]]:
+    """Fetch sync metadata, filtered by data-source view.
+
+    - project=None  → exclude yookr-direct endpoint (SPoHF Datalake view)
+    - project=<str> → include only that endpoint
+    """
+    pool = get_pool()
+
+    if project is not None:
+        where = "WHERE endpoint = %(endpoint)s"
+        params: dict[str, Any] = {"endpoint": project}
+    else:
+        where = "WHERE endpoint != %(excluded)s"
+        params = {"excluded": YOOKR_PROJECT}
+
+    query = f"""
+        SELECT endpoint,
+               last_run_at,
+               last_run_success,
+               last_run_duration_sec AS duration_seconds,
+               last_run_records AS records,
+               last_error AS error,
+               last_api_status AS api_status,
+               last_api_error_detail AS api_error_detail,
+               total_runs,
+               total_failures,
+               last_timestamp AS last_data_timestamp
+        FROM sync_metadata
+        {where}
+    """
+
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(query, params)
+        return await cur.fetchall()

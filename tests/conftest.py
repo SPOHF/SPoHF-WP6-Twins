@@ -1,4 +1,4 @@
-"""Shared test fixtures for api/, graph/, and sync/ modules."""
+"""Shared test fixtures for api/, db/, and sync/ modules."""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -30,25 +30,29 @@ def make_api_response(readings: list[SensorReading] | None = None) -> ApiRespons
 
 
 @pytest.fixture()
-def mock_neo4j_session():
-    """AsyncMock neo4j session with .run() returning .single() -> None."""
-    session = AsyncMock()
-    result = AsyncMock()
-    result.single.return_value = None
-    session.run.return_value = result
-    return session
+def mock_db_conn():
+    """AsyncMock psycopg connection with cursor context manager."""
+    conn = AsyncMock()
+    cursor = AsyncMock()
+    cursor.fetchone = AsyncMock(return_value=None)
+    cursor.fetchall = AsyncMock(return_value=[])
+    cursor.statusmessage = "INSERT 0 1"
+
+    ctx = AsyncMock()
+    ctx.__aenter__ = AsyncMock(return_value=cursor)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    conn.cursor = MagicMock(return_value=ctx)
+
+    return conn
 
 
 @pytest.fixture()
 def mock_settings():
-    """MagicMock Settings with all sync/neo4j/api fields populated."""
+    """MagicMock Settings with all sync/db/api fields populated."""
     s = MagicMock()
     s.api_base_url = "https://api.example.com"
     s.api_token = "test-token"
-    s.neo4j_uri = "bolt://localhost:7687"
-    s.neo4j_user = "neo4j"
-    s.neo4j_password = "password"
-    s.neo4j_database = "neo4j"
+    s.tsdb_url = "postgresql://wp6:wp6dev@localhost:5432/wp6_blue"
     s.sync_page_size = 100
     s.sync_mode = "incremental"
     s.sync_window_days = 1

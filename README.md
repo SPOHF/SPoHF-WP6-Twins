@@ -7,61 +7,83 @@
 
 | Dashboard | Backend | Auth | URL |
 |-----------|---------|------|-----|
-| **Blue** | Neo4j (synced from SPoHF API) | Public | `wp6-blue.spohf.fontysvenlo.dev` |
+| **Blue** | TimescaleDB (synced from SPoHF API) | Public | `wp6-blue.spohf.fontysvenlo.dev` |
 | **Red** | MySQL (`spohf2`) | Basic Auth | `wp6-red.spohf.fontysvenlo.dev` |
 
 Both dashboards serve interactive Plotly charts via FastAPI.
 
+### Blue Data Sources
+
+The Blue dashboard supports two data sources, switchable via a cookie (`wp6_blue_source`):
+
+| Source | Description | Sync |
+|--------|-------------|------|
+| **SPoHF Datalake** (`spohf-datalake`) | Bulk data from `backoffice.spohf.com` | `WP6_ENDPOINTS=yookr-data` sync job |
+| **Yookr API** (`yookr`) | Per-sensor data from `api.yookr.org` | `--yookr` sync job |
+
+Both sources store data in the same TimescaleDB instance, separated by the `project` column in the `readings` table.
+
 ## Quick Start
 
 ```bash
-uv sync                        # Install dependencies
-uv sync --extra dev            # Install with dev tools
+# 1. Start TimescaleDB
+docker compose -f docker-compose.blue.yml up -d
+
+# 2. Install dependencies
+uv sync
+uv sync --extra dev                    # with dev tools
+
+# 3. Run sync (populates the database)
+uv run python -m wp6_data                             # SPoHF datalake sync (incremental)
+WP6_SYNC_MODE=full uv run python -m wp6_data          # SPoHF historical sync (full, may take hours)
+uv run python -m wp6_data --yookr                     # Yookr direct sync
+
+# 4. Start dashboards
+uv run python -m wp6_data.blue.dashboard  # Blue dashboard (port 8000)
+uv run python -m wp6_data.red.dashboard   # Red dashboard (port 8000)
+```
+
+```bash
+# Dev commands
 uv run ruff check src/ --fix   # Lint
 uv run pytest                  # Run tests
-uv run pytest tests/e2e/ -v    # Run end-to-end tests (requires running blue dashboard + neo4j)
-uv run python -m wp6_data      # Run sync job (requires env vars)
-uv run python -m wp6_data.blue.dashboard  # Run blue dashboard (port 8000)
-uv run python -m wp6_data.red.dashboard   # Run red dashboard (port 8000)
+uv run pytest tests/e2e/ -v    # E2E tests (requires running blue dashboard + TimescaleDB)
 ```
 
 ## Configuration
 
 All via `WP6_*` environment variables — see `.env.example` for the full list.
 
-### Sync Modes (`WP6_SYNC_MODE`)
+### Key Blue Variables
 
-| Mode | Behavior |
-|------|----------|
-| `auto` (default) | Windowed on first run, incremental after |
-| `windowed` | Full historical fetch using time windows from 2024-01-01 |
-| `incremental` | Only new data since last sync |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WP6_TSDB_URL` | `postgresql://wp6:wp6dev@localhost:5433/wp6_blue` | TimescaleDB connection string |
+| `WP6_SYNC_MODE` | `incremental` | `full` (all history from 2024-01-01) or `incremental` (recent data) |
+| `WP6_ENDPOINTS` | `yookr-data` | SPoHF API endpoints to sync |
+| `WP6_YOOKR_EMAIL` | — | Yookr API credentials (for `--yookr` sync) |
+| `WP6_YOOKR_PASSWORD` | — | Yookr API credentials (for `--yookr` sync) |
 
-`WP6_SYNC_WINDOW_DAYS` controls the window step size (default: 1 day, use 30 for monthly).
-
-Data is upserted via MERGE queries — re-running windowed sync updates existing records without duplicates.
-
-## Neo4j Graph Model
+## TimescaleDB Schema
 
 ```
-(Project)-[:HAS_DEVICE]->(Device)-[:HAS_SENSOR]->(Sensor)-[:RECORDED]->(Reading)
+readings          — time-series sensor data (hypertable, partitioned by time)
+sync_metadata     — per-endpoint sync state (last run, errors, record counts)
+daily_coverage    — device/sensor/day presence index for coverage views
 ```
 
-Example queries:
-```cypher
--- Latest readings per device
-MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor)-[:RECORDED]->(r:Reading)
-RETURN d.device_name, s.tag, r.value, r.datetime_measure
-ORDER BY r.datetime_measure DESC LIMIT 20
-
--- Soil moisture trend (24h)
-MATCH (d:Device)-[:HAS_SENSOR]->(s:Sensor {tag: "soilMoisture"})-[:RECORDED]->(r:Reading)
-WHERE r.datetime_measure > datetime() - duration({hours: 24})
-RETURN d.device_name, r.datetime_measure, r.value
-ORDER BY r.datetime_measure
-```
+Non-numeric sensor values (e.g. `"high"`, `"low"`) are stored as `NULL` in the `value` column and preserved in `raw_value`.
 
 ## Docker
+
+### Local Development Database
+
+```bash
+docker compose -f docker-compose.blue.yml up -d    # Start TimescaleDB on port 5433
+docker compose -f docker-compose.blue.yml down -v   # Fresh start (destroys data)
+```
+
+### Application Images
 
 Multi-target build for separate images:
 

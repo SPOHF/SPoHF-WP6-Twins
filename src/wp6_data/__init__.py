@@ -1,3 +1,3 @@
-"""SPoHF WP6 Sensor Data Sync - Yookr API to Neo4j."""
+"""SPoHF WP6 Sensor Data Sync & Dashboards."""
 
 __version__ = "0.1.0"

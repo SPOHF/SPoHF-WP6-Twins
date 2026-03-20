@@ -57,7 +57,7 @@ class SpoHFClient:
             "from": str(int(offset)),
         }
 
-        logger.debug("fetching_page", endpoint=endpoint, offset=offset)
+        logger.info("fetching_page", endpoint=endpoint, offset=offset)
 
         response = await client.get(
             url,
@@ -113,6 +113,17 @@ class SpoHFClient:
                     total_yielded += 1
 
                 page_count += 1
+
+                if page_count == 10:
+                    logger.warning(
+                        "many_pages_in_window",
+                        endpoint=endpoint,
+                        pages=page_count,
+                        records_so_far=total_yielded,
+                        window_from=timestamp_from.strftime("%Y-%m-%d"),
+                        window_until=timestamp_until.strftime("%Y-%m-%d"),
+                        hint="consider reducing sync_window_days",
+                    )
 
                 if response.count < self.page_size:
                     break

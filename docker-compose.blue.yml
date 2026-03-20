@@ -1,0 +1,12 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    ports: ["5433:5432"]
+    environment:
+      POSTGRES_USER: wp6
+      POSTGRES_PASSWORD: wp6dev
+      POSTGRES_DB: wp6_blue
+    shm_size: 1gb
+    volumes: [tsdb_data:/var/lib/postgresql/data]
+volumes:
+  tsdb_data:

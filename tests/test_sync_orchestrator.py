@@ -1,4 +1,4 @@
-"""Tests for wp6_data.sync.orchestrator — patch SyncStateManager + batch_upsert + mock client."""
+"""Tests for wp6_data.sync.orchestrator — patch SyncStateManager + upsert_readings + mock client."""
 
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -105,15 +105,15 @@ class TestFlushBatch:
     async def test_empty_batch(self, mock_settings):
         orch = SyncOrchestrator.__new__(SyncOrchestrator)
         orch.settings = mock_settings
-        session = AsyncMock()
-        upserted, created = await orch._flush_batch(session, [])
+        conn = AsyncMock()
+        upserted, created = await orch._flush_batch(conn, [])
         assert (upserted, created) == (0, 0)
 
     @pytest.mark.asyncio()
-    async def test_delegates_to_batch_upsert(self, mock_settings):
+    async def test_delegates_to_upsert_readings(self, mock_settings):
         orch = SyncOrchestrator.__new__(SyncOrchestrator)
         orch.settings = mock_settings
-        session = AsyncMock()
+        conn = AsyncMock()
         batch = [
             {
                 "sensor_id": "x",
@@ -125,7 +125,7 @@ class TestFlushBatch:
 
         with (
             patch(
-                "wp6_data.sync.orchestrator.batch_upsert_readings",
+                "wp6_data.sync.orchestrator.upsert_readings",
                 new_callable=AsyncMock,
                 return_value=(3, 2),
             ) as mock_upsert,
@@ -135,12 +135,12 @@ class TestFlushBatch:
                 return_value=1,
             ) as mock_coverage,
         ):
-            upserted, created = await orch._flush_batch(session, batch)
+            upserted, created = await orch._flush_batch(conn, batch)
 
         assert (upserted, created) == (3, 2)
-        mock_upsert.assert_awaited_once_with(session, batch)
+        mock_upsert.assert_awaited_once_with(conn, batch)
         mock_coverage.assert_awaited_once_with(
-            session, [{"device_name": "dev1", "sensor_tag": "temp", "day": "2024-06-15"}]
+            conn, [{"device_name": "dev1", "sensor_tag": "temp", "day": "2024-06-15"}]
         )
 
 
@@ -152,8 +152,19 @@ def _make_orchestrator(mock_settings):
     orch = SyncOrchestrator.__new__(SyncOrchestrator)
     orch.settings = mock_settings
     orch.client = MagicMock()
-    orch.neo4j = MagicMock()
+    orch._dsn = mock_settings.tsdb_url
     return orch
+
+
+def _mock_pool_ctx():
+    """Create a mock pool with connection context manager."""
+    conn = AsyncMock()
+    pool = MagicMock()
+    conn_ctx = AsyncMock()
+    conn_ctx.__aenter__ = AsyncMock(return_value=conn)
+    conn_ctx.__aexit__ = AsyncMock(return_value=False)
+    pool.connection = MagicMock(return_value=conn_ctx)
+    return pool, conn
 
 
 class TestSyncEndpoint:
@@ -161,10 +172,7 @@ class TestSyncEndpoint:
     async def test_empty_sync_returns_zero(self, mock_settings):
         mock_settings.sync_mode = "incremental"
         orch = _make_orchestrator(mock_settings)
-
-        session = AsyncMock()
-        orch.neo4j.session.return_value.__aenter__ = AsyncMock(return_value=session)
-        orch.neo4j.session.return_value.__aexit__ = AsyncMock(return_value=False)
+        pool, conn = _mock_pool_ctx()
 
         async def empty_iter(*args, **kwargs):
             return
@@ -172,16 +180,18 @@ class TestSyncEndpoint:
 
         orch.client.fetch_window = empty_iter
 
-        with patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState:
-            state_inst = AsyncMock()
-            MockState.return_value = state_inst
-
-            with patch(
-                "wp6_data.sync.orchestrator.batch_upsert_readings",
+        with (
+            patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState,
+            patch("wp6_data.sync.orchestrator.get_pool", return_value=pool),
+            patch(
+                "wp6_data.sync.orchestrator.upsert_readings",
                 new_callable=AsyncMock,
                 return_value=(0, 0),
-            ):
-                count = await orch._sync_endpoint("yookr-data")
+            ),
+        ):
+            state_inst = AsyncMock()
+            MockState.return_value = state_inst
+            count = await orch._sync_endpoint("yookr-data")
 
         assert count == 0
         state_inst.record_run_result.assert_awaited_once()
@@ -190,10 +200,7 @@ class TestSyncEndpoint:
     async def test_empty_sync_skips_timestamp_update(self, mock_settings):
         mock_settings.sync_mode = "incremental"
         orch = _make_orchestrator(mock_settings)
-
-        session = AsyncMock()
-        orch.neo4j.session.return_value.__aenter__ = AsyncMock(return_value=session)
-        orch.neo4j.session.return_value.__aexit__ = AsyncMock(return_value=False)
+        pool, conn = _mock_pool_ctx()
 
         async def empty_iter(*args, **kwargs):
             return
@@ -201,16 +208,18 @@ class TestSyncEndpoint:
 
         orch.client.fetch_window = empty_iter
 
-        with patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState:
-            state_inst = AsyncMock()
-            MockState.return_value = state_inst
-
-            with patch(
-                "wp6_data.sync.orchestrator.batch_upsert_readings",
+        with (
+            patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState,
+            patch("wp6_data.sync.orchestrator.get_pool", return_value=pool),
+            patch(
+                "wp6_data.sync.orchestrator.upsert_readings",
                 new_callable=AsyncMock,
                 return_value=(0, 0),
-            ):
-                await orch._sync_endpoint("yookr-data")
+            ),
+        ):
+            state_inst = AsyncMock()
+            MockState.return_value = state_inst
+            await orch._sync_endpoint("yookr-data")
 
         state_inst.update_timestamp.assert_not_awaited()
 
@@ -218,10 +227,7 @@ class TestSyncEndpoint:
     async def test_api_error_records_failure(self, mock_settings):
         mock_settings.sync_mode = "incremental"
         orch = _make_orchestrator(mock_settings)
-
-        session = AsyncMock()
-        orch.neo4j.session.return_value.__aenter__ = AsyncMock(return_value=session)
-        orch.neo4j.session.return_value.__aexit__ = AsyncMock(return_value=False)
+        pool, conn = _mock_pool_ctx()
 
         async def error_iter(*args, **kwargs):
             raise httpx.HTTPStatusError(
@@ -233,7 +239,10 @@ class TestSyncEndpoint:
 
         orch.client.fetch_window = error_iter
 
-        with patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState:
+        with (
+            patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState,
+            patch("wp6_data.sync.orchestrator.get_pool", return_value=pool),
+        ):
             state_inst = AsyncMock()
             MockState.return_value = state_inst
 
@@ -249,10 +258,7 @@ class TestSyncEndpoint:
         """When all records in consecutive windows are duplicates, stop early."""
         mock_settings.sync_mode = "incremental"
         orch = _make_orchestrator(mock_settings)
-
-        session = AsyncMock()
-        orch.neo4j.session.return_value.__aenter__ = AsyncMock(return_value=session)
-        orch.neo4j.session.return_value.__aexit__ = AsyncMock(return_value=False)
+        pool, conn = _mock_pool_ctx()
 
         reading = make_reading()
 
@@ -261,27 +267,33 @@ class TestSyncEndpoint:
 
         orch.client.fetch_window = one_reading_iter
 
-        with patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState:
+        with (
+            patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState,
+            patch("wp6_data.sync.orchestrator.get_pool", return_value=pool),
+            patch(
+                "wp6_data.sync.orchestrator.upsert_readings",
+                new_callable=AsyncMock,
+                return_value=(1, 0),  # upserted=1, created=0 → all dupes
+            ),
+            patch(
+                "wp6_data.sync.orchestrator.upsert_daily_coverage",
+                new_callable=AsyncMock,
+                return_value=1,
+            ),
+            patch(
+                "wp6_data.sync.orchestrator._generate_windows"
+            ) as mock_gen,
+        ):
             state_inst = AsyncMock()
             MockState.return_value = state_inst
 
-            with (
-                patch(
-                    "wp6_data.sync.orchestrator.batch_upsert_readings",
-                    new_callable=AsyncMock,
-                    return_value=(1, 0),  # upserted=1, created=0 → all dupes
-                ),
-                patch(
-                    "wp6_data.sync.orchestrator._generate_windows"
-                ) as mock_gen,
-            ):
-                # Generate more windows than the threshold
-                now = datetime.now(UTC)
-                mock_gen.return_value = iter([
-                    (now - timedelta(days=i + 1), now - timedelta(days=i))
-                    for i in range(10)
-                ])
-                count = await orch._sync_endpoint("yookr-data")
+            # Generate more windows than the threshold
+            now = datetime.now(UTC)
+            mock_gen.return_value = iter([
+                (now - timedelta(days=i + 1), now - timedelta(days=i))
+                for i in range(10)
+            ])
+            count = await orch._sync_endpoint("yookr-data")
 
         # Should have stopped after CONSECUTIVE_DUPE_WINDOW_THRESHOLD windows
         # Each window upserts 1 record, so total = threshold * 1
@@ -295,21 +307,36 @@ class TestRun:
     @pytest.mark.asyncio()
     async def test_connect_disconnect_lifecycle(self, mock_settings):
         orch = _make_orchestrator(mock_settings)
-        orch.neo4j = AsyncMock()
 
-        # Make _sync_endpoint a coroutine that returns 0
-        with patch.object(orch, "_sync_endpoint", new_callable=AsyncMock, return_value=5):
+        mock_pool = AsyncMock()
+
+        # Make _sync_endpoint a coroutine that returns 5
+        with (
+            patch.object(orch, "_sync_endpoint", new_callable=AsyncMock, return_value=5),
+            patch(
+                "wp6_data.sync.orchestrator.init_pool",
+                new_callable=AsyncMock,
+                return_value=mock_pool,
+            ) as mock_init,
+            patch(
+                "wp6_data.sync.orchestrator.ensure_schema",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "wp6_data.sync.orchestrator.close_pool",
+                new_callable=AsyncMock,
+            ) as mock_close,
+        ):
             stats = await orch.run()
 
-        orch.neo4j.connect.assert_awaited_once()
-        orch.neo4j.close.assert_awaited_once()
+        mock_init.assert_awaited_once()
+        mock_close.assert_awaited_once()
         assert stats["total_records"] == 5
 
     @pytest.mark.asyncio()
     async def test_per_endpoint_error_isolation(self, mock_settings):
         mock_settings.endpoint_list = ["ep1", "ep2"]
         orch = _make_orchestrator(mock_settings)
-        orch.neo4j = AsyncMock()
 
         call_count = 0
 
@@ -320,7 +347,22 @@ class TestRun:
                 raise RuntimeError("ep1 failed")
             return 10
 
-        with patch.object(orch, "_sync_endpoint", side_effect=side_effect):
+        with (
+            patch.object(orch, "_sync_endpoint", side_effect=side_effect),
+            patch(
+                "wp6_data.sync.orchestrator.init_pool",
+                new_callable=AsyncMock,
+                return_value=AsyncMock(),
+            ),
+            patch(
+                "wp6_data.sync.orchestrator.ensure_schema",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "wp6_data.sync.orchestrator.close_pool",
+                new_callable=AsyncMock,
+            ),
+        ):
             stats = await orch.run()
 
         assert call_count == 2
@@ -333,12 +375,26 @@ class TestRun:
     async def test_stats_aggregation(self, mock_settings):
         mock_settings.endpoint_list = ["ep1", "ep2"]
         orch = _make_orchestrator(mock_settings)
-        orch.neo4j = AsyncMock()
 
         async def side_effect(endpoint):
             return 10 if endpoint == "ep1" else 20
 
-        with patch.object(orch, "_sync_endpoint", side_effect=side_effect):
+        with (
+            patch.object(orch, "_sync_endpoint", side_effect=side_effect),
+            patch(
+                "wp6_data.sync.orchestrator.init_pool",
+                new_callable=AsyncMock,
+                return_value=AsyncMock(),
+            ),
+            patch(
+                "wp6_data.sync.orchestrator.ensure_schema",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "wp6_data.sync.orchestrator.close_pool",
+                new_callable=AsyncMock,
+            ),
+        ):
             stats = await orch.run()
 
         assert stats["total_records"] == 30

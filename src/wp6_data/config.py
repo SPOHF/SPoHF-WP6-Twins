@@ -17,11 +17,8 @@ class Settings(BaseSettings):
     api_base_url: str = "https://backoffice.spohf.com"
     api_token: str  # Required - bearer token
 
-    # Neo4j Aura
-    neo4j_uri: str  # bolt+s://xxx.databases.neo4j.io:7687
-    neo4j_user: str = "neo4j"
-    neo4j_password: str  # Required
-    neo4j_database: str = "neo4j"
+    # TimescaleDB
+    tsdb_url: str = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
 
     # Sync behavior
     sync_page_size: int = 1000
@@ -30,6 +27,14 @@ class Settings(BaseSettings):
 
     # Endpoints to sync (comma-separated)
     endpoints: str = "yookr-data"
+
+    # Yookr API (direct sensor queries)
+    yookr_base_url: str = "https://api.yookr.org"
+    yookr_email: str = ""
+    yookr_password: str = ""
+
+    # Blue dashboard data source
+    blue_default_source: str = "spohf-datalake"  # "spohf-datalake" or "yookr"
 
     # Logging
     log_level: str = "INFO"

@@ -1,5 +1,5 @@
 # Multi-stage build for minimal image size
-# Supports building separate images for blue (Neo4j) and red (MySQL) dashboards
+# Supports building separate images for blue (TimescaleDB) and red (MySQL) dashboards
 #
 # Build blue: docker build --target blue -t wp6-data-blue .
 # Build red:  docker build --target red -t wp6-data-red .
@@ -40,11 +40,11 @@ ENV PYTHONUNBUFFERED=1
 # Expose dashboard port
 EXPOSE 8000
 
-# Blue dashboard (Neo4j backend) - default
+# Blue twin - default
 FROM runtime AS blue
 CMD ["python", "-m", "wp6_data.blue.dashboard"]
 
-# Red dashboard (MySQL backend with auth)
+# Red twin
 FROM runtime AS red
 CMD ["python", "-m", "wp6_data.red.dashboard"]
 

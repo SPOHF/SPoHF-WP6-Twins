@@ -1,12 +1,14 @@
-"""E2E: Blue incremental sync → Neo4j → dashboard renders the data."""
+"""E2E: Blue incremental sync → TimescaleDB → dashboard renders the data."""
 
 import os
 from datetime import UTC, datetime, timedelta
 
 import httpx
+import psycopg
 import pytest
 import respx
 from httpx import ASGITransport
+from psycopg.rows import dict_row
 
 from wp6_data.config import Settings
 from wp6_data.sync.orchestrator import SyncOrchestrator
@@ -70,16 +72,15 @@ FAKE_READINGS = _build_fake_readings()
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
+
 
 def _make_settings() -> Settings:
-    """Build a real Settings object pointed at localhost Neo4j + fake API."""
+    """Build a real Settings object pointed at localhost TimescaleDB + fake API."""
     return Settings(
         api_base_url=FAKE_API_URL,
         api_token="e2e-dummy-token",
-        neo4j_uri="bolt://localhost:7687",
-        neo4j_user="neo4j",
-        neo4j_password="localdevpassword",
-        neo4j_database="neo4j",
+        tsdb_url=TSDB_DSN,
         sync_mode="incremental",
         sync_page_size=100,
         sync_window_days=1,
@@ -113,8 +114,8 @@ def _api_handler(request: httpx.Request) -> httpx.Response:
 
 
 @pytest.mark.e2e
-async def test_incremental_sync_and_dashboard_display(neo4j_driver):
-    """Full pipeline: mock API → sync → Neo4j state → dashboard HTTP."""
+async def test_incremental_sync_and_dashboard_display(tsdb_conn):
+    """Full pipeline: mock API → sync → TimescaleDB state → dashboard HTTP."""
 
     # Reset handler state
     _api_handler._windows_served = 0
@@ -132,56 +133,54 @@ async def test_incremental_sync_and_dashboard_display(neo4j_driver):
     assert stats["total_records"] > 0, f"Expected records, got: {stats}"
     assert stats["errors"] == [], f"Sync errors: {stats['errors']}"
 
-    # ── 3. Assert Neo4j state ────────────────────────────────────────
-    async with neo4j_driver.session() as session:
-        # Device nodes
-        result = await session.run(
-            "MATCH (d:Device) WHERE d.device_name STARTS WITH 'e2e-' "
-            "RETURN d.device_name AS name ORDER BY name"
-        )
-        devices = [r["name"] async for r in result]
-        assert "e2e-device-alpha" in devices
-        assert "e2e-device-beta" in devices
+    # ── 3. Assert TimescaleDB state ──────────────────────────────────
+    async with await psycopg.AsyncConnection.connect(TSDB_DSN) as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            # Device names in readings
+            await cur.execute(
+                "SELECT DISTINCT device_name FROM readings "
+                "WHERE device_name LIKE 'e2e-%' ORDER BY device_name"
+            )
+            devices = [r["device_name"] for r in await cur.fetchall()]
+            assert "e2e-device-alpha" in devices
+            assert "e2e-device-beta" in devices
 
-        # Sensor nodes
-        result = await session.run(
-            "MATCH (s:Sensor) WHERE s.tag STARTS WITH 'e2e-' "
-            "RETURN DISTINCT s.tag AS tag ORDER BY tag"
-        )
-        tags = [r["tag"] async for r in result]
-        assert "e2e-temperature" in tags
-        assert "e2e-humidity" in tags
+            # Sensor tags
+            await cur.execute(
+                "SELECT DISTINCT sensor_tag FROM readings "
+                "WHERE sensor_tag LIKE 'e2e-%' ORDER BY sensor_tag"
+            )
+            tags = [r["sensor_tag"] for r in await cur.fetchall()]
+            assert "e2e-temperature" in tags
+            assert "e2e-humidity" in tags
 
-        # Reading nodes with expected values
-        result = await session.run(
-            "MATCH (s:Sensor {tag: 'e2e-temperature'})-[:RECORDED]->(r:Reading) "
-            "RETURN r.raw_value AS val"
-        )
-        values = [r["val"] async for r in result]
-        assert "21.5" in values
+            # Reading values
+            await cur.execute(
+                "SELECT raw_value FROM readings "
+                "WHERE sensor_tag = 'e2e-temperature'"
+            )
+            values = [r["raw_value"] for r in await cur.fetchall()]
+            assert "21.5" in values
 
-        # DailyCoverage nodes
-        result = await session.run(
-            "MATCH (c:DailyCoverage) WHERE c.device_name STARTS WITH 'e2e-' "
-            "RETURN count(c) AS cnt"
-        )
-        record = await result.single()
-        assert record["cnt"] > 0, "Expected DailyCoverage nodes"
+            # Daily coverage entries
+            await cur.execute(
+                "SELECT count(*) AS cnt FROM daily_coverage "
+                "WHERE device_name LIKE 'e2e-%'"
+            )
+            row = await cur.fetchone()
+            assert row["cnt"] > 0, "Expected daily_coverage entries"
 
-        # SyncMetadata node
-        result = await session.run(
-            "MATCH (m:SyncMetadata {endpoint: $ep}) RETURN m.endpoint AS ep",
-            ep=ENDPOINT,
-        )
-        record = await result.single()
-        assert record is not None, "Expected SyncMetadata node for e2e endpoint"
-        assert record["ep"] == ENDPOINT
+            # Sync metadata
+            await cur.execute(
+                "SELECT endpoint FROM sync_metadata WHERE endpoint = %(ep)s",
+                {"ep": ENDPOINT},
+            )
+            row = await cur.fetchone()
+            assert row is not None, "Expected sync_metadata row for e2e endpoint"
+            assert row["endpoint"] == ENDPOINT
 
     # ── 4. Assert dashboard responses ────────────────────────────────
-    # Point the dashboard's Neo4j env at our local instance
-    os.environ["WP6_NEO4J_URI"] = "bolt://localhost:7687"
-    os.environ["WP6_NEO4J_USER"] = "neo4j"
-    os.environ["WP6_NEO4J_PASSWORD"] = "localdevpassword"
+    os.environ["WP6_TSDB_URL"] = TSDB_DSN
 
     # Import app after env is set so deps pick up the right connection
     from wp6_data.blue.dashboard import app

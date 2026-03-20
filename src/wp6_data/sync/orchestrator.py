@@ -12,11 +12,13 @@ from tenacity import RetryError
 
 from wp6_data.api import SensorReading, SpoHFClient
 from wp6_data.config import Settings
-from wp6_data.graph import (
-    CONSTRAINTS,
-    Neo4jConnection,
-    batch_upsert_readings,
+from wp6_data.db import (
+    close_pool,
+    ensure_schema,
+    get_pool,
+    init_pool,
     upsert_daily_coverage,
+    upsert_readings,
 )
 from wp6_data.sync.state import SyncStateManager
 
@@ -29,7 +31,7 @@ def ensure_utc(dt: datetime) -> datetime:
 
 logger = structlog.get_logger()
 
-BATCH_SIZE = 1000  # Records per Neo4j transaction
+BATCH_SIZE = 1000  # Records per transaction
 FULL_SYNC_START = datetime(2024, 1, 1, tzinfo=UTC)
 INCREMENTAL_LOOKBACK_DAYS = 30
 CONSECUTIVE_DUPE_WINDOW_THRESHOLD = 3
@@ -83,7 +85,7 @@ def _generate_windows(
 
 
 class SyncOrchestrator:
-    """Orchestrate sensor data sync from SPoHF API to Neo4j."""
+    """Orchestrate sensor data sync from SPoHF API to TimescaleDB."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -92,12 +94,7 @@ class SyncOrchestrator:
             settings.api_token,
             settings.sync_page_size,
         )
-        self.neo4j = Neo4jConnection(
-            settings.neo4j_uri,
-            settings.neo4j_user,
-            settings.neo4j_password,
-            settings.neo4j_database,
-        )
+        self._dsn = settings.tsdb_url
 
     async def run(self) -> dict[str, Any]:
         """Execute full sync cycle.
@@ -112,9 +109,9 @@ class SyncOrchestrator:
             "errors": [],
         }
 
+        pool = await init_pool(self._dsn)
         try:
-            await self.neo4j.connect()
-            await self.neo4j.ensure_schema(CONSTRAINTS)
+            await ensure_schema(pool)
 
             # Sync each configured endpoint
             for endpoint in self.settings.endpoint_list:
@@ -132,7 +129,7 @@ class SyncOrchestrator:
             logger.info("sync_completed", **stats)
 
         finally:
-            await self.neo4j.close()
+            await close_pool()
 
         return stats
 
@@ -149,17 +146,17 @@ class SyncOrchestrator:
             s["max"] = dt_iso
 
     async def _flush_batch(
-        self, session: Any, batch: list[dict[str, Any]]
+        self, conn: Any, batch: list[dict[str, Any]]
     ) -> tuple[int, int]:
-        """Flush a batch of readings to Neo4j.
+        """Flush a batch of readings to TimescaleDB.
 
         Returns:
             Tuple of (upserted, created) counts. Returns (0, 0) for empty batch.
         """
         if not batch:
             return 0, 0
-        upserted, created = await batch_upsert_readings(session, batch)
-        # Update DailyCoverage nodes for the days touched by this batch
+        upserted, created = await upsert_readings(conn, batch)
+        # Update daily_coverage for the days touched by this batch
         coverage_keys = {
             (r["device_name"], r["sensor_tag"], r["datetime_measure"][:10])
             for r in batch
@@ -168,7 +165,8 @@ class SyncOrchestrator:
             {"device_name": dn, "sensor_tag": st, "day": day}
             for dn, st, day in coverage_keys
         ]
-        await upsert_daily_coverage(session, coverage_records)
+        await upsert_daily_coverage(conn, coverage_records)
+        await conn.commit()
         logger.debug("batch_flushed", upserted=upserted, created=created)
         return upserted, created
 
@@ -184,8 +182,10 @@ class SyncOrchestrator:
         start_time = datetime.now(UTC)
         mode = self.settings.sync_mode.lower()
 
-        async with self.neo4j.session() as session:
-            state = SyncStateManager(session, endpoint)
+        pool = get_pool()
+
+        async with pool.connection() as conn:
+            state = SyncStateManager(conn, endpoint)
 
             logger.info(
                 "sync_starting",
@@ -226,7 +226,7 @@ class SyncOrchestrator:
                             latest_timestamp = reading_ts
 
                         if len(batch) >= BATCH_SIZE:
-                            upserted, created = await self._flush_batch(session, batch)
+                            upserted, created = await self._flush_batch(conn, batch)
                             total_count += upserted
                             total_created += created
                             window_upserted += upserted
@@ -234,7 +234,7 @@ class SyncOrchestrator:
                             batch = []
 
                     # Flush remaining batch for this window
-                    upserted, created = await self._flush_batch(session, batch)
+                    upserted, created = await self._flush_batch(conn, batch)
                     total_count += upserted
                     total_created += created
                     window_upserted += upserted
@@ -276,6 +276,7 @@ class SyncOrchestrator:
                     duration_seconds=duration,
                     record_count=total_count,
                 )
+                await conn.commit()
 
                 logger.info(
                     "endpoint_synced",
@@ -299,6 +300,7 @@ class SyncOrchestrator:
                     api_status=api_status,
                     api_error_detail=api_detail,
                 )
+                await conn.commit()
                 raise
 
     def _extract_api_error(
@@ -325,7 +327,7 @@ class SyncOrchestrator:
         return None, None, str(exc)[:200]
 
     def _reading_to_params(self, reading: SensorReading) -> dict[str, Any]:
-        """Convert SensorReading to Neo4j query parameters."""
+        """Convert SensorReading to query parameters."""
         return {
             "sensor_id": reading.sensor_id,
             "project": reading.project,

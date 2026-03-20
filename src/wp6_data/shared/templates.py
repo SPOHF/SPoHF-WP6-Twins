@@ -401,10 +401,34 @@ TOGGLE_JS = """
     });
 """
 
+SOURCE_TOGGLE_JS = """
+    function switchSource(value) {
+        document.cookie = 'wp6_blue_source=' + value + ';path=/;max-age=31536000';
+        location.reload();
+    }
+"""
+
 _DASHBOARD_NAMES = {"blue": "SPoHF Blue", "red": "SPoHF Red"}
 
 
-def render_nav_bar() -> str:
+def _render_source_toggle(data_source: str) -> str:
+    """Render a data-source <select> dropdown for the nav bar."""
+    from wp6_data.blue.datasource import SOURCE_LABELS, SOURCES
+
+    options = "".join(
+        f'<option value="{key}"{" selected" if key == data_source else ""}>'
+        f"{label}</option>"
+        for key, label in SOURCE_LABELS.items()
+        if key in SOURCES
+    )
+    return (
+        f'<select id="source-toggle" onchange="switchSource(this.value)"'
+        f' style="width:auto;margin:0;padding:0.2rem 0.5rem;font-size:0.8rem">'
+        f"{options}</select>"
+    )
+
+
+def render_nav_bar(*, data_source: str | None = None) -> str:
     """Render a sticky nav bar with dashboard name, home link, and dark mode toggle."""
     name = _DASHBOARD_NAMES.get(_dashboard_id, "SPoHF")
     user = _current_user.get()
@@ -413,6 +437,7 @@ def render_nav_bar() -> str:
         if user
         else ""
     )
+    source_html = _render_source_toggle(data_source) if data_source else ""
     return f"""
     <nav class="dashboard-nav">
         <a href="/" class="brand">{name}</a>
@@ -420,6 +445,7 @@ def render_nav_bar() -> str:
             <a href="/">Home</a>
             <a href="/compare">Compare</a>
             {user_html}
+            {source_html}
             <button id="theme-toggle" title="Toggle dark mode">
                 <span class="icon-sun">&#9788;</span>
                 <span class="icon-moon">&#9790;</span>
@@ -438,6 +464,7 @@ def render_page(
     show_back_link: bool = False,
     back_url: str = "/",
     extra_css: str = "",
+    data_source: str | None = None,
 ) -> str:
     """Render a complete HTML page with consistent styling.
 
@@ -480,13 +507,14 @@ def render_page(
         </style>
     </head>
     <body>
-        {render_nav_bar()}
+        {render_nav_bar(data_source=data_source)}
         <main>
             {back_html}
             {content}
             {footer_html}
         </main>
         <script>{TOGGLE_JS}</script>
+        <script>{SOURCE_TOGGLE_JS}</script>
     </body>
     </html>
     """
@@ -502,6 +530,7 @@ def render_chart_page(
     back_url: str = "/",
     extra_params: dict[str, str] | None = None,
     extra_css: str = "",
+    data_source: str | None = None,
 ) -> str:
     """Render a full chart page with date filter, empty-data fallback, stats, and layout.
 
@@ -529,6 +558,7 @@ def render_chart_page(
             filter_html + "<h1>No data found</h1>",
             show_back_link=True,
             back_url=back_url,
+            data_source=data_source,
         )
 
     chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
@@ -542,6 +572,7 @@ def render_chart_page(
         show_back_link=True,
         back_url=back_url,
         extra_css=extra_css,
+        data_source=data_source,
     )
 
 
@@ -557,6 +588,7 @@ def render_comparison_result(
     title: str,
     *,
     back_url: str = "/compare",
+    data_source: str | None = None,
 ) -> str:
     """Render a comparison chart page for one or two device/measurement pairs.
 
@@ -609,4 +641,5 @@ def render_comparison_result(
         end,
         back_url=back_url,
         extra_params=extra_params,
+        data_source=data_source,
     )
