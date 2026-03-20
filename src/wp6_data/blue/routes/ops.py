@@ -235,7 +235,7 @@ async def status(
 
     # Sync status section
     if is_yookr:
-        sync_html = "<p>Direct API — no sync needed.</p>"
+        sync_html = "<p>Direct sync via YOOKR API.</p>"
     else:
         sync_table = await _build_sync_table(source)
         sync_html = sync_table if sync_table else "<p>No sync metadata found.</p>"
