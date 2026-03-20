@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
 import pandas as pd
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse
 
 from wp6_data.red import deps
@@ -31,7 +31,6 @@ router = APIRouter()
 
 @router.get("/forecast", response_class=HTMLResponse)
 async def dli_forecast(
-    user: str = Depends(deps.verify_auth),
     start_date: Annotated[date | None, Query(description="Start date")] = None,
     end_date: Annotated[date | None, Query(description="End date")] = None,
 ) -> str:

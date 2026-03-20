@@ -9,14 +9,14 @@ from fastapi.responses import HTMLResponse
 from wp6_data.red import deps
 from wp6_data.red.db import MEASUREMENTS_TO_TABLES
 from wp6_data.shared import make_line_chart, render_chart_page, render_page, resolve_date_range
+from wp6_data.shared.auth import verify_session_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 
 @router.get("/measurement/{measurement}", response_class=HTMLResponse)
 async def measurement_view(
     measurement: str,
-    user: str = Depends(deps.verify_auth),
     limit: int = Query(100000, description="Max records per sensor table"),
     start: Annotated[date | None, Query(description="Start date (default: 7 days ago)")] = None,
     end: Annotated[date | None, Query(description="End date (default: today)")] = None,
@@ -52,7 +52,7 @@ async def measurement_view(
 
 
 @router.get("/table/{table}", response_class=HTMLResponse)
-async def table_view(table: str, user: str = Depends(deps.verify_auth)) -> str:
+async def table_view(table: str) -> str:
     """Show devices for a sensor table."""
     if not deps.db:
         return render_page("WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)

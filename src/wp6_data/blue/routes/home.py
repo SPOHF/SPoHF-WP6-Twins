@@ -1,12 +1,13 @@
 """Blue dashboard home page."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
 from wp6_data.blue import deps
 from wp6_data.shared import render_card, render_page, render_table
+from wp6_data.shared.auth import verify_session_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 
 @router.get("/", response_class=HTMLResponse)

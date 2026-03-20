@@ -1,11 +1,13 @@
 """Shared HTML templates for WP6 dashboards."""
 
+from contextvars import ContextVar
 from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
 import plotly.graph_objects as go
 
 _dashboard_id = "blue"
+_current_user: ContextVar[str | None] = ContextVar("_current_user", default=None)
 
 
 def configure_dashboard(dashboard_id: str) -> None:
@@ -283,6 +285,7 @@ BASE_CSS = """
         font-size: 0.85rem; text-decoration: none; opacity: 0.7;
     }
     .dashboard-nav .nav-links a:hover { opacity: 1; }
+    .nav-user { font-size: 0.8rem; opacity: 0.6; white-space: nowrap; }
     #theme-toggle {
         background: var(--dashboard-surface);
         border: 1.5px solid var(--dashboard-primary);
@@ -404,12 +407,19 @@ _DASHBOARD_NAMES = {"blue": "SPoHF Blue", "red": "SPoHF Red"}
 def render_nav_bar() -> str:
     """Render a sticky nav bar with dashboard name, home link, and dark mode toggle."""
     name = _DASHBOARD_NAMES.get(_dashboard_id, "SPoHF")
+    user = _current_user.get()
+    user_html = (
+        f'<span class="nav-user">{user} | <a href="/auth/logout">Logout</a></span>'
+        if user
+        else ""
+    )
     return f"""
     <nav class="dashboard-nav">
         <a href="/" class="brand">{name}</a>
         <div class="nav-links">
             <a href="/">Home</a>
             <a href="/compare">Compare</a>
+            {user_html}
             <button id="theme-toggle" title="Toggle dark mode">
                 <span class="icon-sun">&#9788;</span>
                 <span class="icon-moon">&#9790;</span>

@@ -4,12 +4,13 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 
 from wp6_data.red import deps
+from wp6_data.shared.auth import verify_session_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 
 @router.get("/download/{table}")
-async def download_csv(table: str, user: str = Depends(deps.verify_auth)) -> FileResponse:
+async def download_csv(table: str) -> FileResponse:
     """Download pre-generated CSV for a sensor table."""
     from fastapi import HTTPException
 

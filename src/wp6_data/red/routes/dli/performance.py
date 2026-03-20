@@ -5,7 +5,7 @@ from typing import Annotated
 
 import numpy as np
 import plotly.graph_objects as go
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse
 
 from wp6_data.red import deps
@@ -30,7 +30,6 @@ router = APIRouter()
 
 @router.get("/performance", response_class=HTMLResponse)
 async def dli_performance(
-    user: str = Depends(deps.verify_auth),
     start: Annotated[date | None, Query(description="Start date")] = None,
     end: Annotated[date | None, Query(description="End date")] = None,
 ) -> str:

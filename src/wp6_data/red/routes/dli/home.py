@@ -1,24 +1,25 @@
 """GET /dli — DLI dashboard overview page."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from wp6_data.red import deps
 from wp6_data.red.dli import get_model
 from wp6_data.shared import render_page
+from wp6_data.shared.auth import is_admin
 
 router = APIRouter()
 
 
 @router.get("/", response_class=HTMLResponse)
-async def dli_home(user: str = Depends(deps.verify_auth)) -> str:
+async def dli_home(request: Request) -> str:
     """DLI dashboard overview page."""
     if not deps.db:
         return render_page("DLI - WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
 
     # Get model status for the card
     model = get_model()
-    user_is_admin = deps.is_admin(user)
+    user_is_admin = is_admin(request)
 
     # Build model card based on status and permissions
     if model.is_trained() and model.stats:

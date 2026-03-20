@@ -1,9 +1,8 @@
 """GET /dli/model — View model status and training options."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
-from wp6_data.red import deps
 from wp6_data.red.dli import (
     DEFAULT_TRAINING_START,
     NATURAL_LIGHT_SENSOR,
@@ -16,7 +15,7 @@ router = APIRouter()
 
 
 @router.get("/", response_class=HTMLResponse)
-async def dli_model_status(user: str = Depends(deps.verify_admin_auth)) -> str:
+async def dli_model_status() -> str:
     """View model status and training options."""
     model = get_model()
 

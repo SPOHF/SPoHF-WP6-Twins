@@ -6,12 +6,13 @@ from fastapi.responses import HTMLResponse
 from wp6_data.red import deps
 from wp6_data.red.db import MEASUREMENT_GROUPS, MEASUREMENTS_TO_TABLES
 from wp6_data.shared import render_card, render_page, render_table
+from wp6_data.shared.auth import verify_session_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 
 @router.get("/", response_class=HTMLResponse)
-async def home(user: str = Depends(deps.verify_auth)) -> str:
+async def home(user: str = Depends(verify_session_user)) -> str:
     """Dashboard home page - list available sensors."""
     if not deps.db:
         return render_page("WP6 Red", "<h1>Database not connected</h1>")
@@ -64,12 +65,7 @@ async def home(user: str = Depends(deps.verify_auth)) -> str:
         measurement_rows,
     )
 
-    extra_css = """
-        .user-info { float: right; color: #666; font-size: 0.9em; }
-    """
-
     content = f"""
-        <div class="user-info">Logged in as: {user}</div>
         <h1>WP6 Red - Sensor Dashboard</h1>
 
         {render_card(
@@ -97,4 +93,4 @@ async def home(user: str = Depends(deps.verify_auth)) -> str:
            style="width:100%">Download Sensor Device Identification (docx)</a>
     """
 
-    return render_page("WP6 Red - Sensor Dashboard", content, extra_css=extra_css)
+    return render_page("WP6 Red - Sensor Dashboard", content)

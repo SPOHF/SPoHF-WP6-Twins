@@ -39,11 +39,18 @@ spec:
                 secretKeyRef:
                   name: {{ $redSecret }}
                   key: mysql-password
-            - name: WP6_RED_AUTH_USERS
+            - name: WP6_OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ $redSecret }}
-                  key: auth-users
+                  name: {{ .Values.secrets.existingSecret | default (printf "%s-secrets" .Chart.Name) }}
+                  key: oidc-client-secret
+            - name: WP6_OIDC_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret | default (printf "%s-secrets" .Chart.Name) }}
+                  key: oidc-session-secret
+            - name: WP6_OIDC_REDIRECT_BASE
+              value: {{ printf "https://%s" .Values.red.ingress.host | quote }}
             {{- if .Values.red.export.enabled }}
             - name: WP6_RED_EXPORT_DIR
               value: /data/exports
