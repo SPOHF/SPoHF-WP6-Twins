@@ -64,7 +64,6 @@ secrets:
   create: false  # Set to true to create secret from values, false to use existing
   existingSecret: ""  # Name of existing secret (default: <release>-secrets)
   apiToken: ""
-  neo4jPassword: ""
   oidcClientSecret: ""   # OIDC client secret for wp6-data client
   oidcSessionSecret: ""  # Random string for signing session cookies (generate with: python -c "import secrets; print(secrets.token_hex(32))")
   tsdbUrl: ""        # e.g., postgresql://user:pass@host:5432/dbname
