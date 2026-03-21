@@ -208,6 +208,9 @@ async def _build_coverage_html(source: ModuleType = deps) -> str:
         else 0
     )
 
+    devices = {r["device"] for r in records}
+    sensors = {(r["device"], r["sensor"]) for r in records}
+
     legend_html = """
     <div class="uptime-legend">
         <div class="uptime-legend-item">
@@ -222,7 +225,12 @@ async def _build_coverage_html(source: ModuleType = deps) -> str:
     </div>
     """
 
-    return f"<p>{good_pct:.0f}% good coverage.</p>" + grid_html + legend_html
+    summary = (
+        f"<p>{good_pct:.0f}% good coverage "
+        f"across {len(devices)} devices and {len(sensors)} sensors.</p>"
+    )
+
+    return summary + grid_html + legend_html
 
 
 @router.get("/status", response_class=HTMLResponse)
