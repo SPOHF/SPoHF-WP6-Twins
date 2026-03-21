@@ -1,0 +1,6 @@
+apiVersion: v2
+name: wp6-data-shared
+description: WP6 Shared Infrastructure - TimescaleDB and sync jobs
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

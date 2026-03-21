@@ -2,19 +2,19 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ .Chart.Name }}-timescaledb
+  name: wp6-data-timescaledb
   labels:
-    app.kubernetes.io/name: {{ .Chart.Name }}-timescaledb
+    app.kubernetes.io/name: wp6-data-timescaledb
 spec:
-  serviceName: {{ .Chart.Name }}-timescaledb
+  serviceName: wp6-data-timescaledb
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: {{ .Chart.Name }}-timescaledb
+      app.kubernetes.io/name: wp6-data-timescaledb
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: {{ .Chart.Name }}-timescaledb
+        app.kubernetes.io/name: wp6-data-timescaledb
     spec:
       containers:
         - name: timescaledb
@@ -26,7 +26,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secrets.existingSecret | default (printf "%s-secrets" .Chart.Name) }}
+                  name: {{ .Values.secrets.existingSecret | default "wp6-data-secrets" }}
                   key: tsdb-password
           volumeMounts:
             - name: data
@@ -57,9 +57,9 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Chart.Name }}-timescaledb
+  name: wp6-data-timescaledb
   labels:
-    app.kubernetes.io/name: {{ .Chart.Name }}-timescaledb
+    app.kubernetes.io/name: wp6-data-timescaledb
 spec:
   type: ClusterIP
   ports:
@@ -67,5 +67,5 @@ spec:
       targetPort: 5432
       name: postgres
   selector:
-    app.kubernetes.io/name: {{ .Chart.Name }}-timescaledb
+    app.kubernetes.io/name: wp6-data-timescaledb
 {{- end }}

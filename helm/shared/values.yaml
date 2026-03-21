@@ -1,0 +1,48 @@
+# WP6 Shared Infrastructure - TimescaleDB and sync jobs
+# Deployed as a separate ArgoCD app to avoid shared resource ownership conflicts
+
+image:
+  repository: ""  # Required: e.g., harbor.example.com/spohf/wp6-data-blue
+  pullPolicy: Always
+  tag: "latest"
+
+# TimescaleDB (shared by blue and red twins)
+timescaledb:
+  enabled: true
+
+# SPoHF Sync CronJob (datalake API)
+sync:
+  enabled: true
+  schedule: "*/15 * * * *"
+  pageSize: 1000
+  endpoints: "yookr-data"
+  mode: "incremental"  # "full" or "incremental"
+  windowDays: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Yookr Sync CronJob (direct API)
+yookrSync:
+  enabled: true
+  schedule: "*/15 * * * *"
+  mode: "incremental"  # "full" or "incremental"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# SPoHF API
+api:
+  baseUrl: "https://backoffice.spohf.com"
+
+# Secrets (referenced from ExternalSecret or direct)
+secrets:
+  existingSecret: ""  # Name of existing secret (default: wp6-data-secrets)
