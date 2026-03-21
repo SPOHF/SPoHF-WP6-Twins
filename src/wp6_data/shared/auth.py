@@ -76,11 +76,11 @@ def make_auth_router(settings: OIDCSettings) -> APIRouter:
 
         stored_state = request.session.pop("state", None)
         if not stored_state or stored_state != state:
-            raise HTTPException(status_code=400, detail="Invalid state parameter")
+            return RedirectResponse(url="/auth/login", status_code=302)
 
         code_verifier = request.session.pop("code_verifier", None)
         if not code_verifier:
-            raise HTTPException(status_code=400, detail="Missing code verifier")
+            return RedirectResponse(url="/auth/login", status_code=302)
 
         async with httpx.AsyncClient() as client:
             token_resp = await client.post(
