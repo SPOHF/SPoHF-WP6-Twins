@@ -40,6 +40,16 @@ spec:
                   key: oidc-session-secret
             - name: WP6_OIDC_REDIRECT_BASE
               value: {{ printf "https://%s" .Values.dashboard.ingress.host | quote }}
+            {{- if .Values.dashboard.export.enabled }}
+            - name: WP6_BLUE_EXPORT_DIR
+              value: /data/exports
+            {{- end }}
+          {{- if .Values.dashboard.export.enabled }}
+          volumeMounts:
+            - name: exports
+              mountPath: /data/exports
+              readOnly: true
+          {{- end }}
           resources:
             {{- toYaml .Values.dashboard.resources | nindent 12 }}
           livenessProbe:
@@ -63,6 +73,12 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 5
             failureThreshold: 18
+      {{- if .Values.dashboard.export.enabled }}
+      volumes:
+        - name: exports
+          persistentVolumeClaim:
+            claimName: {{ .Chart.Name }}-blue-exports
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

@@ -1,0 +1,62 @@
+{{- if .Values.dashboard.enabled }}
+{{- if .Values.dashboard.export.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Chart.Name }}-blue-exports
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-blue-exports
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.dashboard.export.storageSize | default "1Gi" }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Chart.Name }}-blue-export
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-blue-export
+spec:
+  schedule: {{ .Values.dashboard.export.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ .Chart.Name }}-blue-export
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: export
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["python", "-m", "wp6_data.blue.export"]
+              env:
+                - name: WP6_TSDB_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secrets.existingSecret | default (printf "%s-secrets" .Chart.Name) }}
+                      key: tsdb-url
+                - name: WP6_BLUE_EXPORT_DIR
+                  value: /data/exports
+              volumeMounts:
+                - name: exports
+                  mountPath: /data/exports
+              resources:
+                {{- toYaml .Values.dashboard.export.resources | nindent 16 }}
+          volumes:
+            - name: exports
+              persistentVolumeClaim:
+                claimName: {{ .Chart.Name }}-blue-exports
+{{- end }}
+{{- end }}

@@ -21,6 +21,18 @@ dashboard:
   ingress:
     enabled: true
     host: ""  # Required: e.g., wp6.example.com
+  # CSV export job (runs nightly, generates downloadable CSVs per device)
+  export:
+    enabled: true
+    schedule: "0 2 * * *"  # 2 AM daily
+    storageSize: "1Gi"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
 
 # Secrets (referenced from ExternalSecret or direct)
 secrets:

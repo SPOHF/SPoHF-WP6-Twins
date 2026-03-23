@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
 from wp6_data.blue.datasource import GetActiveSource
+from wp6_data.blue.deps import get_export_metadata
 from wp6_data.shared import render_card, render_page, render_table
 from wp6_data.shared.auth import verify_session_user
 
@@ -20,6 +21,8 @@ async def home(
     """Dashboard home page."""
     source, source_name = active_source
     sensors = await source.fetch_available_sensors()
+    export_meta = get_export_metadata()
+    available_exports = export_meta.get("devices", {}) if export_meta else {}
 
     # Group by sensor tag: total readings
     sensor_tags: dict[str, int] = {}
@@ -41,16 +44,24 @@ async def home(
     ]
     sensor_table = render_table(["Sensor Tag", "Readings"], sensor_rows)
 
-    # Devices table
-    device_rows = [
-        [
+    # Devices table (with download links when exports are available)
+    device_rows = []
+    for device, info in sorted(device_info.items()):
+        if device in available_exports:
+            export_ts = available_exports[device][:16].replace("T", " ")
+            download_link = (
+                f'<a href="/download/{device}" title="Download CSV">CSV</a> '
+                f"<small>({export_ts})</small>"
+            )
+        else:
+            download_link = "-"
+        device_rows.append([
             f'<a href="/device/{device}">{device}</a>',
             ", ".join(sorted(info["tags"])),
             f'{info["readings"]:,}',
-        ]
-        for device, info in sorted(device_info.items())
-    ]
-    device_table = render_table(["Device", "Sensors", "Readings"], device_rows)
+            download_link,
+        ])
+    device_table = render_table(["Device", "Sensors", "Readings", "Download"], device_rows)
 
     content = f"""
         <h1>WP6 Blue - Sensor Dashboard</h1>

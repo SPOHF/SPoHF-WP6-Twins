@@ -9,7 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from wp6_data.blue import deps
-from wp6_data.blue.routes import charts, compare, home, ops
+from wp6_data.blue.routes import charts, compare, export, home, ops
 from wp6_data.config import OIDCSettings, Settings
 from wp6_data.shared.auth import NotAuthenticated, make_auth_router, startup_oidc
 from wp6_data.shared.templates import _current_user
@@ -57,6 +57,7 @@ app.include_router(ops.router)
 app.include_router(home.router)
 app.include_router(charts.router)
 app.include_router(compare.router)
+app.include_router(export.router)
 
 if __name__ == "__main__":
     import uvicorn
