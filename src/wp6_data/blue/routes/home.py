@@ -22,8 +22,12 @@ async def home(
     """Dashboard home page."""
     source, source_name = active_source
     sensors = await source.fetch_available_sensors()
-    export_meta = get_export_metadata()
-    available_exports = export_meta.get("devices", {}) if export_meta else {}
+    show_exports = source_name == "spohf-datalake"
+    if show_exports:
+        export_meta = get_export_metadata()
+        available_exports = export_meta.get("devices", {}) if export_meta else {}
+    else:
+        available_exports = {}
 
     # Group by sensor tag: total readings
     sensor_tags: dict[str, int] = {}
@@ -45,17 +49,21 @@ async def home(
     ]
     sensor_table = render_table(["Sensor Tag", "Readings"], sensor_rows)
 
-    # Devices table (with download links when exports are available)
-    device_rows = [
-        [
+    # Devices table (with download links only for spohf-datalake source)
+    headers = ["Device", "Sensors", "Readings"]
+    device_rows = []
+    for device, info in sorted(device_info.items()):
+        row = [
             f'<a href="/device/{device}">{device}</a>',
             ", ".join(sorted(info["tags"])),
             f'{info["readings"]:,}',
-            render_download_link(device, available_exports),
         ]
-        for device, info in sorted(device_info.items())
-    ]
-    device_table = render_table(["Device", "Sensors", "Readings", "Download"], device_rows)
+        if show_exports:
+            row.append(render_download_link(device, available_exports))
+        device_rows.append(row)
+    if show_exports:
+        headers.append("Download")
+    device_table = render_table(headers, device_rows)
 
     content = f"""
         <h1>WP6 Blue - Sensor Dashboard</h1>
