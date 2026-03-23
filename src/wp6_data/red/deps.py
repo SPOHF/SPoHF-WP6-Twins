@@ -1,6 +1,5 @@
 """Red dashboard dependencies: config, auth, globals, helpers."""
 
-import json
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -8,6 +7,7 @@ from dotenv import load_dotenv
 from wp6_data.config import RedSettings
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.dli import OpenMeteoClient
+from wp6_data.shared.export import get_export_metadata as _get_export_metadata
 
 load_dotenv()
 
@@ -50,10 +50,4 @@ def _export_info_html(export_meta: dict | None) -> str:
 
 def get_export_metadata() -> dict | None:
     """Get metadata about available CSV exports."""
-    metadata_path = EXPORT_DIR / "metadata.json"
-    if not metadata_path.exists():
-        return None
-    try:
-        return json.loads(metadata_path.read_text())
-    except Exception:
-        return None
+    return _get_export_metadata(EXPORT_DIR)

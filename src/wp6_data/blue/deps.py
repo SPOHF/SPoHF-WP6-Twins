@@ -5,7 +5,6 @@ All query functions accept an optional ``project`` parameter:
 - A string → include only that project (used by the Yookr view)
 """
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +14,7 @@ from psycopg.rows import dict_row
 
 from wp6_data.config import Settings
 from wp6_data.db import close_pool, get_pool, init_pool
+from wp6_data.shared.export import get_export_metadata as _get_export_metadata
 
 # Serve static files (logo, etc.) from project root
 # __file__ is src/wp6_data/blue/deps.py, so .parent x4 gets to wp6-data/
@@ -185,10 +185,4 @@ async def fetch_sync_metrics(project: str | None = None) -> list[dict[str, Any]]
 
 def get_export_metadata() -> dict | None:
     """Get metadata about available CSV exports."""
-    metadata_path = EXPORT_DIR / "metadata.json"
-    if not metadata_path.exists():
-        return None
-    try:
-        return json.loads(metadata_path.read_text())
-    except Exception:
-        return None
+    return _get_export_metadata(EXPORT_DIR)
