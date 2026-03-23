@@ -7,6 +7,7 @@ from wp6_data.red import deps
 from wp6_data.red.db import MEASUREMENT_GROUPS, MEASUREMENTS_TO_TABLES
 from wp6_data.shared import render_card, render_page, render_table
 from wp6_data.shared.auth import verify_session_user
+from wp6_data.shared.export import render_download_link
 
 router = APIRouter(dependencies=[Depends(verify_session_user)])
 
@@ -22,25 +23,16 @@ async def home(user: str = Depends(verify_session_user)) -> str:
     available_exports = export_meta.get("tables", {}) if export_meta else {}
 
     # Sensor types table
-    sensor_rows = []
-    for s in sensors:
-        table = s["table"]
-        measurements = ", ".join(s["measurements"])
-        if table in available_exports:
-            export_ts = available_exports[table][:16].replace("T", " ")
-            download_link = (
-                f'<a href="/download/{table}" title="Download CSV">CSV</a> '
-                f"<small>({export_ts})</small>"
-            )
-        else:
-            download_link = "-"
-        sensor_rows.append([
-            f'<a href="/table/{table}">{table}</a>',
+    sensor_rows = [
+        [
+            f'<a href="/table/{s["table"]}">{s["table"]}</a>',
             str(s["devices"]),
             f'{s["readings"]:,}',
-            measurements,
-            download_link,
-        ])
+            ", ".join(s["measurements"]),
+            render_download_link(s["table"], available_exports),
+        ]
+        for s in sensors
+    ]
 
     sensor_table = render_table(
         ["Device Type", "Devices", "Readings", "Measurements", "Download"],

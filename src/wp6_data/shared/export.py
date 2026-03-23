@@ -20,6 +20,20 @@ def get_export_metadata(export_dir: Path) -> dict | None:
         return None
 
 
+def render_download_link(name: str, available_exports: dict[str, str]) -> str:
+    """Render an HTML download link cell for a CSV export.
+
+    Returns a link with timestamp if the export exists, or "-" otherwise.
+    """
+    if name in available_exports:
+        export_ts = available_exports[name][:16].replace("T", " ")
+        return (
+            f'<a href="/download/{name}" title="Download CSV">CSV</a> '
+            f"<small>({export_ts})</small>"
+        )
+    return "-"
+
+
 def make_download_router(
     export_dir: Path,
     *,

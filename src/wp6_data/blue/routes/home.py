@@ -10,6 +10,7 @@ from wp6_data.blue.datasource import GetActiveSource
 from wp6_data.blue.deps import get_export_metadata
 from wp6_data.shared import render_card, render_page, render_table
 from wp6_data.shared.auth import verify_session_user
+from wp6_data.shared.export import render_download_link
 
 router = APIRouter(dependencies=[Depends(verify_session_user)])
 
@@ -45,22 +46,15 @@ async def home(
     sensor_table = render_table(["Sensor Tag", "Readings"], sensor_rows)
 
     # Devices table (with download links when exports are available)
-    device_rows = []
-    for device, info in sorted(device_info.items()):
-        if device in available_exports:
-            export_ts = available_exports[device][:16].replace("T", " ")
-            download_link = (
-                f'<a href="/download/{device}" title="Download CSV">CSV</a> '
-                f"<small>({export_ts})</small>"
-            )
-        else:
-            download_link = "-"
-        device_rows.append([
+    device_rows = [
+        [
             f'<a href="/device/{device}">{device}</a>',
             ", ".join(sorted(info["tags"])),
             f'{info["readings"]:,}',
-            download_link,
-        ])
+            render_download_link(device, available_exports),
+        ]
+        for device, info in sorted(device_info.items())
+    ]
     device_table = render_table(["Device", "Sensors", "Readings", "Download"], device_rows)
 
     content = f"""
