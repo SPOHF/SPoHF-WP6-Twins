@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from wp6_data.config import OIDCSettings
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
-from wp6_data.red.routes import browse, charts, compare, dli, dli_model, export, health, home
+from wp6_data.red.routes import api, browse, charts, dli, dli_model, export, health, home
 from wp6_data.red.routes.dli_model.train import train_model_from_db
 from wp6_data.shared.auth import NotAuthenticated, make_auth_router, startup_oidc
 from wp6_data.shared.templates import _current_user, configure_dashboard
@@ -87,11 +87,11 @@ if (deps.PROJECT_ROOT / "static").exists():
     app.mount("/static", StaticFiles(directory=deps.PROJECT_ROOT / "static"), name="static")
 
 app.include_router(make_auth_router(oidc_settings))
+app.include_router(api.router)
 app.include_router(health.router)
 app.include_router(home.router)
 app.include_router(browse.router)
 app.include_router(charts.router)
-app.include_router(compare.router)
 app.include_router(export.router)
 app.include_router(dli.router)
 app.include_router(dli_model.router)

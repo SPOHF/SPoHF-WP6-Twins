@@ -13,12 +13,10 @@ from wp6_data.shared.charts import (
 from wp6_data.shared.templates import (
     default_date_range,
     render_card,
-    render_chart_page,
-    render_compare_form,
-    render_comparison_result,
     render_date_filter,
     render_page,
     render_table,
+    render_unified_chart_page,
     resolve_date_range,
     utc_day_bounds,
 )
@@ -34,12 +32,10 @@ __all__ = [
     "prepare_comparison",
     "render_card",
     "render_coverage_grid",
-    "render_chart_page",
-    "render_compare_form",
-    "render_comparison_result",
     "render_date_filter",
     "render_page",
     "render_table",
+    "render_unified_chart_page",
     "resolve_date_range",
     "utc_day_bounds",
 ]

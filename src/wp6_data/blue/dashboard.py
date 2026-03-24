@@ -9,7 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from wp6_data.blue import deps
-from wp6_data.blue.routes import charts, compare, export, home, ops
+from wp6_data.blue.routes import api, charts, export, home, ops
 from wp6_data.config import OIDCSettings, Settings
 from wp6_data.shared.auth import NotAuthenticated, make_auth_router, startup_oidc
 from wp6_data.shared.templates import _current_user
@@ -53,10 +53,10 @@ if (deps.PROJECT_ROOT / "static").exists():
     app.mount("/static", StaticFiles(directory=deps.PROJECT_ROOT / "static"), name="static")
 
 app.include_router(make_auth_router(oidc_settings))
+app.include_router(api.router)
 app.include_router(ops.router)
 app.include_router(home.router)
 app.include_router(charts.router)
-app.include_router(compare.router)
 app.include_router(export.router)
 
 if __name__ == "__main__":

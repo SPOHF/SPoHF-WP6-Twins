@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     yookr_email: str = ""
     yookr_password: str = ""
 
+    # Chart query limit (max data points per series in /api/series)
+    chart_query_limit: int = 100000
+
     # Blue dashboard data source
     blue_default_source: str = "spohf-datalake"  # "spohf-datalake" or "yookr"
 

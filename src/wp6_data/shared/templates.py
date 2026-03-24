@@ -3,9 +3,6 @@
 from contextvars import ContextVar
 from datetime import UTC, date, datetime, timedelta
 
-import pandas as pd
-import plotly.graph_objects as go
-
 _dashboard_id = "blue"
 _current_user: ContextVar[str | None] = ContextVar("_current_user", default=None)
 
@@ -86,11 +83,13 @@ def render_date_filter(start: date, end: date, extra_params: dict[str, str] | No
             {''.join(buttons)}
         </div>
         <div class="date-inputs">
-            <label>From <input type="date" id="df-start" name="start"
-                   value="{start.isoformat()}"></label>
-            <label>To <input type="date" id="df-end" name="end"
-                   value="{end.isoformat()}"></label>
-            <button type="submit" class="outline">Apply</button>
+            <input type="date" id="df-start" name="start"
+                   value="{start.isoformat()}" title="From"
+                   onchange="document.getElementById('dateFilter').submit()">
+            <span class="date-sep">&ndash;</span>
+            <input type="date" id="df-end" name="end"
+                   value="{end.isoformat()}" title="To"
+                   onchange="document.getElementById('dateFilter').submit()">
         </div>
     </form>
     </article>
@@ -122,74 +121,6 @@ def render_table(headers: list[str], rows: list[list[str]]) -> str:
         for row in rows
     )
     return f"<table><thead>{thead}</thead><tbody>{tbody}</tbody></table>"
-
-
-def render_compare_form(
-    device_data: dict[str, list[str]],
-    action_url: str = "/compare/chart",
-) -> str:
-    """Render a dual-axis compare form with cascading device → measurement selects.
-
-    Args:
-        device_data: Mapping of selectable entity (e.g. device id) to its
-            available sub-options (e.g. measurements or sensor tags).
-            Must be JSON-serialisable.
-        action_url: Form action URL.
-
-    Returns:
-        HTML string containing the form, fieldsets, and JavaScript.
-    """
-    import json
-
-    device_data_json = json.dumps(dict(sorted(device_data.items())))
-    device_ids = sorted(device_data.keys())
-
-    def _select_html(prefix: str, label: str, *, optional: bool = False) -> str:
-        none_option = '<option value="">— None —</option>' if optional else ""
-        device_options = "".join(f'<option value="{d}">{d}</option>' for d in device_ids)
-        return f"""
-        <fieldset>
-            <legend><strong>{label}</strong></legend>
-            <div class="compare-selects">
-                <label>Device
-                    <select name="{prefix}_device" id="{prefix}_device"
-                            onchange="updateMeasurements('{prefix}')">
-                        {none_option}{device_options}
-                    </select>
-                </label>
-                <label>Measurement
-                    <select name="{prefix}_measurement" id="{prefix}_measurement">
-                    </select>
-                </label>
-            </div>
-        </fieldset>
-        """
-
-    return f"""
-        <form method="get" action="{action_url}">
-            <div class="compare-axes">
-                {_select_html("left", "Left Y-axis")}
-                {_select_html("right", "Right Y-axis", optional=True)}
-            </div>
-            <button type="submit">Generate Chart</button>
-        </form>
-        <script>
-        var deviceData = {device_data_json};
-        function updateMeasurements(prefix) {{
-            var device = document.getElementById(prefix + '_device').value;
-            var sel = document.getElementById(prefix + '_measurement');
-            sel.innerHTML = '';
-            if (!device) return;
-            (deviceData[device] || []).forEach(function(m) {{
-                var opt = document.createElement('option');
-                opt.value = m; opt.textContent = m;
-                sel.appendChild(opt);
-            }});
-        }}
-        updateMeasurements('left');
-        updateMeasurements('right');
-        </script>
-    """
 
 
 BASE_CSS = """
@@ -356,11 +287,6 @@ BASE_CSS = """
     tbody tr { transition: background 0.1s ease; }
     tbody tr:hover { background: var(--dashboard-surface-hover); }
 
-    /* --- Compare form --- */
-    .compare-axes { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
-    .compare-selects { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-    .compare-selects label { margin-bottom: 0; }
-
     /* --- Buttons --- */
     button, [type="submit"] { transition: transform 0.1s ease; }
     button:hover, [type="submit"]:hover { transform: translateY(-1px); }
@@ -377,6 +303,216 @@ BASE_CSS = """
     }
     .footer-logo { max-height: 60px; transition: opacity 0.15s ease; }
     .footer-logo:hover { opacity: 0.7; }
+
+    /* --- Collapsible date filter --- */
+    .date-filter-collapsible {
+        padding: 0;
+        margin-bottom: 0.5rem;
+        border: none;
+        box-shadow: none;
+    }
+    .date-filter-collapsible summary {
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--dashboard-primary);
+        padding: 0.4rem 0.75rem;
+        border-left: 3px solid var(--dashboard-primary);
+        background: var(--dashboard-surface);
+        border-radius: 0 8px 8px 0;
+    }
+    .date-filter-collapsible[open] summary {
+        margin-bottom: 0;
+        border-radius: 0 8px 0 0;
+    }
+    .date-filter-collapsible .date-filter {
+        border-radius: 0 0 12px 0;
+        margin-bottom: 0;
+        padding: 0.4rem 0.5rem;
+    }
+    .sensor-panel .date-filter-collapsible {
+        margin-bottom: 0.5rem;
+    }
+    .sensor-panel .date-presets {
+        flex-wrap: wrap;
+        gap: 2px;
+    }
+    .sensor-panel .date-presets button {
+        padding: 0.15rem 0.5rem;
+        font-size: 0.75rem;
+    }
+    .sensor-panel .date-inputs {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+    }
+    .sensor-panel .date-inputs input[type="date"] {
+        font-size: 0.72rem;
+        padding: 0.15rem 0.25rem;
+        flex: 1;
+        min-width: 0;
+    }
+    .sensor-panel .date-sep {
+        font-size: 0.75rem;
+        opacity: 0.5;
+        flex-shrink: 0;
+    }
+    .date-filter-collapsible:hover {
+        transform: none;
+        box-shadow: none;
+    }
+
+    /* --- Unified chart layout --- */
+    .chart-layout {
+        display: flex;
+        gap: 0;
+        min-height: 600px;
+    }
+    .sensor-panel {
+        width: 260px;
+        min-width: 260px;
+        border-right: 2px solid var(--dashboard-primary);
+        padding: 0.75rem;
+        overflow-y: auto;
+        max-height: 80vh;
+        background: var(--dashboard-surface);
+        transition: width 0.2s, min-width 0.2s, padding 0.2s;
+    }
+    .sensor-panel.collapsed {
+        width: 0;
+        min-width: 0;
+        padding: 0;
+        overflow: hidden;
+        border-right: none;
+    }
+    .sensor-panel h4 {
+        margin: 0 0 0.5rem 0;
+        font-size: 0.9rem;
+        color: var(--dashboard-primary);
+    }
+    .chart-main {
+        flex: 1;
+        min-width: 0;
+        padding: 0 0.5rem;
+    }
+    .panel-toggle {
+        font-size: 0.8rem;
+        padding: 0.2rem 0.6rem;
+        margin-bottom: 0.5rem;
+        cursor: pointer;
+        width: auto;
+    }
+
+    /* Measurement groups in side panel */
+    .sensor-group {
+        margin-bottom: 0.5rem;
+    }
+    .sensor-group summary {
+        font-size: 0.82rem;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 0.15rem 0;
+        color: var(--dashboard-primary);
+    }
+    .sensor-item {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+        padding: 0.1rem 0 0.1rem 0.5rem;
+        font-size: 0.78rem;
+    }
+    .sensor-item .cb-label {
+        margin: 0;
+        padding: 0;
+        font-size: 0.7rem;
+        font-weight: 600;
+        opacity: 0.6;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 1px;
+    }
+    .sensor-item .cb-label:has(:checked) {
+        opacity: 1;
+        color: var(--dashboard-primary);
+    }
+    .sensor-item input[type="checkbox"] {
+        margin: 0;
+        transform: scale(0.8);
+    }
+    .sensor-item .device-name {
+        font-size: 0.78rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        cursor: pointer;
+    }
+    .sensor-item .device-name:hover {
+        color: var(--dashboard-primary);
+    }
+    .group-badge {
+        font-size: 0.7rem;
+        font-weight: 700;
+        color: var(--dashboard-primary);
+    }
+    .sensor-panel h4 {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .clear-btn {
+        font-size: 0.7rem;
+        opacity: 0.5;
+        text-decoration: none;
+        font-weight: 400;
+    }
+    .clear-btn:hover {
+        opacity: 1;
+    }
+    .group-toggle {
+        display: flex;
+        gap: 2px;
+        margin-bottom: 0.5rem;
+    }
+    .group-btn {
+        flex: 1;
+        font-size: 0.72rem;
+        padding: 0.15rem 0.3rem;
+        margin-bottom: 0;
+        cursor: pointer;
+    }
+    .group-btn.active {
+        background: var(--dashboard-primary);
+        color: #fff;
+        border-color: var(--dashboard-primary);
+    }
+    .sensor-item.active {
+        background: var(--dashboard-surface-hover);
+        border-radius: 4px;
+    }
+    #chart-area {
+        min-height: 500px;
+    }
+    .chart-stats {
+        font-size: 0.82rem;
+        opacity: 0.7;
+        margin: 0.25rem 0;
+    }
+    .truncation-warning {
+        color: #f59e0b;
+        font-weight: 600;
+    }
+    [data-theme="dark"] .truncation-warning {
+        color: #fbbf24;
+    }
+    .chart-empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 400px;
+        opacity: 0.5;
+        font-size: 1.1rem;
+    }
 
     /* --- Charts: dark mode invert --- */
     [data-theme="dark"] .js-plotly-plot {
@@ -406,6 +542,454 @@ SOURCE_TOGGLE_JS = """
         document.cookie = 'wp6_blue_source=' + value + ';path=/;max-age=31536000';
         location.reload();
     }
+"""
+
+UNIFIED_CHART_JS = """
+(function() {
+    var chartDiv = document.getElementById('chart-area');
+    var panelDiv = document.getElementById('sensor-panel');
+    var statsDiv = document.getElementById('chart-stats');
+    var toggleBtn = document.getElementById('panel-toggle');
+    if (!chartDiv || !panelDiv) return;
+
+    // State: map of "device:sensor" -> {axis: "left"|"right", traceIdx: number}
+    var activeSeries = {};
+    var totalPoints = 0;
+
+    // Parse URL params
+    var params = new URLSearchParams(window.location.search);
+    var leftSpecs = (params.get('s') || '').split(',').filter(Boolean);
+    var rightSpecs = (params.get('r') || '').split(',').filter(Boolean);
+    var startDate = params.get('start') || '';
+    var endDate = params.get('end') || '';
+
+    // Build initial active set from URL
+    var initialLeft = {};
+    var initialRight = {};
+    leftSpecs.forEach(function(s) { initialLeft[s] = true; });
+    rightSpecs.forEach(function(s) { initialRight[s] = true; });
+
+    // Initialize empty Plotly chart
+    var layout = {
+        template: 'plotly_white',
+        hovermode: 'x unified',
+        height: 600,
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        yaxis2: {overlaying: 'y', side: 'right', showgrid: false}
+    };
+    Plotly.newPlot(chartDiv, [], layout);
+
+    // Toggle panel
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', function() {
+            var sp = document.querySelector('.sensor-panel');
+            sp.classList.toggle('collapsed');
+            toggleBtn.textContent = sp.classList.contains('collapsed')
+                ? 'Show controls' : 'Hide controls';
+            Plotly.Plots.resize(chartDiv);
+        });
+    }
+
+    // Clear all selections
+    var clearBtn = document.getElementById('clear-all');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            // Remove all traces from chart
+            var keys = Object.keys(activeSeries);
+            if (keys.length === 0) return;
+            var indices = keys.map(function(k) {
+                return activeSeries[k].traceIdx;
+            }).sort(function(a, b) { return b - a; });
+            Plotly.deleteTraces(chartDiv, indices);
+            activeSeries = {};
+            totalPoints = 0;
+            // Uncheck all checkboxes
+            var cbs = panelDiv.querySelectorAll(
+                'input[type="checkbox"]:checked');
+            cbs.forEach(function(cb) { cb.checked = false; });
+            panelDiv.querySelectorAll('.sensor-item').forEach(
+                function(el) { el.classList.remove('active'); });
+            showEmpty(true);
+            syncUrl();
+            updateStats();
+            updateY2();
+            updateAllBadges();
+        });
+    }
+
+    // Fetch sensor list and build tree
+    var allSensors = [];
+    var currentGrouping = 'measurement';
+    fetch('/api/sensors')
+        .then(function(r) { return r.json(); })
+        .then(function(sensors) {
+            allSensors = sensors;
+            buildTree(sensors, currentGrouping);
+            loadInitialSeries();
+        });
+
+    // Grouping toggle
+    var groupBtns = document.querySelectorAll('.group-btn');
+    groupBtns.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var mode = btn.dataset.group;
+            if (mode === currentGrouping) return;
+            currentGrouping = mode;
+            groupBtns.forEach(function(b) {
+                b.classList.toggle('active', b === btn);
+            });
+            buildTree(allSensors, currentGrouping);
+        });
+    });
+
+    function buildTree(sensors, groupBy) {
+        // Group sensors into {groupKey: [{device, sensor}, ...]}
+        var groups = {};
+        sensors.forEach(function(s) {
+            var key = groupBy === 'device' ? s.device : s.sensor;
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(s);
+        });
+
+        // Build current checked state from activeSeries
+        var checkedLeft = {};
+        var checkedRight = {};
+        Object.keys(activeSeries).forEach(function(k) {
+            if (activeSeries[k].axis === 'right') checkedRight[k] = true;
+            else checkedLeft[k] = true;
+        });
+        // On first load, also use URL state
+        if (Object.keys(activeSeries).length === 0) {
+            checkedLeft = initialLeft;
+            checkedRight = initialRight;
+        }
+
+        var html = '';
+        var sortedKeys = Object.keys(groups).sort();
+        sortedKeys.forEach(function(groupKey) {
+            var items = groups[groupKey];
+            var open = items.some(function(s) {
+                var key = s.device + ':' + s.sensor;
+                return checkedLeft[key] || checkedRight[key];
+            });
+            html += '<details class="sensor-group"'
+                + (open ? ' open' : '') + '>';
+            html += '<summary>' + groupKey
+                + ' <small>(' + items.length + ')</small>'
+                + '<span class="group-badge"></span>'
+                + '</summary>';
+            items.forEach(function(s) {
+                var key = s.device + ':' + s.sensor;
+                var label = groupBy === 'device'
+                    ? s.sensor : s.device;
+                var isLeft = !!checkedLeft[key];
+                var isRight = !!checkedRight[key];
+                var activeClass = (isLeft || isRight)
+                    ? ' active' : '';
+                html += '<div class="sensor-item' + activeClass
+                    + '" data-key="' + key + '">';
+                html += '<label class="cb-label" title="Left Y">'
+                    + '<input type="checkbox" data-axis="left"'
+                    + ' data-key="' + key + '"'
+                    + (isLeft ? ' checked' : '')
+                    + '> L</label>';
+                html += '<label class="cb-label" title="Right Y">'
+                    + '<input type="checkbox" data-axis="right"'
+                    + ' data-key="' + key + '"'
+                    + (isRight ? ' checked' : '')
+                    + '> R</label>';
+                html += '<span class="device-name" title="'
+                    + key + '">' + label + '</span>';
+                html += '</div>';
+            });
+            html += '</details>';
+        });
+        panelDiv.innerHTML = html;
+        updateAllBadges();
+
+        // Listen for changes
+        panelDiv.addEventListener('change', function(e) {
+            var cb = e.target;
+            if (cb.type !== 'checkbox') return;
+            var key = cb.dataset.key;
+            var axis = cb.dataset.axis;
+            var otherAxis = axis === 'left' ? 'right' : 'left';
+            var item = panelDiv.querySelector(
+                '[data-key="' + key + '"]');
+
+            if (cb.checked) {
+                // Uncheck the other axis for this sensor
+                var other = item.querySelector(
+                    'input[data-axis="' + otherAxis + '"]');
+                if (other && other.checked) {
+                    other.checked = false;
+                }
+                addOrUpdateSeries(key, axis);
+                if (item) item.classList.add('active');
+            } else {
+                removeSeries(key);
+                // Check if any checkbox still checked
+                var any = item.querySelector(
+                    'input[type="checkbox"]:checked');
+                if (!any && item) {
+                    item.classList.remove('active');
+                }
+                // Sync immediately for removals (synchronous)
+                syncUrl();
+                updateStats();
+                updateY2();
+            }
+            updateAllBadges();
+        });
+
+        // Clicking name toggles the L checkbox
+        panelDiv.addEventListener('click', function(e) {
+            var name = e.target.closest('.device-name');
+            if (!name) return;
+            var item = name.closest('.sensor-item');
+            if (!item) return;
+            var lcb = item.querySelector(
+                'input[data-axis="left"]');
+            if (lcb) {
+                lcb.checked = !lcb.checked;
+                lcb.dispatchEvent(
+                    new Event('change', {bubbles: true}));
+            }
+        });
+    }
+
+    function updateAllBadges() {
+        var groups = panelDiv.querySelectorAll('.sensor-group');
+        groups.forEach(function(g) {
+            var checked = g.querySelectorAll(
+                'input[type="checkbox"]:checked');
+            var badge = g.querySelector('.group-badge');
+            if (badge) {
+                badge.textContent = checked.length > 0
+                    ? ' [' + checked.length + ']' : '';
+            }
+        });
+    }
+
+    function loadInitialSeries() {
+        var allSpecs = leftSpecs.map(function(s) {
+            return {key: s, axis: 'left'};
+        }).concat(rightSpecs.map(function(s) {
+            return {key: s, axis: 'right'};
+        }));
+        if (allSpecs.length === 0) {
+            showEmpty(true);
+            return;
+        }
+        showEmpty(false);
+        var loaded = 0;
+        allSpecs.forEach(function(spec) {
+            fetchAndAdd(spec.key, spec.axis, function() {
+                loaded++;
+                if (loaded === allSpecs.length) {
+                    updateStats();
+                    updateY2();
+                }
+            });
+        });
+    }
+
+    function fetchAndAdd(key, axis, cb) {
+        var parts = key.split(':');
+        var device = parts[0];
+        var sensor = parts.slice(1).join(':');
+        var url = '/api/series?device='
+            + encodeURIComponent(device)
+            + '&sensor=' + encodeURIComponent(sensor);
+        if (startDate) url += '&start=' + startDate;
+        if (endDate) url += '&end=' + endDate;
+
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(resp) {
+                var data = resp.data || [];
+                if (data.length === 0) { if (cb) cb(); return; }
+
+                var times = data.map(function(d) {
+                    return d.time;
+                });
+                var values = data.map(function(d) {
+                    return d.value;
+                });
+
+                var trace = {
+                    x: times,
+                    y: values,
+                    name: key,
+                    mode: 'lines',
+                    yaxis: axis === 'right' ? 'y2' : 'y'
+                };
+                if (axis === 'right') {
+                    trace.line = {dash: 'dash'};
+                }
+
+                Plotly.addTraces(chartDiv, [trace]);
+                var idx = chartDiv.data.length - 1;
+                activeSeries[key] = {
+                    axis: axis, traceIdx: idx, points: data.length,
+                    truncated: !!resp.truncated,
+                    limit: resp.limit || 0
+                };
+                totalPoints += data.length;
+                showEmpty(false);
+                if (cb) cb();
+            });
+    }
+
+    function addOrUpdateSeries(key, axis) {
+        if (activeSeries[key]) {
+            // Already loaded — just switch axis (synchronous)
+            var idx = activeSeries[key].traceIdx;
+            var yaxis = axis === 'right' ? 'y2' : 'y';
+            var dash = axis === 'right' ? 'dash' : 'solid';
+            Plotly.restyle(chartDiv, {
+                yaxis: yaxis, 'line.dash': dash, visible: true
+            }, [idx]);
+            activeSeries[key].axis = axis;
+            syncUrl();
+            updateStats();
+            updateY2();
+        } else {
+            // Need to fetch — syncUrl after fetch completes
+            showEmpty(false);
+            fetchAndAdd(key, axis, function() {
+                syncUrl();
+                updateStats();
+                updateY2();
+            });
+        }
+    }
+
+    function removeSeries(key) {
+        if (!activeSeries[key]) return;
+        var idx = activeSeries[key].traceIdx;
+        totalPoints -= activeSeries[key].points || 0;
+        Plotly.deleteTraces(chartDiv, [idx]);
+        delete activeSeries[key];
+        // Reindex remaining traces
+        Object.keys(activeSeries).forEach(function(k) {
+            if (activeSeries[k].traceIdx > idx) {
+                activeSeries[k].traceIdx--;
+            }
+        });
+        if (Object.keys(activeSeries).length === 0) {
+            showEmpty(true);
+        }
+    }
+
+    function updateY2() {
+        var hasY2 = chartDiv.data.some(function(t) {
+            return t.visible !== false && t.yaxis === 'y2';
+        });
+        Plotly.relayout(chartDiv, {
+            'yaxis2.visible': hasY2,
+            'yaxis2.showticklabels': hasY2
+        });
+    }
+
+    function updateStats() {
+        if (statsDiv) {
+            var t = 0;
+            var truncatedKeys = [];
+            Object.keys(activeSeries).forEach(function(k) {
+                t += activeSeries[k].points || 0;
+                if (activeSeries[k].truncated) {
+                    truncatedKeys.push(k);
+                }
+            });
+            var text = t > 0
+                ? t.toLocaleString() + ' data points' : '';
+            if (truncatedKeys.length > 0) {
+                var limit = activeSeries[truncatedKeys[0]].limit;
+                text += ' — ' + truncatedKeys.length
+                    + (truncatedKeys.length === 1
+                        ? ' series' : ' series')
+                    + ' capped at '
+                    + limit.toLocaleString()
+                    + ' points (narrow the date range'
+                    + ' to see all data)';
+            }
+            statsDiv.textContent = text;
+            statsDiv.classList.toggle(
+                'truncation-warning',
+                truncatedKeys.length > 0);
+        }
+    }
+
+    function showEmpty(show) {
+        var el = document.getElementById('chart-empty');
+        if (el) el.style.display = show ? 'flex' : 'none';
+        chartDiv.style.display = show ? 'none' : 'block';
+    }
+
+    function syncUrl() {
+        var left = [], right = [];
+        Object.keys(activeSeries).sort().forEach(function(k) {
+            if (activeSeries[k].axis === 'right') right.push(k);
+            else left.push(k);
+        });
+        var p = new URLSearchParams(window.location.search);
+        if (left.length) p.set('s', left.join(','));
+        else p.delete('s');
+        if (right.length) p.set('r', right.join(','));
+        else p.delete('r');
+        var newUrl = window.location.pathname;
+        var qs = p.toString();
+        if (qs) newUrl += '?' + qs;
+        history.replaceState(null, '', newUrl);
+        syncDateFormParams();
+    }
+
+    // Preserve s/r params across date filter submissions by
+    // injecting hidden fields into the form. This works for both
+    // the Apply button and the preset buttons (which call
+    // form.submit() directly, bypassing the submit event).
+    var dateForm = document.getElementById('dateFilter');
+    if (dateForm) {
+        var params = new URLSearchParams(window.location.search);
+        ['s', 'r'].forEach(function(name) {
+            var val = params.get(name);
+            if (val) {
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = name;
+                input.value = val;
+                dateForm.appendChild(input);
+            }
+        });
+    }
+
+    // Also keep hidden fields in sync when series change
+    function syncDateFormParams() {
+        if (!dateForm) return;
+        ['s', 'r'].forEach(function(name) {
+            var existing = dateForm.querySelector(
+                'input[name="' + name + '"]');
+            var p = new URLSearchParams(window.location.search);
+            var val = p.get(name);
+            if (val) {
+                if (existing) {
+                    existing.value = val;
+                } else {
+                    var input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = name;
+                    input.value = val;
+                    dateForm.appendChild(input);
+                }
+            } else if (existing) {
+                existing.remove();
+            }
+        });
+    }
+})();
 """
 
 _DASHBOARD_NAMES = {"blue": "SPoHF Blue", "red": "SPoHF Red"}
@@ -443,7 +1027,7 @@ def render_nav_bar(*, data_source: str | None = None) -> str:
         <a href="/" class="brand">{name}</a>
         <div class="nav-links">
             <a href="/">Home</a>
-            <a href="/compare">Compare</a>
+            <a href="/chart">Chart</a>
             {user_html}
             {source_html}
             <button id="theme-toggle" title="Toggle dark mode">
@@ -520,126 +1104,66 @@ def render_page(
     """
 
 
-def render_chart_page(
-    df: pd.DataFrame,
-    fig: go.Figure,
+def render_unified_chart_page(
     title: str,
     start: date,
     end: date,
     *,
-    back_url: str = "/",
-    extra_params: dict[str, str] | None = None,
-    extra_css: str = "",
     data_source: str | None = None,
 ) -> str:
-    """Render a full chart page with date filter, empty-data fallback, stats, and layout.
+    """Render the unified chart page with side panel and on-demand data loading.
 
-    Callers build their own ``fig`` (chart logic differs per dashboard), but pass
-    ``df`` so this helper can check emptiness and compute a data-point count.
+    The page starts empty; client-side JS fetches sensor list and series data.
+    URL params ``s`` and ``r`` encode the selected series for bookmarking.
 
     Args:
-        df: DataFrame used to check emptiness and compute stats.
-        fig: Plotly Figure to render (ignored when *df* is empty).
-        title: Page ``<title>`` passed to :func:`render_page`.
+        title: Page title.
         start: Start date for the date-range filter.
         end: End date for the date-range filter.
-        back_url: URL for the back link.
-        extra_params: Hidden form fields forwarded to :func:`render_date_filter`.
-        extra_css: Additional CSS rules.
+        data_source: Optional data source identifier (blue twin).
 
     Returns:
         Complete HTML page string.
     """
-    filter_html = render_date_filter(start, end, extra_params=extra_params)
+    filter_html = render_date_filter(start, end)
 
-    if df.empty:
-        return render_page(
-            title,
-            filter_html + "<h1>No data found</h1>",
-            show_back_link=True,
-            back_url=back_url,
-            data_source=data_source,
-        )
-
-    chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
-    stats_html = f"<small>{len(df):,} data points</small>"
+    content = f"""
+    <div class="chart-layout">
+        <div class="sensor-panel" id="sensor-panel-wrapper">
+            <details class="date-filter-collapsible" open>
+                <summary>Date range: {start.isoformat()} \
+to {end.isoformat()}</summary>
+                {filter_html}
+            </details>
+            <h4>Sensors <a href="#" id="clear-all"
+                class="clear-btn" title="Clear all selections"
+                >[x]</a></h4>
+            <div class="group-toggle">
+                <button class="group-btn active" data-group="measurement"
+                    >By metric</button>
+                <button class="group-btn" data-group="device"
+                    >By device</button>
+            </div>
+            <div id="sensor-panel">Loading sensors...</div>
+        </div>
+        <div class="chart-main">
+            <button class="panel-toggle outline" id="panel-toggle">
+                Hide controls</button>
+            <div class="chart-stats" id="chart-stats"></div>
+            <div class="chart-empty" id="chart-empty">
+                Select sensors from the panel to start charting</div>
+            <div id="chart-area"></div>
+        </div>
+    </div>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script>{UNIFIED_CHART_JS}</script>
+    """
 
     return render_page(
         title,
-        filter_html + stats_html + chart_html,
+        content,
         show_logo=False,
         show_footer=False,
         show_back_link=True,
-        back_url=back_url,
-        extra_css=extra_css,
-        data_source=data_source,
-    )
-
-
-def render_comparison_result(
-    left_df: pd.DataFrame,
-    right_df: pd.DataFrame,
-    left_device: str,
-    left_measurement: str,
-    right_device: str,
-    right_measurement: str,
-    start: date,
-    end: date,
-    title: str,
-    *,
-    back_url: str = "/compare",
-    data_source: str | None = None,
-) -> str:
-    """Render a comparison chart page for one or two device/measurement pairs.
-
-    Handles label creation, :func:`prepare_comparison`, chart type selection
-    (dual-axis vs single line), and delegates to :func:`render_chart_page`.
-
-    Args:
-        left_df: DataFrame for the left axis (device, sensor, time, value).
-        right_df: DataFrame for the right axis (may be empty).
-        left_device: Device identifier for the left series.
-        left_measurement: Measurement name for the left series.
-        right_device: Device identifier for the right series (empty string if none).
-        right_measurement: Measurement name for the right series (empty string if none).
-        start: Start date for the date-range filter.
-        end: End date for the date-range filter.
-        title: Page ``<title>``.
-        back_url: URL for the back link.
-
-    Returns:
-        Complete HTML page string.
-    """
-    from wp6_data.shared.charts import make_dual_axis_chart, make_line_chart, prepare_comparison
-
-    has_right = bool(right_device and right_measurement)
-
-    left_label = f"{left_device} | {left_measurement}"
-    right_label = f"{right_device} | {right_measurement}" if has_right else ""
-    df, left_label, right_label = prepare_comparison(
-        left_df, right_df, left_label, right_label,
-    )
-
-    extra_params: dict[str, str] = {
-        "left_device": left_device,
-        "left_measurement": left_measurement,
-    }
-    if has_right:
-        extra_params["right_device"] = right_device
-        extra_params["right_measurement"] = right_measurement
-
-    if has_right:
-        fig = make_dual_axis_chart(df, left_label, right_label)
-    else:
-        fig = make_line_chart(df, title=left_label)
-
-    return render_chart_page(
-        df,
-        fig,
-        title,
-        start,
-        end,
-        back_url=back_url,
-        extra_params=extra_params,
         data_source=data_source,
     )

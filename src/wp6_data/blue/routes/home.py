@@ -69,10 +69,10 @@ async def home(
         <h1>WP6 Blue - Sensor Dashboard</h1>
 
         {render_card(
-            "Custom Compare",
-            '<a href="/compare" role="button">Compare</a>',
-            description="Create a custom dual-axis chart "
-            "by selecting two sensor/device combinations.",
+            "Interactive Chart",
+            '<a href="/chart" role="button">Chart</a>',
+            description="Select any sensors and devices to plot "
+            "on a customizable dual-axis chart.",
         )}
 
         {render_card("Browse by Sensor Tag", sensor_table)}

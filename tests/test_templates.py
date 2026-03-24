@@ -3,15 +3,11 @@
 from datetime import date, timedelta
 from unittest.mock import patch
 
-import pandas as pd
-
 from wp6_data.shared.templates import (
     default_date_range,
-    render_chart_page,
-    render_compare_form,
-    render_comparison_result,
     render_date_filter,
     render_page,
+    render_unified_chart_page,
     resolve_date_range,
 )
 
@@ -169,195 +165,32 @@ class TestRenderPage:
         assert "pico.classless.min.css" in html
 
 
-SAMPLE_DEVICE_DATA = {
-    "sensor-A": ["temp", "humidity"],
-    "sensor-B": ["co2"],
-}
-
-
-class TestRenderCompareForm:
-    def test_contains_form_with_action(self):
-        html = render_compare_form(SAMPLE_DEVICE_DATA, action_url="/my/compare")
-        assert 'action="/my/compare"' in html
-        assert "<form" in html
-
-    def test_default_action_url(self):
-        html = render_compare_form(SAMPLE_DEVICE_DATA)
-        assert 'action="/compare/chart"' in html
-
-    def test_left_and_right_fieldsets(self):
-        html = render_compare_form(SAMPLE_DEVICE_DATA)
-        assert "Left Y-axis" in html
-        assert "Right Y-axis" in html
-
-    def test_device_options_sorted(self):
-        html = render_compare_form(SAMPLE_DEVICE_DATA)
-        assert 'value="sensor-A"' in html
-        assert 'value="sensor-B"' in html
-        # sensor-A should appear before sensor-B
-        assert html.index("sensor-A") < html.index("sensor-B")
-
-    def test_contains_update_script(self):
-        html = render_compare_form(SAMPLE_DEVICE_DATA)
-        assert "function updateMeasurements(prefix)" in html
-        assert "updateMeasurements('left')" in html
-        assert "updateMeasurements('right')" in html
-
-    def test_device_data_json_embedded(self):
-        html = render_compare_form(SAMPLE_DEVICE_DATA)
-        assert '"sensor-A"' in html
-        assert '"temp"' in html
-        assert '"humidity"' in html
-        assert '"co2"' in html
-
-    def test_submit_button(self):
-        html = render_compare_form(SAMPLE_DEVICE_DATA)
-        assert "Generate Chart" in html
-
-    def test_select_names(self):
-        html = render_compare_form(SAMPLE_DEVICE_DATA)
-        assert 'name="left_device"' in html
-        assert 'name="left_measurement"' in html
-        assert 'name="right_device"' in html
-        assert 'name="right_measurement"' in html
-
-    def test_empty_device_data(self):
-        html = render_compare_form({})
-        assert "<form" in html
-        assert "Generate Chart" in html
-
-    def test_right_axis_has_none_option(self):
-        html = render_compare_form(SAMPLE_DEVICE_DATA)
-        # Right device select should have a "None" option
-        right_select_start = html.index('id="right_device"')
-        right_select_chunk = html[right_select_start - 200 : right_select_start + 200]
-        assert "— None —" in right_select_chunk
-
-
-def _sample_chart_df():
-    return pd.DataFrame(
-        {
-            "device": ["d1", "d1"],
-            "sensor": ["temp", "temp"],
-            "time": pd.to_datetime(["2026-01-01", "2026-01-02"]),
-            "value": [20.0, 21.0],
-        }
-    )
-
-
-def _make_fig(df):
-    from wp6_data.shared.charts import make_line_chart
-
-    return make_line_chart(df)
-
-
-class TestRenderChartPage:
-    def test_empty_df_returns_no_data(self):
-        empty = pd.DataFrame(columns=["device", "sensor", "time", "value"])
-        fig = _make_fig(empty)
-        html = render_chart_page(empty, fig, "Test", date(2026, 1, 1), date(2026, 1, 8))
-        assert "No data found" in html
-        assert "<title>Test</title>" in html
-
-    def test_non_empty_df_returns_chart(self):
-        df = _sample_chart_df()
-        fig = _make_fig(df)
-        html = render_chart_page(df, fig, "Test", date(2026, 1, 1), date(2026, 1, 8))
-        assert "plotly" in html.lower()
-        assert "2 data points" in html
+class TestRenderUnifiedChartPage:
+    def test_contains_chart_layout(self):
+        html = render_unified_chart_page("Test", date(2026, 1, 1), date(2026, 1, 8))
+        assert "chart-layout" in html
+        assert "sensor-panel" in html
+        assert "chart-area" in html
 
     def test_contains_date_filter(self):
-        df = _sample_chart_df()
-        fig = _make_fig(df)
-        html = render_chart_page(df, fig, "Test", date(2026, 1, 1), date(2026, 1, 8))
-        assert 'id="dateFilter"' in html
+        html = render_unified_chart_page("Test", date(2026, 1, 1), date(2026, 1, 8))
+        assert "dateFilter" in html
         assert 'value="2026-01-01"' in html
 
-    def test_back_url(self):
-        df = _sample_chart_df()
-        fig = _make_fig(df)
-        html = render_chart_page(
-            df, fig, "Test", date(2026, 1, 1), date(2026, 1, 8), back_url="/custom",
-        )
-        assert 'href="/custom"' in html
-
-    def test_extra_params_forwarded(self):
-        df = _sample_chart_df()
-        fig = _make_fig(df)
-        html = render_chart_page(
-            df, fig, "Test", date(2026, 1, 1), date(2026, 1, 8),
-            extra_params={"sensor": "temp"},
-        )
-        assert 'name="sensor" value="temp"' in html
-
-    def test_empty_page_has_back_link(self):
-        empty = pd.DataFrame(columns=["device", "sensor", "time", "value"])
-        fig = _make_fig(empty)
-        html = render_chart_page(empty, fig, "Test", date(2026, 1, 1), date(2026, 1, 8))
-        assert "Back to Dashboard" in html
-
-    def test_chart_page_hides_logo_and_footer(self):
-        df = _sample_chart_df()
-        fig = _make_fig(df)
-        html = render_chart_page(df, fig, "Test", date(2026, 1, 1), date(2026, 1, 8))
-        assert '<div class="logo">' not in html
-        assert "<footer>" not in html
-
-
-class TestRenderComparisonResult:
-    def test_basic_rendering_with_both_sides(self):
-        left = pd.DataFrame({
-            "device": ["d1", "d1"],
-            "sensor": ["temp", "temp"],
-            "time": pd.to_datetime(["2026-01-01", "2026-01-02"]),
-            "value": [20.0, 21.0],
-        })
-        right = pd.DataFrame({
-            "device": ["d2", "d2"],
-            "sensor": ["humidity", "humidity"],
-            "time": pd.to_datetime(["2026-01-01", "2026-01-02"]),
-            "value": [55.0, 60.0],
-        })
-        html = render_comparison_result(
-            left, right, "d1", "temp", "d2", "humidity",
-            date(2026, 1, 1), date(2026, 1, 8), "Compare",
-        )
+    def test_contains_plotly_script(self):
+        html = render_unified_chart_page("Test", date(2026, 1, 1), date(2026, 1, 8))
         assert "plotly" in html.lower()
-        assert "4 data points" in html
-        assert 'name="left_device" value="d1"' in html
-        assert 'name="right_device" value="d2"' in html
 
-    def test_single_axis_when_right_empty(self):
-        left = pd.DataFrame({
-            "device": ["d1", "d1"],
-            "sensor": ["temp", "temp"],
-            "time": pd.to_datetime(["2026-01-01", "2026-01-02"]),
-            "value": [20.0, 21.0],
-        })
-        right = pd.DataFrame(columns=["device", "sensor", "time", "value"])
-        html = render_comparison_result(
-            left, right, "d1", "temp", "", "",
-            date(2026, 1, 1), date(2026, 1, 8), "Compare",
-        )
-        assert "plotly" in html.lower()
-        assert "2 data points" in html
-        # No right params in hidden fields
-        assert 'name="right_device"' not in html
+    def test_contains_grouping_toggle(self):
+        html = render_unified_chart_page("Test", date(2026, 1, 1), date(2026, 1, 8))
+        assert "By metric" in html
+        assert "By device" in html
 
-    def test_empty_data_shows_no_data(self):
-        empty = pd.DataFrame(columns=["device", "sensor", "time", "value"])
-        html = render_comparison_result(
-            empty, empty, "d1", "temp", "", "",
-            date(2026, 1, 1), date(2026, 1, 8), "Compare",
-        )
-        assert "No data found" in html
+    def test_contains_clear_button(self):
+        html = render_unified_chart_page("Test", date(2026, 1, 1), date(2026, 1, 8))
+        assert "clear-all" in html
 
-    def test_custom_back_url(self):
-        left = _sample_chart_df()
-        right = pd.DataFrame(columns=["device", "sensor", "time", "value"])
-        html = render_comparison_result(
-            left, right, "d1", "temp", "", "",
-            date(2026, 1, 1), date(2026, 1, 8), "Compare",
-            back_url="/my-compare",
-        )
-        assert 'href="/my-compare"' in html
+    def test_contains_panel_toggle(self):
+        html = render_unified_chart_page("Test", date(2026, 1, 1), date(2026, 1, 8))
+        assert "panel-toggle" in html
+        assert "Hide controls" in html

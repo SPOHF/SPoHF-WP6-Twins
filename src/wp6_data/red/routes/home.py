@@ -67,10 +67,10 @@ async def home(user: str = Depends(verify_session_user)) -> str:
         )}
 
         {render_card(
-            "Custom Compare",
-            '<a href="/compare" role="button">Compare</a>',
-            description="Create a custom dual-axis chart "
-            "by selecting two sensor/measurement combinations.",
+            "Interactive Chart",
+            '<a href="/chart" role="button">Chart</a>',
+            description="Select any sensors and measurements to plot "
+            "on a customizable dual-axis chart.",
         )}
 
         {render_card("Compare by Measurement Type", measurement_table,
