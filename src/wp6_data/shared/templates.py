@@ -471,20 +471,32 @@ BASE_CSS = """
     }
     .group-toggle {
         display: flex;
-        gap: 2px;
         margin-bottom: 0.5rem;
+        border-radius: 6px;
+        overflow: hidden;
+        border: 1px solid var(--dashboard-primary);
     }
     .group-btn {
         flex: 1;
         font-size: 0.72rem;
-        padding: 0.15rem 0.3rem;
+        padding: 0.25rem 0.3rem;
         margin-bottom: 0;
         cursor: pointer;
+        border: none;
+        border-radius: 0;
+        background: transparent;
+        color: var(--dashboard-primary);
+        transition: background 0.15s, color 0.15s;
+    }
+    .group-btn:not(:last-child) {
+        border-right: 1px solid var(--dashboard-primary);
     }
     .group-btn.active {
         background: var(--dashboard-primary);
         color: #fff;
-        border-color: var(--dashboard-primary);
+    }
+    .group-btn:not(.active):hover {
+        background: color-mix(in srgb, var(--dashboard-primary) 12%, transparent);
     }
     .sensor-item.active {
         background: var(--dashboard-surface-hover);
@@ -708,57 +720,57 @@ UNIFIED_CHART_JS = """
         });
         panelDiv.innerHTML = html;
         updateAllBadges();
-
-        // Listen for changes
-        panelDiv.addEventListener('change', function(e) {
-            var cb = e.target;
-            if (cb.type !== 'checkbox') return;
-            var key = cb.dataset.key;
-            var axis = cb.dataset.axis;
-            var otherAxis = axis === 'left' ? 'right' : 'left';
-            var item = panelDiv.querySelector(
-                '[data-key="' + key + '"]');
-
-            if (cb.checked) {
-                // Uncheck the other axis for this sensor
-                var other = item.querySelector(
-                    'input[data-axis="' + otherAxis + '"]');
-                if (other && other.checked) {
-                    other.checked = false;
-                }
-                addOrUpdateSeries(key, axis);
-                if (item) item.classList.add('active');
-            } else {
-                removeSeries(key);
-                // Check if any checkbox still checked
-                var any = item.querySelector(
-                    'input[type="checkbox"]:checked');
-                if (!any && item) {
-                    item.classList.remove('active');
-                }
-                // Sync immediately for removals (synchronous)
-                syncUrl();
-                updateStats();
-                updateY2();
-            }
-            updateAllBadges();
-        });
-
-        // Clicking name toggles the L checkbox
-        panelDiv.addEventListener('click', function(e) {
-            var name = e.target.closest('.device-name');
-            if (!name) return;
-            var item = name.closest('.sensor-item');
-            if (!item) return;
-            var lcb = item.querySelector(
-                'input[data-axis="left"]');
-            if (lcb) {
-                lcb.checked = !lcb.checked;
-                lcb.dispatchEvent(
-                    new Event('change', {bubbles: true}));
-            }
-        });
     }
+
+    // Listen for changes (once, outside buildTree to avoid stacking)
+    panelDiv.addEventListener('change', function(e) {
+        var cb = e.target;
+        if (cb.type !== 'checkbox') return;
+        var key = cb.dataset.key;
+        var axis = cb.dataset.axis;
+        var otherAxis = axis === 'left' ? 'right' : 'left';
+        var item = panelDiv.querySelector(
+            '[data-key="' + key + '"]');
+
+        if (cb.checked) {
+            // Uncheck the other axis for this sensor
+            var other = item.querySelector(
+                'input[data-axis="' + otherAxis + '"]');
+            if (other && other.checked) {
+                other.checked = false;
+            }
+            addOrUpdateSeries(key, axis);
+            if (item) item.classList.add('active');
+        } else {
+            removeSeries(key);
+            // Check if any checkbox still checked
+            var any = item.querySelector(
+                'input[type="checkbox"]:checked');
+            if (!any && item) {
+                item.classList.remove('active');
+            }
+            // Sync immediately for removals (synchronous)
+            syncUrl();
+            updateStats();
+            updateY2();
+        }
+        updateAllBadges();
+    });
+
+    // Clicking name toggles the L checkbox (once, outside buildTree)
+    panelDiv.addEventListener('click', function(e) {
+        var name = e.target.closest('.device-name');
+        if (!name) return;
+        var item = name.closest('.sensor-item');
+        if (!item) return;
+        var lcb = item.querySelector(
+            'input[data-axis="left"]');
+        if (lcb) {
+            lcb.checked = !lcb.checked;
+            lcb.dispatchEvent(
+                new Event('change', {bubbles: true}));
+        }
+    });
 
     function updateAllBadges() {
         var groups = panelDiv.querySelectorAll('.sensor-group');
