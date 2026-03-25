@@ -2,7 +2,10 @@
 
 from typing import Any
 
+import structlog
 from psycopg import AsyncConnection
+
+logger = structlog.get_logger()
 
 
 async def upsert_readings(
@@ -95,3 +98,16 @@ async def rebuild_daily_coverage(conn: AsyncConnection) -> int:
         await cur.execute("SELECT count(*) FROM daily_coverage")
         row = await cur.fetchone()
         return row[0] if row else 0
+
+
+async def refresh_sensor_summary(pool: Any) -> None:
+    """Refresh the sensors_daily_summary continuous aggregate.
+
+    Call this after syncing new data so the cagg is immediately up to date.
+    """
+    async with pool.connection() as conn:
+        await conn.set_autocommit(True)
+        await conn.execute(
+            "CALL refresh_continuous_aggregate('sensors_daily_summary', NULL, NULL)"
+        )
+    logger.info("sensors_daily_summary_refreshed")

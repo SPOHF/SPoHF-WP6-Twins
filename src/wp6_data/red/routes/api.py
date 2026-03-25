@@ -27,7 +27,10 @@ async def list_sensors() -> list[dict[str, str]]:
     for device_id, info in sorted(devices.items()):
         for measurement in sorted(info["measurements"]):
             result.append({"device": device_id, "sensor": measurement})
-    return result
+    return JSONResponse(
+        content=result,
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @router.get("/series")

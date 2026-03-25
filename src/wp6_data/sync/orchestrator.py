@@ -17,6 +17,7 @@ from wp6_data.db import (
     ensure_schema,
     get_pool,
     init_pool,
+    refresh_sensor_summary,
     upsert_daily_coverage,
     upsert_readings,
 )
@@ -33,7 +34,7 @@ logger = structlog.get_logger()
 
 BATCH_SIZE = 1000  # Records per transaction
 FULL_SYNC_START = datetime(2024, 1, 1, tzinfo=UTC)
-INCREMENTAL_LOOKBACK_DAYS = 30
+INCREMENTAL_LOOKBACK_DAYS = 7
 CONSECUTIVE_DUPE_WINDOW_THRESHOLD = 3
 
 
@@ -122,6 +123,9 @@ class SyncOrchestrator:
                 except Exception as e:
                     logger.exception("endpoint_sync_failed", endpoint=endpoint)
                     stats["errors"].append(f"{endpoint}: {e}")
+
+            # Refresh the continuous aggregate so dashboards see new data
+            await refresh_sensor_summary(pool)
 
             stats["duration_seconds"] = (
                 datetime.now(UTC) - start_time

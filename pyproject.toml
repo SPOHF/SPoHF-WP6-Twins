@@ -7,6 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "aiomysql>=0.2",
     "authlib>=1.3",
+    "cachetools>=5.5",
     "fastapi>=0.128.0",
     "httpx>=0.28",
     "itsdangerous>=2.1",

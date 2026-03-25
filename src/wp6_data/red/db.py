@@ -112,8 +112,8 @@ class MySQLConnection:
             self.pool.close()
             await self.pool.wait_closed()
 
-    async def get_available_sensors(self) -> list[dict[str, Any]]:
-        """Get list of sensor tables with device counts and reading counts."""
+    async def _fetch_available_sensors(self) -> list[dict[str, Any]]:
+        """Query MySQL for sensor tables with device counts and reading counts."""
         if not self.pool:
             raise RuntimeError("Not connected")
 
@@ -139,20 +139,21 @@ class MySQLConnection:
 
         return sorted(sensors, key=lambda x: -x["readings"])
 
-    async def get_devices_for_table(self, table: str) -> list[str]:
-        """Get list of unique device IDs for a sensor table."""
-        if not self.pool:
-            raise RuntimeError("Not connected")
+    async def get_available_sensors(self) -> list[dict[str, Any]]:
+        """Get sensor list (cached via shared sensor summary)."""
+        from wp6_data.shared.sensor_summary import get_sensor_summary
 
+        return await get_sensor_summary("red", self._fetch_available_sensors)
+
+    async def get_devices_for_table(self, table: str) -> list[str]:
+        """Get list of unique device IDs for a sensor table (derived from cached device list)."""
         if table not in SENSOR_TABLES:
             raise ValueError(f"Unknown table: {table}")
 
-        async with self.pool.acquire() as conn, conn.cursor() as cursor:
-            await cursor.execute(
-                f"SELECT DISTINCT device_id FROM {table} ORDER BY device_id"
-            )
-            rows = await cursor.fetchall()
-            return [row[0] for row in rows]
+        all_devices = await self.get_all_devices()
+        return sorted(
+            did for did, info in all_devices.items() if table in info["tables"]
+        )
 
     async def get_readings_by_measurement(
         self,
@@ -219,12 +220,8 @@ class MySQLConnection:
             df = df.sort_values("time")
         return df
 
-    async def get_all_devices(self) -> dict[str, dict[str, list[str]]]:
-        """Get all device IDs across all tables with their available measurements.
-
-        Returns dict mapping device_id -> {"tables": [...], "measurements": [...]}.
-        A device may appear in multiple tables.
-        """
+    async def _fetch_all_devices(self) -> dict[str, dict[str, list[str]]]:
+        """Query MySQL for all device IDs across all tables with their measurements."""
         if not self.pool:
             raise RuntimeError("Not connected")
 
@@ -245,6 +242,12 @@ class MySQLConnection:
                         if m not in devices[device_id]["measurements"]:
                             devices[device_id]["measurements"].append(m)
         return devices
+
+    async def get_all_devices(self) -> dict[str, dict[str, list[str]]]:
+        """Get all devices with measurements (cached via shared sensor summary)."""
+        from wp6_data.shared.sensor_summary import get_sensor_summary
+
+        return await get_sensor_summary("red:devices", self._fetch_all_devices)
 
     async def get_readings_for_comparison(
         self,
@@ -445,16 +448,6 @@ class MySQLConnection:
             df["time"] = pd.to_datetime(df["time"], utc=True)
             df = df.sort_values("time")
         return df
-
-    async def get_par_devices(self) -> list[str]:
-        """Get list of device IDs that have PAR readings."""
-        if not self.pool:
-            raise RuntimeError("Not connected")
-
-        async with self.pool.acquire() as conn, conn.cursor() as cursor:
-            await cursor.execute("SELECT DISTINCT device_id FROM s2100 ORDER BY device_id")
-            rows = await cursor.fetchall()
-            return [row[0] for row in rows]
 
     async def get_weather_station_readings(
         self,
