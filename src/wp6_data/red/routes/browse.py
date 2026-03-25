@@ -39,6 +39,38 @@ async def measurement_view(
     return RedirectResponse(url=f"/chart?{urlencode(params)}")
 
 
+@router.get("/type/{sensor_type}")
+async def type_view(
+    sensor_type: str,
+    start: Annotated[date | None, Query()] = None,
+    end: Annotated[date | None, Query()] = None,
+) -> RedirectResponse:
+    """Redirect to unified chart with all measurements of a given type."""
+    if not deps.db:
+        return RedirectResponse(url="/chart")
+
+    # Find all measurement keys that belong to this type
+    type_map = deps.metadata.sensor_types()
+    measurements = type_map.get(sensor_type, [])
+    if not measurements:
+        return RedirectResponse(url="/chart")
+
+    series: list[str] = []
+    for measurement in measurements:
+        tables = MEASUREMENTS_TO_TABLES.get(measurement, [])
+        for table in tables:
+            devices = await deps.db.get_devices_for_table(table)
+            for device in devices:
+                series.append(f"{device}:{measurement}")
+
+    params: dict[str, str] = {"s": ",".join(series)}
+    if start:
+        params["start"] = start.isoformat()
+    if end:
+        params["end"] = end.isoformat()
+    return RedirectResponse(url=f"/chart?{urlencode(params)}")
+
+
 @router.get("/table/{table}")
 async def table_view(table: str) -> RedirectResponse:
     """Redirect to unified chart for a sensor table."""

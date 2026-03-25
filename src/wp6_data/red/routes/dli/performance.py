@@ -27,6 +27,7 @@ from wp6_data.shared import render_date_filter, render_page, utc_day_bounds
 
 router = APIRouter()
 
+PAGE_TITLE = "SPoHF Red - DLI Performance"
 
 @router.get("/performance", response_class=HTMLResponse)
 async def dli_performance(
@@ -35,13 +36,13 @@ async def dli_performance(
 ) -> str:
     """Compare predicted DLI (model hindcast) with actual sensor readings."""
     if not deps.db:
-        return render_page("DLI Performance - WP6 Red", "<h1>Database not connected</h1>",
+        return render_page(PAGE_TITLE, "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
     model = get_model()
     if not model.is_trained():
         return render_page(
-            "DLI Performance - WP6 Red",
+            PAGE_TITLE,
             "<h1>Model not trained</h1><p>Train the prediction model first.</p>",
             show_back_link=True, back_url="/dli",
         )
@@ -67,7 +68,7 @@ async def dli_performance(
             device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR], start=lamp_ref_dt, end=end_dt
         )
     except Exception as e:
-        return render_page("DLI Performance - WP6 Red", f"<h1>Error: {e}</h1>",
+        return render_page(PAGE_TITLE, f"<h1>Error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
     # Fetch weather data including lamp_ref_day for lamp inference
@@ -76,7 +77,7 @@ async def dli_performance(
         forecasts = await fetch_weather_for_range(client, lamp_ref_day, end)
         predicted_natural = predict_natural_dli_from_weather(model, forecasts)
     except Exception as e:
-        return render_page("DLI Performance - WP6 Red",
+        return render_page(PAGE_TITLE,
                           filter_html + f"<h1>Weather data error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
@@ -310,7 +311,7 @@ async def dli_performance(
     """
 
     return render_page(
-        "DLI Performance - WP6 Red",
+        PAGE_TITLE,
         content,
         extra_css=extra_css,
         show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",

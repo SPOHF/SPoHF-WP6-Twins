@@ -21,13 +21,14 @@ from wp6_data.shared import render_page
 
 router = APIRouter()
 
+PAGE_TITLE = "SPoHF Red - DLI Model Diagnostic"
 
 @router.get("/diagnostic", response_class=HTMLResponse)
 async def dli_model_diagnostic() -> str:
     """Diagnostic view to investigate model training data."""
     if not deps.db:
         return render_page(
-            "Model Diagnostic - WP6 Red",
+            PAGE_TITLE,
             "<h1>Database not connected</h1>",
             show_back_link=True, back_url="/dli/model",
         )
@@ -52,7 +53,7 @@ async def dli_model_diagnostic() -> str:
         outdoor_df = await deps.db.get_weather_station_readings(start=start_dt, end=end_dt)
     except Exception as e:
         return render_page(
-            "Model Diagnostic - WP6 Red",
+            PAGE_TITLE,
             f"<h1>Error fetching data</h1><p>{e}</p>",
             show_back_link=True, back_url="/dli/model",
         )
@@ -297,7 +298,7 @@ async def dli_model_diagnostic() -> str:
     """
 
     return render_page(
-        "Model Diagnostic - WP6 Red",
+        PAGE_TITLE,
         content,
         show_back_link=True, back_url="/dli/model",
     )

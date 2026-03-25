@@ -183,7 +183,7 @@ class TestRenderUnifiedChartPage:
 
     def test_contains_grouping_toggle(self):
         html = render_unified_chart_page("Test", date(2026, 1, 1), date(2026, 1, 8))
-        assert "By metric" in html
+        assert "By type" in html
         assert "By device" in html
 
     def test_contains_clear_button(self):

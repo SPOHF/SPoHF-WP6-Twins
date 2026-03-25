@@ -68,7 +68,7 @@ async def _set_user_context(request: Request, call_next):
         _current_user.reset(token)
 
 
-app = FastAPI(title="WP6 Red - Sensor Dashboard", lifespan=lifespan)
+app = FastAPI(title="SPoHF Red Digital Twin", lifespan=lifespan)
 app.add_middleware(BaseHTTPMiddleware, dispatch=_set_user_context)
 app.add_middleware(SessionMiddleware, secret_key=oidc_settings.session_secret)
 

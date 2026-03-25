@@ -8,6 +8,7 @@ from wp6_data.config import RedSettings
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.dli import OpenMeteoClient
 from wp6_data.shared.export import get_export_metadata as _get_export_metadata
+from wp6_data.shared.metadata import MetadataRegistry
 
 load_dotenv()
 
@@ -15,6 +16,7 @@ load_dotenv()
 # __file__ is src/wp6_data/red/deps.py, so .parent x4 gets to wp6-data/
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 settings = RedSettings()
+metadata = MetadataRegistry(Path(__file__).parent / "metadata.yaml")
 
 # MySQL connection settings
 DB_HOST = settings.db_host

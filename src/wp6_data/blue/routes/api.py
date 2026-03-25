@@ -7,6 +7,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
+from wp6_data.blue import deps
 from wp6_data.blue.datasource import GetActiveSource
 from wp6_data.config import Settings
 from wp6_data.shared.auth import verify_session_user
@@ -28,11 +29,13 @@ async def list_sensors(
     except Exception:
         return JSONResponse(content={"error": "Database not connected"}, status_code=503)
 
+    flat = [
+        {"device": s["device"], "sensor": s["sensor"]}
+        for s in sorted(sensors, key=lambda s: (s["sensor"], s["device"]))
+    ]
+    enriched = deps.metadata.enrich_sensor_list(flat)
     return JSONResponse(
-        content=[
-            {"device": s["device"], "sensor": s["sensor"]}
-            for s in sorted(sensors, key=lambda s: (s["sensor"], s["device"]))
-        ],
+        content=enriched,
         headers={"Cache-Control": "private, max-age=300"},
     )
 

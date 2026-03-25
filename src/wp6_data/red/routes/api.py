@@ -23,12 +23,13 @@ async def list_sensors() -> list[dict[str, str]]:
         return JSONResponse(content={"error": "Database not connected"}, status_code=503)
 
     devices = await deps.db.get_all_devices()
-    result: list[dict[str, str]] = []
+    flat: list[dict[str, str]] = []
     for device_id, info in sorted(devices.items()):
         for measurement in sorted(info["measurements"]):
-            result.append({"device": device_id, "sensor": measurement})
+            flat.append({"device": device_id, "sensor": measurement})
+    enriched = deps.metadata.enrich_sensor_list(flat)
     return JSONResponse(
-        content=result,
+        content=enriched,
         headers={"Cache-Control": "private, max-age=300"},
     )
 

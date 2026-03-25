@@ -1,0 +1,212 @@
+# Blue twin (blueberry farm) — device and sensor metadata.
+
+sensor_defaults:
+  soil_pH:
+    type: "soil"
+    unit: "pH"
+    alias: "pH"
+  soilTemperature:
+    type: "soil"
+    unit: "°C"
+    alias: "Soil Temp"
+  soilMoisture:
+    type: "soil"
+    unit: "%VWC"
+    alias: "Soil Moist"
+  soilConductivity:
+    type: "soil"
+    unit: "μS/cm"
+    alias: "Soil EC"
+  temperature:
+    type: "temperature"
+    unit: "°C"
+    alias: "Temp"
+  humidity:
+    type: "humidity"
+    unit: "%RH"
+    alias: "Hum"
+  par:
+    type: "photosynthetically active radiation (PAR)"
+    unit: "μmol/m²/s"
+    alias: "PAR"
+  leaf_moisture:
+    type: "leaf"
+    unit: ""
+    alias: "Leaf Wet"
+  leaf_temperature:
+    type: "leaf"
+    unit: "°C"
+    alias: "Leaf Temp"
+  airTemperature:
+    type: "temperature"
+    unit: "°C"
+    alias: "Air Temp"
+  atmosphericPressure:
+    type: "pressure"
+    unit: "hPa"
+    alias: "Pressure"
+  battery:
+    type: "diagnostics"
+    unit: "V"
+    alias: "Battery"
+  inputVoltage:
+    type: "diagnostics"
+    unit: "V"
+    alias: "Input V"
+  lightningStrikes:
+    type: "lightning"
+    unit: "count"
+    alias: "Lightning"
+  precipitation:
+    type: "precipitation"
+    unit: "mm"
+    alias: "Rain"
+  solarRadiation:
+    type: "radiation"
+    unit: "W/m²"
+    alias: "Solar Rad"
+  vaporPressure:
+    type: "pressure"
+    unit: "kPa"
+    alias: "Vapor P"
+  windDirection:
+    type: "wind"
+    unit: "°"
+    alias: "Wind Dir"
+  windSpeed:
+    type: "wind"
+    unit: "m/s"
+    alias: "Wind Spd"
+  windspeedGust:
+    type: "wind"
+    unit: "m/s"
+    alias: "Gust"
+
+devices:
+  "PH2 | 4D25":
+    type: "pH sensor"
+
+  "PH1 | 4D1D":
+    type: "pH sensor"
+
+  "PH3 | 4D20":
+    type: "pH sensor"
+
+  "SPoHF_EC-BV_rij1":
+    position: "Row 1"
+    type: "EC/BV sensor"
+
+  "SPoHF_EC-BV_rij2":
+    position: "Row 2"
+    type: "EC/BV sensor"
+
+  "SPoHF_EC-BV_rij3":
+    position: "Row 3"
+    type: "EC/BV sensor"
+
+  "SPoHF_EC-BV_rij4":
+    position: "Row 4"
+    type: "EC/BV sensor"
+
+  "SPoHF_EC-BV_rij5":
+    position: "Row 5"
+    type: "EC/BV sensor"
+
+  "01 | 0E5E | BV + EC + BT":
+    type: "Soil sensor"
+
+  "02 | 0E4F | BV + EC + BT":
+    type: "Soil sensor"
+
+  "03 | 0E09 | BV + EC + BT":
+    type: "Soil sensor"
+
+  "04 | 0E69 | BV + EC + BT":
+    type: "Soil sensor"
+
+  "BV + BT + EC | Nr. 6":
+    type: "Soil sensor"
+
+  "366D | LT + LV | Rij 1 Onder | 5":
+    position: "Row 1"
+    type: "Climate sensor"
+    sensors:
+      temperature:
+        intention: "Air temperature, lower canopy"
+      humidity:
+        intention: "Air humidity, lower canopy"
+
+  "366F | LT + LV | Rij 1 Boven | 6":
+    position: "Row 1"
+    type: "Climate sensor"
+    sensors:
+      temperature:
+        intention: "Air temperature, upper canopy"
+      humidity:
+        intention: "Air humidity, upper canopy"
+
+  "3670 | LT + LV | Rij 3 Onder | 3":
+    position: "Row 3"
+    type: "Climate sensor"
+    sensors:
+      temperature:
+        intention: "Air temperature, lower canopy"
+      humidity:
+        intention: "Air humidity, lower canopy"
+
+  "3671 | LT + LV | Rij 3 Boven | 4":
+    position: "Row 3"
+    type: "Climate sensor"
+    sensors:
+      temperature:
+        intention: "Air temperature, upper canopy"
+      humidity:
+        intention: "Air humidity, upper canopy"
+
+  "3672 | LT + LV | Rij 5 onder | 1":
+    position: "Row 5"
+    type: "Climate sensor"
+    sensors:
+      temperature:
+        intention: "Air temperature, lower canopy"
+      humidity:
+        intention: "Air humidity, lower canopy"
+
+  "366E | LT + LV | Rij 5 boven | 2":
+    position: "Row 5"
+    type: "Climate sensor"
+    sensors:
+      temperature:
+        intention: "Air temperature, upper canopy"
+      humidity:
+        intention: "Air humidity, upper canopy"
+
+  "3672 | PAR":
+    type: "PAR sensor"
+    sensors:
+      par:
+        intention: "Photosynthetically active radiation"
+
+  "DF1D | BN + BT | Midden control":
+    type: "Leaf sensor"
+    sensors:
+      leaf_moisture:
+        intention: "Leaf wetness, middle control"
+      leaf_temperature:
+        intention: "Leaf temperature, middle control"
+
+  "DF1C | BN + BT | Zijkant Biologisch":
+    type: "Leaf sensor"
+    sensors:
+      leaf_moisture:
+        intention: "Leaf wetness, side organic"
+      leaf_temperature:
+        intention: "Leaf temperature, side organic"
+
+  "weatherstation":
+    type: "Weather station"
+    sensors:
+      airTemperature:
+        intention: "Outdoor air temperature"
+      solarRadiation:
+        intention: "Outdoor solar radiation"

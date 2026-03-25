@@ -14,6 +14,7 @@ from wp6_data.shared.auth import verify_session_user
 
 router = APIRouter(dependencies=[Depends(verify_session_user)])
 
+PAGE_TITLE = "SPoHF Red"
 
 @router.get("/chart", response_class=HTMLResponse)
 async def unified_chart(
@@ -22,7 +23,7 @@ async def unified_chart(
 ) -> str:
     """Unified interactive chart page with side panel sensor selection."""
     start, end, _, _ = resolve_date_range(start, end)
-    return render_unified_chart_page("Chart - WP6 Red", start, end)
+    return render_unified_chart_page(PAGE_TITLE, start, end)
 
 
 @router.get("/chart/{table}")

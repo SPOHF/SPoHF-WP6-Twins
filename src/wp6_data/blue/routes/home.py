@@ -6,11 +6,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
+from wp6_data.blue import deps
 from wp6_data.blue.datasource import GetActiveSource
 from wp6_data.blue.deps import get_export_metadata
-from wp6_data.shared import render_card, render_page, render_table
+from wp6_data.shared import build_home_tables, render_card, render_page
 from wp6_data.shared.auth import verify_session_user
-from wp6_data.shared.export import render_download_link
 
 router = APIRouter(dependencies=[Depends(verify_session_user)])
 
@@ -29,44 +29,24 @@ async def home(
     else:
         available_exports = {}
 
-    # Group by sensor tag: total readings
-    sensor_tags: dict[str, int] = {}
-    # Group by device: set of sensor tags + total readings
-    device_info: dict[str, dict] = {}
+    # Normalize into common format: {device: {sensors, readings}}
+    device_data: dict[str, dict] = {}
     for s in sensors:
-        tag = s["sensor"]
-        device = s["device"]
-        readings = s["readings"]
-        sensor_tags[tag] = sensor_tags.get(tag, 0) + readings
-        info = device_info.setdefault(device, {"tags": set(), "readings": 0})
-        info["tags"].add(tag)
-        info["readings"] += readings
+        info = device_data.setdefault(
+            s["device"], {"sensors": set(), "readings": 0},
+        )
+        info["sensors"].add(s["sensor"])
+        info["readings"] += s["readings"]
+    # Convert sensor sets to lists for the shared builder
+    for info in device_data.values():
+        info["sensors"] = list(info["sensors"])
 
-    # Sensor tags table
-    sensor_rows = [
-        [f'<a href="/chart/{tag}">{tag}</a>', f"{count:,}"]
-        for tag, count in sorted(sensor_tags.items(), key=lambda x: -x[1])
-    ]
-    sensor_table = render_table(["Sensor Tag", "Readings"], sensor_rows)
-
-    # Devices table (with download links only for spohf-datalake source)
-    headers = ["Device", "Sensors", "Readings"]
-    device_rows = []
-    for device, info in sorted(device_info.items()):
-        row = [
-            f'<a href="/device/{device}">{device}</a>',
-            ", ".join(sorted(info["tags"])),
-            f'{info["readings"]:,}',
-        ]
-        if show_exports:
-            row.append(render_download_link(device, available_exports))
-        device_rows.append(row)
-    if show_exports:
-        headers.append("Download")
-    device_table = render_table(headers, device_rows)
+    sensor_table, device_table = build_home_tables(
+        deps.metadata, device_data, available_exports,
+    )
 
     content = f"""
-        <h1>WP6 Blue - Sensor Dashboard</h1>
+        <h1>SPoHF Blue Digital Twin</h1>
 
         {render_card(
             "Interactive Chart",
@@ -75,7 +55,7 @@ async def home(
             "on a customizable dual-axis chart.",
         )}
 
-        {render_card("Browse by Sensor Tag", sensor_table)}
+        {render_card("Browse by Sensor Type", sensor_table)}
 
         {render_card("Browse by Device", device_table)}
 
@@ -87,4 +67,4 @@ async def home(
         )}
     """
 
-    return render_page("WP6 Blue - Sensor Dashboard", content, data_source=source_name)
+    return render_page("SPoHF Blue Digital Twin", content, data_source=source_name)

@@ -20,6 +20,8 @@ from wp6_data.shared import render_date_filter, render_page, resolve_date_range
 
 router = APIRouter()
 
+PAGE_TITLE = "SPoHF Red - DLI History"
+
 
 @router.get("/history", response_class=HTMLResponse)
 async def dli_history(
@@ -28,7 +30,7 @@ async def dli_history(
 ) -> str:
     """DLI chart comparing natural light vs total light over time."""
     if not deps.db:
-        return render_page("DLI History - WP6 Red", "<h1>Database not connected</h1>",
+        return render_page(PAGE_TITLE, "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
     start, end, start_dt, end_dt = resolve_date_range(start, end)
@@ -38,14 +40,14 @@ async def dli_history(
             device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR], start=start_dt, end=end_dt
         )
     except Exception as e:
-        return render_page("DLI History - WP6 Red", f"<h1>Error: {e}</h1>",
+        return render_page(PAGE_TITLE, f"<h1>Error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
     filter_html = render_date_filter(start, end)
 
     if par_df.empty:
         return render_page(
-            "DLI History - WP6 Red",
+            PAGE_TITLE,
             filter_html + "<h1>No PAR data found</h1>",
             show_back_link=True, back_url="/dli",
         )
@@ -55,7 +57,7 @@ async def dli_history(
 
     if dli_df.empty:
         return render_page(
-            "DLI History - WP6 Red",
+            PAGE_TITLE,
             filter_html + "<h1>Insufficient data for DLI calculation</h1>",
             show_back_link=True, back_url="/dli",
         )
@@ -221,7 +223,7 @@ async def dli_history(
     """
 
     return render_page(
-        "DLI History - WP6 Red",
+        PAGE_TITLE,
         content,
         extra_css=extra_css,
         show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",

@@ -1,62 +1,62 @@
-rownr,sensor_id,sensor_tag,device_name,device_id
-1,268ef1cd-0fa6-4265-bd71-af1b2d54a3b8,soil_pH,PH2 | 4D25,0b8fc9a9-f221-4c96-9e5a-5d8e3458a0d3
-2,84de4675-2e41-488a-a7b2-265645c69c25,soilTemperature,SPoHF_EC-BV_rij5,0ee1b6f0-0493-4d0f-b9ff-5f3c802dcb2d
-3,da9d76ac-d406-47f9-a5fa-5d6e90797468,soilMoisture,SPoHF_EC-BV_rij5,0ee1b6f0-0493-4d0f-b9ff-5f3c802dcb2d
-4,f83739c1-cde5-49aa-9b90-fcab4490fc47,soilConductivity,SPoHF_EC-BV_rij5,0ee1b6f0-0493-4d0f-b9ff-5f3c802dcb2d
-5,876ce569-e97c-4323-a916-8cafde7d007e,soil_pH,PH1 | 4D1D,1002170d-53e1-4f91-a84f-0b1db747ddc4
-6,35f27ebd-e678-4601-9d4f-aa665bd17010,soilTemperature,03 | 0E09 | BV + EC + BT,10bd2d6c-4e2b-4bcf-8f80-129c348a63d9
-7,6c1b6276-4278-4393-b22b-6077d15db6a3,soilConductivity,03 | 0E09 | BV + EC + BT,10bd2d6c-4e2b-4bcf-8f80-129c348a63d9
-8,ff220b11-2f11-457b-beea-499bebc01219,soilMoisture,03 | 0E09 | BV + EC + BT,10bd2d6c-4e2b-4bcf-8f80-129c348a63d9
-9,44ef124e-f40c-4cf4-a3db-48f12d9849ef,soil_pH,PH3 | 4D20,26394b7c-f309-4c82-af6e-bbca8cebbde5
-10,a0263dd0-deab-4897-ac33-52241ceff141,leaf_moisture,DF1D | BN + BT | Midden control,39009908-08fc-4719-a0c4-d253e294ff00
-11,df69623c-1684-4251-a3f2-ba3518e125fb,leaf_temperature,DF1D | BN + BT | Midden control,39009908-08fc-4719-a0c4-d253e294ff00
-12,60f285ee-431d-4238-9007-c022f2dcc678,humidity,366E | LT + LV | Rij 5 boven | 2,57fd41c1-a87e-4552-b89b-6bb7447cb374
-13,c4b0a015-dfbd-4ec7-adce-3e69b934e62a,temperature,366E | LT + LV | Rij 5 boven | 2,57fd41c1-a87e-4552-b89b-6bb7447cb374
-14,0ce53c08-71d3-45d6-9bf6-5f5bb1204955,soilTemperature,04 | 0E69 | BV + EC + BT,59e57c08-89bb-4bd1-a35a-09e8343db5a8
-15,aed214bc-a873-4d0c-8cad-3c5d8a9d189b,soilConductivity,04 | 0E69 | BV + EC + BT,59e57c08-89bb-4bd1-a35a-09e8343db5a8
-16,b63860fd-76b2-4ea8-a53b-97c73ed2158d,soilMoisture,04 | 0E69 | BV + EC + BT,59e57c08-89bb-4bd1-a35a-09e8343db5a8
-17,3b8a7931-0927-49a7-bc1d-d10091f98c03,humidity,3670 | LT + LV | Rij 3 Onder | 3,5dfaffc0-0cc9-47cd-a9bc-dce47b4204a9
-18,c477f5a0-2e3e-4450-a405-03100174d946,temperature,3670 | LT + LV | Rij 3 Onder | 3,5dfaffc0-0cc9-47cd-a9bc-dce47b4204a9
-20,85d6939c-881d-4001-b965-1171561ec8b1,soilTemperature,01 | 0E5E | BV + EC + BT,72e801d1-20ae-4daf-92d8-5477ae784458
-21,c81896cc-6e02-4292-9ba6-f3c1893ea21f,soilConductivity,01 | 0E5E | BV + EC + BT,72e801d1-20ae-4daf-92d8-5477ae784458
-22,d1da4572-bde7-4c5f-8a8e-9470156712b3,soilMoisture,01 | 0E5E | BV + EC + BT,72e801d1-20ae-4daf-92d8-5477ae784458
-23,79ff4920-2eed-4d01-b18b-6c7d96509014,humidity,366D | LT + LV | Rij 1 Onder | 5,732a3778-098f-4560-a997-c39d26c4e682
-24,ea553100-8554-4998-9044-a8702844cf7a,temperature,366D | LT + LV | Rij 1 Onder | 5,732a3778-098f-4560-a997-c39d26c4e682
-25,16ab5345-0be1-4cfc-94b0-568f0fef4c77,humidity,3672 | LT + LV | Rij 5 onder | 1,8d86de9c-d667-452d-bb25-bbf1a20a4847
-26,b97483fe-8194-4e36-b7bf-6f8c49d40a73,temperature,3672 | LT + LV | Rij 5 onder | 1,8d86de9c-d667-452d-bb25-bbf1a20a4847
-27,dbd5b7c2-8df0-42a7-94c7-c46b244985cf,humidity,366F | LT + LV | Rij 1 Boven | 6 ,a544c756-ee66-4322-b4ba-efad4ec890dd
-28,ed92fab2-dbbd-49f1-be65-dd79c2dcf27b,temperature,366F | LT + LV | Rij 1 Boven | 6 ,a544c756-ee66-4322-b4ba-efad4ec890dd
-29,03e8a7fa-0794-4e15-8810-ec4864cf6835,soilConductivity,SPoHF_EC-BV_rij1,abcfe73b-cf4b-420e-a8d3-613d9ddd5b54
-30,0d424139-b70d-4115-81b9-c2e303a7e0b8,soilMoisture,SPoHF_EC-BV_rij1,abcfe73b-cf4b-420e-a8d3-613d9ddd5b54
-31,3d63ae7c-6083-4c96-b8bb-bbd4eba1ac2c,soilTemperature,SPoHF_EC-BV_rij1,abcfe73b-cf4b-420e-a8d3-613d9ddd5b54
-32,6aaefc1f-cfe8-46fc-8da7-56dee85799f9,par,3672 | PAR,b386f703-eb06-4bf4-86f5-f2f4f6e57df7
-33,15207538-3454-44ee-8fa5-721153dbd2e3,soilConductivity,SPoHF_EC-BV_rij3,b6af293a-8e7d-4779-831c-5f22f84cb978
-34,d612258e-705c-4b20-89f7-dae7a103e9a8,soilTemperature,SPoHF_EC-BV_rij3,b6af293a-8e7d-4779-831c-5f22f84cb978
-35,d8941b56-cb57-4f5b-8fd3-dce4436a5e76,soilMoisture,SPoHF_EC-BV_rij3,b6af293a-8e7d-4779-831c-5f22f84cb978
-36,69e767b8-935a-4ad4-8c07-7875086694bd,humidity,3671 | LT + LV | Rij 3 Boven | 4,bed21111-e5ff-4ac6-9a5a-3f36e8b3e23e
-37,72ba57ef-f306-4039-a3c9-cdae524a151f,temperature,3671 | LT + LV | Rij 3 Boven | 4,bed21111-e5ff-4ac6-9a5a-3f36e8b3e23e
-39,16fc7442-388d-4e73-be29-246d7aab65a1,soilConductivity,SPoHF_EC-BV_rij2,d39a8504-cba6-40cb-b32c-08632f2d2111
-40,40fc5078-66a9-4fbe-8c5d-c1790649a033,soilMoisture,SPoHF_EC-BV_rij2,d39a8504-cba6-40cb-b32c-08632f2d2111
-41,7947ccaf-1374-4be7-8e03-5c414045ec4d,soilTemperature,SPoHF_EC-BV_rij2,d39a8504-cba6-40cb-b32c-08632f2d2111
-42,2a3c0f1c-2dcd-4434-99fa-d7c1a96c43ff,soilMoisture,BV + BT + EC | Nr. 6,e5d1f4ee-24c3-4f65-8892-0ea13a917d61
-43,30e813db-1e6f-4f33-b392-e43fd370772a,soilTemperature,BV + BT + EC | Nr. 6,e5d1f4ee-24c3-4f65-8892-0ea13a917d61
-44,f26b629c-49ca-4091-b167-4a54bc0e5bdb,soilConductivity,BV + BT + EC | Nr. 6,e5d1f4ee-24c3-4f65-8892-0ea13a917d61
-45,312576be-e598-4afe-aa14-a9324029813d,soilConductivity,SPoHF_EC-BV_rij4,e9c243e6-75aa-450b-9fd5-fe5519d4263a
-46,554154ba-00f1-4cec-ad08-3469325a9e8d,soilTemperature,SPoHF_EC-BV_rij4,e9c243e6-75aa-450b-9fd5-fe5519d4263a
-47,96a57e2d-25cf-4df9-9149-fab7fb2d7103,soilMoisture,SPoHF_EC-BV_rij4,e9c243e6-75aa-450b-9fd5-fe5519d4263a
-48,0e0703d4-350f-4d37-be5f-4f96df98b3f0,leaf_temperature,DF1C | BN + BT | Zijkant Biologisch,ec075f6f-f35d-4bce-8d22-46e551a7bc03
-49,93b4a3db-61c4-48d4-bbb0-86fe8771291d,leaf_moisture,DF1C | BN + BT | Zijkant Biologisch,ec075f6f-f35d-4bce-8d22-46e551a7bc03
-50,057c56f1-7235-4e39-9b52-807121c88f26,soilConductivity,02 | 0E4F | BV + EC + BT,fe39c47a-e729-4845-81c0-5093a1b7fe95
-51,25de66b5-6e92-406d-900e-56eba4193d54,soilMoisture,02 | 0E4F | BV + EC + BT,fe39c47a-e729-4845-81c0-5093a1b7fe95
-52,d9568380-8cda-4e33-b69a-4ed34160c7ce,soilTemperature,02 | 0E4F | BV + EC + BT,fe39c47a-e729-4845-81c0-5093a1b7fe95
-53,40b66be1-a498-41eb-98ff-070575651c63,airTemperature,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173
-54,7bcf5553-4abe-408e-9826-7d744ab173ea,atmosphericPressure,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173
-55,c6d9411f-61b6-4b49-a5bf-dcdc1cb61ce2,battery,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173
-56,a73d657c-9f7e-42ea-bc33-a8356b23f267,inputVoltage,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173
-57,0091dacf-8789-481d-bd02-67b57e4d0ad3,lightningStrikes,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173
-58,31766108-5df8-431c-9f60-09381fd0d2ee,precipitation,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173
-59,af30b365-89da-47ef-bf7f-54431770386f,solarRadiation,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173
+rownr,sensor_id,sensor_tag,device_name,device_id, Fertilizer
+1,268ef1cd-0fa6-4265-bd71-af1b2d54a3b8,soil_pH,PH2 | 4D25,0b8fc9a9-f221-4c96-9e5a-5d8e3458a0d3, Std
+2,84de4675-2e41-488a-a7b2-265645c69c25,soilTemperature,SPoHF_EC-BV_rij5,0ee1b6f0-0493-4d0f-b9ff-5f3c802dcb2d, K
+3,da9d76ac-d406-47f9-a5fa-5d6e90797468,soilMoisture,SPoHF_EC-BV_rij5,0ee1b6f0-0493-4d0f-b9ff-5f3c802dcb2d, K
+4,f83739c1-cde5-49aa-9b90-fcab4490fc47,soilConductivity,SPoHF_EC-BV_rij5,0ee1b6f0-0493-4d0f-b9ff-5f3c802dcb2d, K
+5,876ce569-e97c-4323-a916-8cafde7d007e,soil_pH,PH1 | 4D1D,1002170d-53e1-4f91-a84f-0b1db747ddc4, Org1
+6,35f27ebd-e678-4601-9d4f-aa665bd17010,soilTemperature,03 | 0E09 | BV + EC + BT,10bd2d6c-4e2b-4bcf-8f80-129c348a63d9, K1
+7,6c1b6276-4278-4393-b22b-6077d15db6a3,soilConductivity,03 | 0E09 | BV + EC + BT,10bd2d6c-4e2b-4bcf-8f80-129c348a63d9, K1
+8,ff220b11-2f11-457b-beea-499bebc01219,soilMoisture,03 | 0E09 | BV + EC + BT,10bd2d6c-4e2b-4bcf-8f80-129c348a63d9, K1
+9,44ef124e-f40c-4cf4-a3db-48f12d9849ef,soil_pH,PH3 | 4D20,26394b7c-f309-4c82-af6e-bbca8cebbde5, K2
+10,a0263dd0-deab-4897-ac33-52241ceff141,leaf_moisture,DF1D | BN + BT | Midden control,39009908-08fc-4719-a0c4-d253e294ff00, Std
+11,df69623c-1684-4251-a3f2-ba3518e125fb,leaf_temperature,DF1D | BN + BT | Midden control,39009908-08fc-4719-a0c4-d253e294ff00, Std
+12,60f285ee-431d-4238-9007-c022f2dcc678,humidity,366E | LT + LV | Rij 5 boven | 2,57fd41c1-a87e-4552-b89b-6bb7447cb374, K3
+13,c4b0a015-dfbd-4ec7-adce-3e69b934e62a,temperature,366E | LT + LV | Rij 5 boven | 2,57fd41c1-a87e-4552-b89b-6bb7447cb374, K3
+14,0ce53c08-71d3-45d6-9bf6-5f5bb1204955,soilTemperature,04 | 0E69 | BV + EC + BT,59e57c08-89bb-4bd1-a35a-09e8343db5a8, K3
+15,aed214bc-a873-4d0c-8cad-3c5d8a9d189b,soilConductivity,04 | 0E69 | BV + EC + BT,59e57c08-89bb-4bd1-a35a-09e8343db5a8, K3
+16,b63860fd-76b2-4ea8-a53b-97c73ed2158d,soilMoisture,04 | 0E69 | BV + EC + BT,59e57c08-89bb-4bd1-a35a-09e8343db5a8, K3
+17,3b8a7931-0927-49a7-bc1d-d10091f98c03,humidity,3670 | LT + LV | Rij 3 Onder | 3,5dfaffc0-0cc9-47cd-a9bc-dce47b4204a9, Std
+18,c477f5a0-2e3e-4450-a405-03100174d946,temperature,3670 | LT + LV | Rij 3 Onder | 3,5dfaffc0-0cc9-47cd-a9bc-dce47b4204a9, Std
+20,85d6939c-881d-4001-b965-1171561ec8b1,soilTemperature,01 | 0E5E | BV + EC + BT,72e801d1-20ae-4daf-92d8-5477ae784458, Ca1
+21,c81896cc-6e02-4292-9ba6-f3c1893ea21f,soilConductivity,01 | 0E5E | BV + EC + BT,72e801d1-20ae-4daf-92d8-5477ae784458, Ca1
+22,d1da4572-bde7-4c5f-8a8e-9470156712b3,soilMoisture,01 | 0E5E | BV + EC + BT,72e801d1-20ae-4daf-92d8-5477ae784458, Ca1
+23,79ff4920-2eed-4d01-b18b-6c7d96509014,humidity,366D | LT + LV | Rij 1 Onder | 5,732a3778-098f-4560-a997-c39d26c4e682, Org1
+24,ea553100-8554-4998-9044-a8702844cf7a,temperature,366D | LT + LV | Rij 1 Onder | 5,732a3778-098f-4560-a997-c39d26c4e682, Org1
+25,16ab5345-0be1-4cfc-94b0-568f0fef4c77,humidity,3672 | LT + LV | Rij 5 onder | 1,8d86de9c-d667-452d-bb25-bbf1a20a4847, K3
+26,b97483fe-8194-4e36-b7bf-6f8c49d40a73,temperature,3672 | LT + LV | Rij 5 onder | 1,8d86de9c-d667-452d-bb25-bbf1a20a4847, K3
+27,dbd5b7c2-8df0-42a7-94c7-c46b244985cf,humidity,366F | LT + LV | Rij 1 Boven | 6 ,a544c756-ee66-4322-b4ba-efad4ec890dd, Org1
+28,ed92fab2-dbbd-49f1-be65-dd79c2dcf27b,temperature,366F | LT + LV | Rij 1 Boven | 6 ,a544c756-ee66-4322-b4ba-efad4ec890dd, Org1
+29,03e8a7fa-0794-4e15-8810-ec4864cf6835,soilConductivity,SPoHF_EC-BV_rij1,abcfe73b-cf4b-420e-a8d3-613d9ddd5b54, Org1
+30,0d424139-b70d-4115-81b9-c2e303a7e0b8,soilMoisture,SPoHF_EC-BV_rij1,abcfe73b-cf4b-420e-a8d3-613d9ddd5b54, Org1
+31,3d63ae7c-6083-4c96-b8bb-bbd4eba1ac2c,soilTemperature,SPoHF_EC-BV_rij1,abcfe73b-cf4b-420e-a8d3-613d9ddd5b54, Org1
+32,6aaefc1f-cfe8-46fc-8da7-56dee85799f9,par,3672 | PAR,b386f703-eb06-4bf4-86f5-f2f4f6e57df7, 
+33,15207538-3454-44ee-8fa5-721153dbd2e3,soilConductivity,SPoHF_EC-BV_rij3,b6af293a-8e7d-4779-831c-5f22f84cb978, Std
+34,d612258e-705c-4b20-89f7-dae7a103e9a8,soilTemperature,SPoHF_EC-BV_rij3,b6af293a-8e7d-4779-831c-5f22f84cb978, Std
+35,d8941b56-cb57-4f5b-8fd3-dce4436a5e76,soilMoisture,SPoHF_EC-BV_rij3,b6af293a-8e7d-4779-831c-5f22f84cb978, Std
+36,69e767b8-935a-4ad4-8c07-7875086694bd,humidity,3671 | LT + LV | Rij 3 Boven | 4,bed21111-e5ff-4ac6-9a5a-3f36e8b3e23e, Std
+37,72ba57ef-f306-4039-a3c9-cdae524a151f,temperature,3671 | LT + LV | Rij 3 Boven | 4,bed21111-e5ff-4ac6-9a5a-3f36e8b3e23e, Std
+39,16fc7442-388d-4e73-be29-246d7aab65a1,soilConductivity,SPoHF_EC-BV_rij2,d39a8504-cba6-40cb-b32c-08632f2d2111, Org2
+40,40fc5078-66a9-4fbe-8c5d-c1790649a033,soilMoisture,SPoHF_EC-BV_rij2,d39a8504-cba6-40cb-b32c-08632f2d2111, Org2
+41,7947ccaf-1374-4be7-8e03-5c414045ec4d,soilTemperature,SPoHF_EC-BV_rij2,d39a8504-cba6-40cb-b32c-08632f2d2111, Org2
+42,2a3c0f1c-2dcd-4434-99fa-d7c1a96c43ff,soilMoisture,BV + BT + EC | Nr. 6,e5d1f4ee-24c3-4f65-8892-0ea13a917d61, Org1
+43,30e813db-1e6f-4f33-b392-e43fd370772a,soilTemperature,BV + BT + EC | Nr. 6,e5d1f4ee-24c3-4f65-8892-0ea13a917d61, Org1
+44,f26b629c-49ca-4091-b167-4a54bc0e5bdb,soilConductivity,BV + BT + EC | Nr. 6,e5d1f4ee-24c3-4f65-8892-0ea13a917d61, Org1
+45,312576be-e598-4afe-aa14-a9324029813d,soilConductivity,SPoHF_EC-BV_rij4,e9c243e6-75aa-450b-9fd5-fe5519d4263a, Ca
+46,554154ba-00f1-4cec-ad08-3469325a9e8d,soilTemperature,SPoHF_EC-BV_rij4,e9c243e6-75aa-450b-9fd5-fe5519d4263a, Ca
+47,96a57e2d-25cf-4df9-9149-fab7fb2d7103,soilMoisture,SPoHF_EC-BV_rij4,e9c243e6-75aa-450b-9fd5-fe5519d4263a, Ca
+48,0e0703d4-350f-4d37-be5f-4f96df98b3f0,leaf_temperature,DF1C | BN + BT | Zijkant Biologisch,ec075f6f-f35d-4bce-8d22-46e551a7bc03, Org1
+49,93b4a3db-61c4-48d4-bbb0-86fe8771291d,leaf_moisture,DF1C | BN + BT | Zijkant Biologisch,ec075f6f-f35d-4bce-8d22-46e551a7bc03, Org1
+50,057c56f1-7235-4e39-9b52-807121c88f26,soilConductivity,02 | 0E4F | BV + EC + BT,fe39c47a-e729-4845-81c0-5093a1b7fe95, Org2
+51,25de66b5-6e92-406d-900e-56eba4193d54,soilMoisture,02 | 0E4F | BV + EC + BT,fe39c47a-e729-4845-81c0-5093a1b7fe95, Org2
+52,d9568380-8cda-4e33-b69a-4ed34160c7ce,soilTemperature,02 | 0E4F | BV + EC + BT,fe39c47a-e729-4845-81c0-5093a1b7fe95, Org2
+53,40b66be1-a498-41eb-98ff-070575651c63,airTemperature,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173,
+54,7bcf5553-4abe-408e-9826-7d744ab173ea,atmosphericPressure,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173,
+55,c6d9411f-61b6-4b49-a5bf-dcdc1cb61ce2,battery,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173,
+56,a73d657c-9f7e-42ea-bc33-a8356b23f267,inputVoltage,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173,
+57,0091dacf-8789-481d-bd02-67b57e4d0ad3,lightningStrikes,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173,
+58,31766108-5df8-431c-9f60-09381fd0d2ee,precipitation,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173,
+59,af30b365-89da-47ef-bf7f-54431770386f,solarRadiation,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173,
 60,ac1ba4c7-4e54-4953-a017-0e4e7f9073ba,vaporPressure,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173
-61,fc9f3933-baa0-4f82-8f89-822e011c2a91,windDirection,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173
-62,282aac15-e308-4557-9523-1227ab597d13,windSpeed,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173
-63,3958e037-f80c-40cb-84cd-d107a54faa8a,windspeedGust,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173
+61,fc9f3933-baa0-4f82-8f89-822e011c2a91,windDirection,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173,
+62,282aac15-e308-4557-9523-1227ab597d13,windSpeed,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173,
+63,3958e037-f80c-40cb-84cd-d107a54faa8a,windspeedGust,weatherstation,3c92efda-b9ea-4c6f-a694-145957979173,

@@ -261,7 +261,7 @@ async def status(
     """
 
     return render_page(
-        "Status - WP6 Blue", content,
+        "SPoHF Blue - Status", content,
         show_back_link=True, extra_css=COVERAGE_CSS, data_source=source_name,
     )
 
@@ -307,7 +307,7 @@ async def maintenance(
     """
 
     return render_page(
-        "Maintenance - WP6 Blue", content,
+        "SPoHF Blue - Maintenance", content,
         show_back_link=True, data_source=source_name,
     )
 

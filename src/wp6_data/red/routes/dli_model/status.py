@@ -13,6 +13,8 @@ from wp6_data.shared import render_page
 
 router = APIRouter()
 
+PAGE_TITLE = "SPoHF Red - DLI Model Status"
+
 
 @router.get("/", response_class=HTMLResponse)
 async def dli_model_status() -> str:
@@ -159,7 +161,7 @@ async def dli_model_status() -> str:
     """
 
     return render_page(
-        "Light Model - WP6 Red",
+        PAGE_TITLE,
         content,
         show_back_link=True, back_url="/dli",
     )

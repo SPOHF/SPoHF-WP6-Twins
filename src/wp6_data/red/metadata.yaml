@@ -1,0 +1,95 @@
+# Red twin (tomato greenhouse) — device and sensor metadata.
+# Device keys match the device_id values from the MySQL tables.
+
+sensor_defaults:
+  temp:
+    type: "temperature"
+    unit: "°C"
+    alias: "Temp"
+  hum:
+    type: "humidity"
+    unit: "%RH"
+    alias: "Hum"
+  temp_ext:
+    type: "temperature"
+    unit: "°C"
+    alias: "Ext Temp"
+  hum_ext:
+    type: "humidity"
+    unit: "%RH"
+    alias: "Ext Hum"
+  lux:
+    type: "illuminance"
+    unit: "lx"
+    alias: "Lux"
+  par:
+    type: "photosynthetically active radiation (PAR)"
+    unit: "μmol/m²/s"
+    alias: "PAR"
+  co2:
+    type: "CO2 concentration"
+    unit: "ppm"
+    alias: "CO2"
+  air_press:
+    type: "pressure"
+    unit: "hPa"
+    alias: "Pressure"
+  wind_sp:
+    type: "speed"
+    unit: "m/s"
+    alias: "Wind Spd"
+  wind_dir:
+    type: "direction"
+    unit: "°"
+    alias: "Wind Dir"
+  rainfall:
+    type: "precipitation"
+    unit: "mm"
+    alias: "Rain"
+  pm25:
+    type: "particulate matter"
+    unit: "μg/m³"
+    alias: "PM2.5"
+  pm10:
+    type: "particulate matter"
+    unit: "μg/m³"
+    alias: "PM10"
+  adc_ch1:
+    type: "dendrometer"
+    unit: "mV"
+    alias: "Dendro CH1"
+  adc_ch2:
+    type: "dendrometer"
+    unit: "mV"
+    alias: "Dendro CH2"
+  adc_ch3:
+    type: "dendrometer"
+    unit: "mV"
+    alias: "Dendro CH3"
+  battery_pc:
+    type: "diagnostics"
+    unit: "%"
+    alias: "Battery"
+  rssi:
+    type: "diagnostics"
+    unit: "dBm"
+    alias: "RSSI"
+  snr:
+    type: "diagnostics"
+    unit: "dB"
+    alias: "SNR"
+
+devices:
+  "s2100-01-par":
+    description: "PAR above lamp level"
+    position: "B4"
+    sensors:
+      par:
+        intention: "Measures PAR above grow lamp"
+
+  "s2100-02-par":
+    description: "PAR at canopy level"
+    position: "B4"
+    sensors:
+      par:
+        intention: "Measures PAR at plant height"

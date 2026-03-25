@@ -28,6 +28,7 @@ from wp6_data.shared import make_schedule_chart, render_page, utc_day_bounds
 
 router = APIRouter()
 
+PAGE_TITLE = "SPoHF Red - DLI Forecast"
 
 @router.get("/forecast", response_class=HTMLResponse)
 async def dli_forecast(
@@ -36,7 +37,7 @@ async def dli_forecast(
 ) -> str:
     """Analyze light schedule with predictions based on inferred lamp schedule."""
     if not deps.db:
-        return render_page("DLI Forecast - WP6 Red", "<h1>Database not connected</h1>",
+        return render_page(PAGE_TITLE, "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
     # Default to a 5-day window centred on today (today-2 … today+2)
@@ -65,7 +66,7 @@ async def dli_forecast(
             device_ids=[sensor], start=lamp_ref_start, end=lamp_ref_end
         )
     except Exception as e:
-        return render_page("DLI Forecast - WP6 Red", f"<h1>Error: {e}</h1>",
+        return render_page(PAGE_TITLE, f"<h1>Error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
     # Calculate lamp reference day's DLI (also used for yesterday card when applicable)
@@ -113,7 +114,7 @@ async def dli_forecast(
             device_ids=[sensor], start=range_start, end=range_end
         )
     except Exception as e:
-        return render_page("DLI Forecast - WP6 Red", f"<h1>Error: {e}</h1>",
+        return render_page(PAGE_TITLE, f"<h1>Error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
     # Prepare actual data for chart (raw readings)
@@ -364,7 +365,7 @@ async def dli_forecast(
     """
 
     return render_page(
-        "DLI Forecast - WP6 Red",
+        PAGE_TITLE,
         content,
         extra_css=extra_css,
         show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",

@@ -1,11 +1,18 @@
 """Shared HTML templates for WP6 dashboards."""
 
+from __future__ import annotations
+
 from contextvars import ContextVar
 from datetime import UTC, date, datetime, timedelta
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from wp6_data.shared.metadata import MetadataRegistry
 
 _dashboard_id = "blue"
 _current_user: ContextVar[str | None] = ContextVar("_current_user", default=None)
 
+# TODO: a red and blue variant of the favicon icon
 
 def configure_dashboard(dashboard_id: str) -> None:
     """Set the dashboard identity (blue/red) for styling. Call once at startup."""
@@ -113,14 +120,211 @@ def render_card(title: str, body: str, *, description: str = "") -> str:
     return f"<article><h2>{title}</h2>{desc}{body}</article>"
 
 
-def render_table(headers: list[str], rows: list[list[str]]) -> str:
+def render_table(headers: list[str], rows: list[list[str]], *, sortable: bool = True) -> str:
     """Render an HTML table from headers and row data (cells may contain HTML)."""
-    thead = "<tr>" + "".join(f"<th>{h}</th>" for h in headers) + "</tr>"
+    thead = "<tr>" + "".join(
+        f'<th style="cursor:pointer" onclick="sortTable(this)">{h}</th>'
+        if sortable else f"<th>{h}</th>"
+        for h in headers
+    ) + "</tr>"
     tbody = "".join(
-        "<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>"
+        "<tr>" + "".join(
+            f'<td data-sort="{cell[1]}">{cell[0]}</td>'
+            if isinstance(cell, tuple)
+            else f"<td>{cell}</td>"
+            for cell in row
+        ) + "</tr>"
         for row in rows
     )
     return f"<table><thead>{thead}</thead><tbody>{tbody}</tbody></table>"
+
+
+def build_home_tables(
+    metadata: MetadataRegistry,
+    devices: dict[str, dict],
+    available_exports: dict[str, str],
+) -> tuple[str, str]:
+    """Build the sensor-type and device tables for a home page.
+
+    Args:
+        metadata: The twin's metadata registry.
+        devices: ``{device_id: {"sensors": [str], "readings": int}}``.
+        available_exports: Export availability dict for download links.
+
+    Returns:
+        ``(sensor_table_html, device_table_html)``
+    """
+    from wp6_data.shared.export import render_download_link
+
+    # --- Sensor type table ---
+    # Aggregate per-sensor: total readings + set of devices
+    sensor_readings: dict[str, int] = {}
+    sensor_devices: dict[str, set[str]] = {}
+    for device_id, info in devices.items():
+        for s in info["sensors"]:
+            sensor_readings[s] = sensor_readings.get(s, 0) + info["readings"]
+            sensor_devices.setdefault(s, set()).add(device_id)
+
+    sensor_entries = []
+    for key in sorted(sensor_readings, key=lambda k: -sensor_readings[k]):
+        sm = metadata.sensor_default(key)
+        sensor_entries.append({
+            "key": key,
+            "url": chart_url([
+                f"{d}:{key}" for d in sorted(sensor_devices.get(key, set()))
+            ]),
+            "type": sm.type,
+            "alias": sm.alias,
+            "unit": sm.unit,
+            "Devices": ", ".join(sorted(sensor_devices.get(key, set()))),
+            "Readings": f"{sensor_readings[key]:,}",
+        })
+    sensor_table = render_sensor_type_table(
+        sensor_entries, extra_headers=["Devices", "Readings"],
+    )
+
+    # --- Device table ---
+    # Pre-build position and device-type series for group links
+    position_series: dict[str, list[str]] = {}
+    dtype_series: dict[str, list[str]] = {}
+    for device_id, info in devices.items():
+        dm = metadata.device(device_id)
+        series = [f"{device_id}:{s}" for s in sorted(info["sensors"])]
+        if dm.position:
+            position_series.setdefault(dm.position, []).extend(series)
+        if dm.type:
+            dtype_series.setdefault(dm.type, []).extend(series)
+
+    device_entries = []
+    for device_id, info in sorted(devices.items()):
+        dm = metadata.device(device_id)
+        dev_series = [f"{device_id}:{s}" for s in sorted(info["sensors"])]
+        sensor_links = ", ".join(
+            f'<a href="{chart_url([f"{device_id}:{s}"])}">'
+            f"{metadata.sensor_default(s).alias or s}</a>"
+            for s in sorted(info["sensors"])
+        )
+        pos_html = (
+            f'<a href="{chart_url(position_series[dm.position])}">'
+            f"{dm.position}</a>"
+            if dm.position
+            else ""
+        )
+        type_html = (
+            f'<a href="{chart_url(dtype_series[dm.type])}">'
+            f"{dm.type}</a>"
+            if dm.type
+            else ""
+        )
+        device_entries.append({
+            "name": f'<a href="{chart_url(dev_series)}">{device_id}</a>',
+            "position": pos_html,
+            "type": type_html,
+            "sensors": sensor_links,
+            "readings": f'{info["readings"]:,}' if info["readings"] else "",
+            "Download": render_download_link(device_id, available_exports),
+        })
+    device_table = render_device_table(
+        device_entries, extra_columns=["Download"],
+    )
+
+    return sensor_table, device_table
+
+
+def chart_url(series: list[str]) -> str:
+    """Build a /chart?s=... URL from a list of device:sensor keys."""
+    from urllib.parse import urlencode
+
+    if not series:
+        return "/chart"
+    return f"/chart?{urlencode({'s': ','.join(series)})}"
+
+
+def render_sensor_type_table(
+    sensors: list[dict[str, str]],
+    *,
+    extra_headers: list[str] | None = None,
+) -> str:
+    """Render a sensor table grouped by sensor type.
+
+    Each dict in *sensors* should have keys:
+        - ``key``: sensor/measurement key (used as fallback label)
+        - ``url``: link target for the sensor name
+        - ``type``: sensor type for grouping (rows without type are skipped)
+        - ``alias``: display name (falls back to key)
+        - ``unit``: unit of measurement
+    Plus any extra keys matching *extra_headers*.
+    """
+    from collections import defaultdict as _defaultdict
+
+    type_groups: dict[str, list[dict[str, str]]] = _defaultdict(list)
+    for s in sensors:
+        if s.get("type"):
+            type_groups[s["type"]].append(s)
+
+    headers = ["Type", "Sensor", "Unit"]
+    if extra_headers:
+        headers.extend(extra_headers)
+
+    rows: list[list] = []
+    for sensor_type in sorted(type_groups):
+        items = type_groups[sensor_type]
+        for i, s in enumerate(items):
+            type_html = (
+                f'<strong><a href="/type/{sensor_type}">'
+                f"{sensor_type}</a></strong>"
+                if i == 0
+                else ""
+            )
+            # Tuple (html, sort_value) so empty cells still sort correctly
+            type_cell = (type_html, sensor_type)
+            row: list = [
+                type_cell,
+                f'<a href="{s["url"]}">{s.get("alias") or s["key"]}</a>',
+                s.get("unit", ""),
+            ]
+            if extra_headers:
+                for h in extra_headers:
+                    row.append(s.get(h, ""))
+            rows.append(row)
+
+    return render_table(headers, rows)
+
+
+def render_device_table(
+    devices: list[dict[str, str]],
+    *,
+    extra_columns: list[str] | None = None,
+) -> str:
+    """Render a uniform device table from metadata-enriched entries.
+
+    Each dict in *devices* should have keys:
+        - ``name``: device name/id (displayed as-is, may contain HTML links)
+        - ``position``: from device metadata
+        - ``type``: from device metadata
+        - ``sensors``: comma-separated sensor aliases
+        - ``readings``: formatted reading count
+    Plus any extra keys matching *extra_columns* headers.
+    """
+    headers = ["Device", "Position", "Type", "Sensors", "Readings"]
+    if extra_columns:
+        headers.extend(extra_columns)
+
+    rows: list[list[str]] = []
+    for d in devices:
+        row = [
+            d.get("name", ""),
+            d.get("position", ""),
+            d.get("type", ""),
+            d.get("sensors", ""),
+            d.get("readings", ""),
+        ]
+        if extra_columns:
+            for col in extra_columns:
+                row.append(d.get(col, ""))
+        rows.append(row)
+
+    return render_table(headers, rows)
 
 
 BASE_CSS = """
@@ -283,7 +487,11 @@ BASE_CSS = """
         background: var(--dashboard-primary);
         color: #fff;
     }
-    thead th { color: #fff; --pico-color: #fff; border-color: var(--dashboard-primary); }
+    thead th {
+        color: #fff; --pico-color: #fff;
+        border-color: var(--dashboard-primary); user-select: none;
+    }
+    thead th[onclick]:hover { opacity: 0.8; }
     tbody tr { transition: background 0.1s ease; }
     tbody tr:hover { background: var(--dashboard-surface-hover); }
 
@@ -498,6 +706,11 @@ BASE_CSS = """
     .group-btn:not(.active):hover {
         background: color-mix(in srgb, var(--dashboard-primary) 12%, transparent);
     }
+    .unit-badge {
+        font-size: 0.65rem;
+        opacity: 0.5;
+        margin-left: 2px;
+    }
     .sensor-item.active {
         background: var(--dashboard-surface-hover);
         border-radius: 4px;
@@ -553,6 +766,34 @@ SOURCE_TOGGLE_JS = """
     function switchSource(value) {
         document.cookie = 'wp6_blue_source=' + value + ';path=/;max-age=31536000';
         location.reload();
+    }
+"""
+
+TABLE_SORT_JS = """
+    function sortTable(th) {
+        var table = th.closest('table');
+        var tbody = table.querySelector('tbody');
+        var idx = Array.from(th.parentNode.children).indexOf(th);
+        var rows = Array.from(tbody.querySelectorAll('tr'));
+        var asc = th.dataset.sortDir !== 'asc';
+        // Reset all headers
+        th.parentNode.querySelectorAll('th').forEach(function(h) {
+            h.dataset.sortDir = '';
+            h.textContent = h.textContent.replace(/ [\\u25B2\\u25BC]$/, '');
+        });
+        th.dataset.sortDir = asc ? 'asc' : 'desc';
+        th.textContent += asc ? ' \\u25B2' : ' \\u25BC';
+        rows.sort(function(a, b) {
+            var ac = a.children[idx], bc = b.children[idx];
+            var at = ac.dataset.sort || ac.textContent.trim();
+            var bt = bc.dataset.sort || bc.textContent.trim();
+            // Try numeric comparison (strip commas for formatted numbers)
+            var an = parseFloat(at.replace(/,/g, ''));
+            var bn = parseFloat(bt.replace(/,/g, ''));
+            if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+            return asc ? at.localeCompare(bt) : bt.localeCompare(at);
+        });
+        rows.forEach(function(r) { tbody.appendChild(r); });
     }
 """
 
@@ -631,14 +872,25 @@ UNIFIED_CHART_JS = """
         });
     }
 
-    // Fetch sensor list and build tree
+    // Fetch sensor list (nested by device) and flatten for internal use
     var allSensors = [];
     var currentGrouping = 'measurement';
     fetch('/api/sensors')
         .then(function(r) { return r.json(); })
-        .then(function(sensors) {
-            allSensors = sensors;
-            buildTree(sensors, currentGrouping);
+        .then(function(nested) {
+            allSensors = [];
+            nested.forEach(function(d) {
+                var dm = d.meta || {};
+                d.sensors.forEach(function(s) {
+                    allSensors.push({
+                        device: d.device,
+                        sensor: s.sensor,
+                        device_meta: dm,
+                        sensor_meta: s.meta || {}
+                    });
+                });
+            });
+            buildTree(allSensors, currentGrouping);
             loadInitialSeries();
         });
 
@@ -657,10 +909,14 @@ UNIFIED_CHART_JS = """
     });
 
     function buildTree(sensors, groupBy) {
-        // Group sensors into {groupKey: [{device, sensor}, ...]}
+        // Group sensors into {groupKey: [{device, sensor, ...}, ...]}
         var groups = {};
         sensors.forEach(function(s) {
-            var key = groupBy === 'device' ? s.device : s.sensor;
+            var key;
+            if (groupBy === 'device') key = s.device;
+            else if (groupBy === 'position')
+                key = (s.device_meta && s.device_meta.position) || 'Ungrouped';
+            else key = (s.sensor_meta && s.sensor_meta.type) || s.sensor;
             if (!groups[key]) groups[key] = [];
             groups[key].push(s);
         });
@@ -694,8 +950,24 @@ UNIFIED_CHART_JS = """
                 + '</summary>';
             items.forEach(function(s) {
                 var key = s.device + ':' + s.sensor;
-                var label = groupBy === 'device'
-                    ? s.sensor : s.device;
+                var sm = s.sensor_meta || {};
+                var dm = s.device_meta || {};
+                // Display label: use alias if available
+                var label;
+                if (groupBy === 'device') label = sm.alias || s.sensor;
+                else if (groupBy === 'position') label = (sm.alias || s.sensor) + ' — ' + s.device;
+                else label = s.device + ' — ' + (sm.alias || s.sensor);
+                // Unit badge
+                var unitBadge = sm.unit
+                    ? ' <span class="unit-badge">' + sm.unit + '</span>'
+                    : '';
+                // Tooltip with metadata
+                var tipParts = [key];
+                if (dm.description) tipParts.push(dm.description);
+                if (dm.position) tipParts.push('Position: ' + dm.position);
+                if (sm.intention) tipParts.push(sm.intention);
+                if (dm.type) tipParts.push('Type: ' + dm.type);
+                var tip = tipParts.join(' | ');
                 var isLeft = !!checkedLeft[key];
                 var isRight = !!checkedRight[key];
                 var activeClass = (isLeft || isRight)
@@ -713,7 +985,7 @@ UNIFIED_CHART_JS = """
                     + (isRight ? ' checked' : '')
                     + '> R</label>';
                 html += '<span class="device-name" title="'
-                    + key + '">' + label + '</span>';
+                    + tip + '">' + label + unitBadge + '</span>';
                 html += '</div>';
             });
             html += '</details>';
@@ -808,6 +1080,15 @@ UNIFIED_CHART_JS = """
         });
     }
 
+    function sensorLabel(key) {
+        var s = allSensors.find(function(s) {
+            return s.device + ':' + s.sensor === key;
+        });
+        if (!s) return key;
+        var alias = (s.sensor_meta && s.sensor_meta.alias) || s.sensor;
+        return s.device + ' | ' + alias;
+    }
+
     function fetchAndAdd(key, axis, cb) {
         var parts = key.split(':');
         var device = parts[0];
@@ -834,7 +1115,7 @@ UNIFIED_CHART_JS = """
                 var trace = {
                     x: times,
                     y: values,
-                    name: key,
+                    name: sensorLabel(key),
                     mode: 'lines',
                     yaxis: axis === 'right' ? 'y2' : 'y'
                 };
@@ -900,10 +1181,29 @@ UNIFIED_CHART_JS = """
         var hasY2 = chartDiv.data.some(function(t) {
             return t.visible !== false && t.yaxis === 'y2';
         });
-        Plotly.relayout(chartDiv, {
+        var relayoutUpdate = {
             'yaxis2.visible': hasY2,
             'yaxis2.showticklabels': hasY2
+        };
+        // Update axis labels based on units
+        var leftUnits = {};
+        var rightUnits = {};
+        Object.keys(activeSeries).forEach(function(k) {
+            var s = allSensors.find(function(s) {
+                return s.device + ':' + s.sensor === k;
+            });
+            var unit = (s && s.sensor_meta && s.sensor_meta.unit) || '';
+            if (!unit) return;
+            if (activeSeries[k].axis === 'right') rightUnits[unit] = true;
+            else leftUnits[unit] = true;
         });
+        var leftKeys = Object.keys(leftUnits);
+        var rightKeys = Object.keys(rightUnits);
+        relayoutUpdate['yaxis.title.text'] = leftKeys.length === 1
+            ? leftKeys[0] : '';
+        relayoutUpdate['yaxis2.title.text'] = rightKeys.length === 1
+            ? rightKeys[0] : '';
+        Plotly.relayout(chartDiv, relayoutUpdate);
     }
 
     function updateStats() {
@@ -1111,13 +1411,14 @@ def render_page(
         </main>
         <script>{TOGGLE_JS}</script>
         <script>{SOURCE_TOGGLE_JS}</script>
+        <script>{TABLE_SORT_JS}</script>
     </body>
     </html>
     """
 
 
 def render_unified_chart_page(
-    title: str,
+    title_prefix: str,
     start: date,
     end: date,
     *,
@@ -1129,7 +1430,7 @@ def render_unified_chart_page(
     URL params ``s`` and ``r`` encode the selected series for bookmarking.
 
     Args:
-        title: Page title.
+        title_prefix: Page title prefix
         start: Start date for the date-range filter.
         end: End date for the date-range filter.
         data_source: Optional data source identifier (blue twin).
@@ -1152,9 +1453,11 @@ to {end.isoformat()}</summary>
                 >[x]</a></h4>
             <div class="group-toggle">
                 <button class="group-btn active" data-group="measurement"
-                    >By metric</button>
+                    >By type</button>
                 <button class="group-btn" data-group="device"
                     >By device</button>
+                <button class="group-btn" data-group="position"
+                    >By position</button>
             </div>
             <div id="sensor-panel">Loading sensors...</div>
         </div>
@@ -1170,6 +1473,10 @@ to {end.isoformat()}</summary>
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
     <script>{UNIFIED_CHART_JS}</script>
     """
+
+    title = f"{title_prefix} — Chart"
+    # TODO: a nice title would be nice both here and in the chart.
+    # e.g. "Temperature and humidity over time"
 
     return render_page(
         title,

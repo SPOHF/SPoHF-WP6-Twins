@@ -72,13 +72,14 @@ async def train_model_from_db(db: MySQLConnection, weather_client: OpenMeteoClie
     model.save()
     return stats
 
+PAGE_TITLE = "SPoHF Red - Train DLI Model"
 
 @router.post("/train", response_class=HTMLResponse)
 async def dli_model_train() -> str:
     """Train the two-stage light prediction model."""
     if not deps.db:
         return render_page(
-            "Train Model - WP6 Red",
+            PAGE_TITLE,
             "<h1>Database not connected</h1>",
             show_back_link=True, back_url="/dli/model",
         )
@@ -87,7 +88,7 @@ async def dli_model_train() -> str:
         stats = await train_model_from_db(deps.db, deps.get_weather_client())
     except Exception as e:
         return render_page(
-            "Train Model - WP6 Red",
+            PAGE_TITLE,
             f"<h1>Training Failed</h1><p>{e}</p>",
             show_back_link=True, back_url="/dli/model",
         )
@@ -132,7 +133,7 @@ async def dli_model_train() -> str:
     """
 
     return render_page(
-        "Model Trained - WP6 Red",
+        PAGE_TITLE,
         content,
         show_back_link=True, back_url="/dli/model",
     )

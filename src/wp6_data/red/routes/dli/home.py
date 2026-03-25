@@ -10,12 +10,13 @@ from wp6_data.shared.auth import is_admin
 
 router = APIRouter()
 
+PAGE_TITLE = "SPoHF Red - DLI Dashboard"
 
 @router.get("/", response_class=HTMLResponse)
 async def dli_home(request: Request) -> str:
     """DLI dashboard overview page."""
     if not deps.db:
-        return render_page("DLI - WP6 Red", "<h1>Database not connected</h1>", show_back_link=True)
+        return render_page(PAGE_TITLE, "<h1>Database not connected</h1>", show_back_link=True)
 
     # Get model status for the card
     model = get_model()
@@ -99,4 +100,4 @@ async def dli_home(request: Request) -> str:
         </div>
     """
 
-    return render_page("DLI Dashboard - WP6 Red", content, extra_css=extra_css, show_back_link=True)
+    return render_page(PAGE_TITLE, content, extra_css=extra_css, show_back_link=True)
