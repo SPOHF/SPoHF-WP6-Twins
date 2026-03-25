@@ -24,6 +24,7 @@ dependencies = [
     "structlog>=25.1",
     "tenacity>=9.0",
     "uvicorn>=0.40.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +44,9 @@ wp6-blue-export = "wp6_data.blue.export:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv]
+exclude-newer = "1 week"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/wp6_data"]
