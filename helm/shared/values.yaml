@@ -29,7 +29,7 @@ sync:
 # Yookr Sync CronJob (direct API)
 yookrSync:
   enabled: true
-  schedule: "*/15 * * * *"
+  schedule: "5,20,35,50 * * * *"  # 5 min offset from SPoHF sync
   mode: "incremental"  # "full" or "incremental"
   resources:
     requests:
