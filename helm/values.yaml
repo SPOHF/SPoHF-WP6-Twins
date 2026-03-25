@@ -13,11 +13,11 @@ dashboard:
   replicas: 1
   resources:
     requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
+      cpu: 200m
       memory: 512Mi
+    limits:
+      cpu: 750m
+      memory: 1Gi
   ingress:
     enabled: true
     host: ""  # Required: e.g., wp6.example.com
@@ -51,11 +51,11 @@ red:
     tag: ""  # If empty, uses main image.tag
   resources:
     requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
+      cpu: 200m
       memory: 512Mi
+    limits:
+      cpu: 750m
+      memory: 1Gi
   ingress:
     enabled: true
     host: ""  # Required if enabled: e.g., wp6-red.example.com
