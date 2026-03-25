@@ -103,17 +103,17 @@ async def fetch_data(
     return df
 
 
-async def fetch_available_sensors(project: str | None = None) -> list[dict[str, Any]]:
-    """Get list of sensors with reading counts and date range."""
+async def _fetch_sensors_from_cagg(project: str | None = None) -> list[dict[str, Any]]:
+    """Query the sensors_daily_summary continuous aggregate."""
     pool = get_pool()
     proj_clause, params = _project_filter(project)
 
     query = f"""
         SELECT device_name AS device, sensor_tag AS sensor,
-               count(*) AS readings,
-               min(time) AS earliest,
-               max(time) AS latest
-        FROM readings
+               sum(reading_count)  AS readings,
+               min(first_reading)  AS earliest,
+               max(last_reading)   AS latest
+        FROM sensors_daily_summary
         WHERE {proj_clause}
         GROUP BY device_name, sensor_tag
         ORDER BY readings DESC
@@ -122,6 +122,14 @@ async def fetch_available_sensors(project: str | None = None) -> list[dict[str, 
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(query, params)
         return await cur.fetchall()
+
+
+async def fetch_available_sensors(project: str | None = None) -> list[dict[str, Any]]:
+    """Get list of sensors with reading counts and date range (cached, via cagg)."""
+    from wp6_data.shared.sensor_summary import get_sensor_summary
+
+    cache_key = f"blue:{project or 'default'}"
+    return await get_sensor_summary(cache_key, _fetch_sensors_from_cagg, project=project)
 
 
 async def fetch_daily_coverage(project: str | None = None) -> list[dict[str, Any]]:

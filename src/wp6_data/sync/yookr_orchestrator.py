@@ -16,6 +16,7 @@ from wp6_data.db import (
     ensure_schema,
     get_pool,
     init_pool,
+    refresh_sensor_summary,
     upsert_daily_coverage,
     upsert_readings,
 )
@@ -28,7 +29,7 @@ logger = structlog.get_logger()
 BATCH_SIZE = 1000
 ENDPOINT_NAME = "yookr-direct"
 FULL_SYNC_START = datetime(2024, 1, 1, tzinfo=UTC)
-INCREMENTAL_LOOKBACK_DAYS = 30
+INCREMENTAL_LOOKBACK_DAYS = 7
 WINDOW_DAYS = 30  # Fetch one month at a time per sensor
 
 
@@ -193,6 +194,9 @@ class YookrSyncOrchestrator:
 
                 stats["duration_seconds"] = duration
                 self._log_summary(stats, sensor_stats)
+
+            # Refresh the continuous aggregate so dashboards see new data
+            await refresh_sensor_summary(pool)
 
         except Exception as e:
             logger.exception("yookr_sync_failed", error=str(e))

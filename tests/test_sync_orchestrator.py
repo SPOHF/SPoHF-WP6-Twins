@@ -9,6 +9,7 @@ import pytest
 
 from wp6_data.sync.orchestrator import (
     CONSECUTIVE_DUPE_WINDOW_THRESHOLD,
+    INCREMENTAL_LOOKBACK_DAYS,
     SyncOrchestrator,
     _generate_windows,
     ensure_utc,
@@ -39,8 +40,7 @@ class TestGenerateWindows:
 
     def test_incremental_mode_limited_lookback(self):
         windows = list(_generate_windows("incremental", 1))
-        # Should have ~30 windows (INCREMENTAL_LOOKBACK_DAYS)
-        assert 29 <= len(windows) <= 31
+        assert INCREMENTAL_LOOKBACK_DAYS - 1 <= len(windows) <= INCREMENTAL_LOOKBACK_DAYS + 1
 
     def test_windows_go_backwards(self):
         windows = list(_generate_windows("incremental", 1))
@@ -323,6 +323,10 @@ class TestRun:
                 new_callable=AsyncMock,
             ),
             patch(
+                "wp6_data.sync.orchestrator.refresh_sensor_summary",
+                new_callable=AsyncMock,
+            ),
+            patch(
                 "wp6_data.sync.orchestrator.close_pool",
                 new_callable=AsyncMock,
             ) as mock_close,
@@ -359,6 +363,10 @@ class TestRun:
                 new_callable=AsyncMock,
             ),
             patch(
+                "wp6_data.sync.orchestrator.refresh_sensor_summary",
+                new_callable=AsyncMock,
+            ),
+            patch(
                 "wp6_data.sync.orchestrator.close_pool",
                 new_callable=AsyncMock,
             ),
@@ -388,6 +396,10 @@ class TestRun:
             ),
             patch(
                 "wp6_data.sync.orchestrator.ensure_schema",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "wp6_data.sync.orchestrator.refresh_sensor_summary",
                 new_callable=AsyncMock,
             ),
             patch(

@@ -28,10 +28,13 @@ async def list_sensors(
     except Exception:
         return JSONResponse(content={"error": "Database not connected"}, status_code=503)
 
-    return [
-        {"device": s["device"], "sensor": s["sensor"]}
-        for s in sorted(sensors, key=lambda s: (s["sensor"], s["device"]))
-    ]
+    return JSONResponse(
+        content=[
+            {"device": s["device"], "sensor": s["sensor"]}
+            for s in sorted(sensors, key=lambda s: (s["sensor"], s["device"]))
+        ],
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @router.get("/series")
