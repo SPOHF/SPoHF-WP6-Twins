@@ -56,15 +56,15 @@ sensor_defaults:
     alias: "PM10"
   adc_ch1:
     type: "dendrometer"
-    unit: "mV"
+    unit: "V"
     alias: "Dendro CH1"
   adc_ch2:
     type: "dendrometer"
-    unit: "mV"
+    unit: "V"
     alias: "Dendro CH2"
   adc_ch3:
     type: "dendrometer"
-    unit: "mV"
+    unit: "V"
     alias: "Dendro CH3"
   battery_pc:
     type: "diagnostics"
