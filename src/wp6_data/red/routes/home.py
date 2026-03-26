@@ -50,12 +50,6 @@ async def home(user: str = Depends(verify_session_user)) -> str:
         <h1>{PAGE_TITLE}</h1>
 
         {render_card(
-            "Light Analysis (DLI)",
-            '<a href="/dli" role="button">DLI Dashboard</a>',
-            description="Daily Light Integral analysis and optimization tools.",
-        )}
-
-        {render_card(
             "Charts",
             '<div style="display:flex;gap:0.5rem">'
             '<a href="/chart" role="button">New Chart</a>'
@@ -65,9 +59,15 @@ async def home(user: str = Depends(verify_session_user)) -> str:
             "saved dashboard of bookmarked views.",
         )}
 
-        {render_card("Browse by Sensor Type", sensor_table)}
+        {render_card(
+            "Light Analysis (DLI)",
+            '<a href="/dli" role="button">DLI Dashboard</a>',
+            description="Daily Light Integral analysis and optimization tools.",
+        )}
 
-        {render_card("Browse by Device", device_table)}
+        {render_card("Explore by Sensor Type", sensor_table)}
+
+        {render_card("Explore by Device", device_table)}
 
         <a href="/static/red/sensor_locations.docx" download role="button" class="outline"
            style="width:100%">Download Sensor Device Identification (docx)</a>

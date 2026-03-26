@@ -58,9 +58,9 @@ async def home(
             "saved dashboard of bookmarked views.",
         )}
 
-        {render_card("Browse by Sensor Type", sensor_table)}
+        {render_card("Explore by Sensor Type", sensor_table)}
 
-        {render_card("Browse by Device", device_table)}
+        {render_card("Explore by Device", device_table)}
 
         {render_card(
             "Status &amp; Coverage",
