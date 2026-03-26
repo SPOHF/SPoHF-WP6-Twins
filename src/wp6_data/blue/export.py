@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from wp6_data.config import Settings
 from wp6_data.db import close_pool, get_pool, init_pool
 from wp6_data.db.schema import ensure_schema
+from wp6_data.shared.export import clear_export_dir
 
 log = structlog.get_logger()
 
@@ -87,6 +88,9 @@ async def run_export() -> None:
     log.info("export_started", export_dir=str(export_dir))
 
     export_dir.mkdir(parents=True, exist_ok=True)
+    removed = clear_export_dir(export_dir)
+    if removed:
+        log.info("cleared_stale_exports", files_removed=removed)
 
     # Initialise DB pool
     await init_pool(settings.tsdb_url)

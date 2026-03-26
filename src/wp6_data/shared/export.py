@@ -9,6 +9,22 @@ from fastapi.responses import FileResponse
 from wp6_data.shared.auth import verify_session_user
 
 
+def clear_export_dir(export_dir: Path) -> int:
+    """Remove all CSV and metadata files from the export directory.
+
+    Returns the number of files removed.
+    """
+    removed = 0
+    for f in export_dir.glob("*.csv"):
+        f.unlink()
+        removed += 1
+    metadata = export_dir / "metadata.json"
+    if metadata.exists():
+        metadata.unlink()
+        removed += 1
+    return removed
+
+
 def get_export_metadata(export_dir: Path) -> dict | None:
     """Get metadata about available CSV exports."""
     metadata_path = export_dir / "metadata.json"

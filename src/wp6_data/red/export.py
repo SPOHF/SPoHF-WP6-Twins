@@ -1,51 +1,59 @@
-"""CSV export job for WP6 Red - generates nightly sensor data exports."""
+"""CSV export job for WP6 Red - generates nightly per-device sensor data exports."""
 
 import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-import aiomysql
 import pandas as pd
 import structlog
 from dotenv import load_dotenv
 
 from wp6_data.config import RedSettings
-from wp6_data.red.db import COMMON_MEASUREMENTS, SENSOR_TABLES
+from wp6_data.red.db import COMMON_MEASUREMENTS, SENSOR_TABLES, MySQLConnection
+from wp6_data.shared.export import clear_export_dir
 
 log = structlog.get_logger()
 
 
-async def export_table(
-    pool: aiomysql.Pool,
-    table: str,
+async def export_device(
+    db: MySQLConnection,
+    device_id: str,
+    tables: list[str],
     output_dir: Path,
 ) -> Path | None:
-    """Export all data from a sensor table to CSV.
+    """Export all data for a device across its tables to CSV.
 
     Returns the path to the exported file, or None if no data.
     """
-    columns = SENSOR_TABLES[table]
-    all_columns = ["device_id", "received_at", *columns, *COMMON_MEASUREMENTS]
+    all_frames = []
 
-    async with pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cursor:
-        query = f"""
-            SELECT {', '.join(all_columns)}
-            FROM {table}
-            ORDER BY received_at ASC
-        """
-        await cursor.execute(query)
-        rows = await cursor.fetchall()
+    for table in tables:
+        columns = SENSOR_TABLES[table]
+        all_columns = ["received_at", *columns, *COMMON_MEASUREMENTS]
 
-    if not rows:
-        log.info("no_data", table=table)
+        async with db.pool.acquire() as conn, conn.cursor() as cursor:
+            query = f"""
+                SELECT {', '.join(all_columns)}
+                FROM {table}
+                WHERE device_id = %s
+                ORDER BY received_at ASC
+            """
+            await cursor.execute(query, (device_id,))
+            rows = await cursor.fetchall()
+
+        if rows:
+            all_frames.append(pd.DataFrame(rows, columns=all_columns))
+
+    if not all_frames:
+        log.info("no_data", device=device_id)
         return None
 
-    df = pd.DataFrame(rows)
-    output_path = output_dir / f"{table}.csv"
+    df = pd.concat(all_frames, ignore_index=True).sort_values("received_at")
+    output_path = output_dir / f"{device_id}.csv"
     df.to_csv(output_path, index=False)
 
-    log.info("exported", table=table, rows=len(df), path=str(output_path))
+    log.info("exported", device=device_id, rows=len(df), path=str(output_path))
     return output_path
 
 
@@ -55,48 +63,44 @@ async def run_export() -> None:
     export_dir = Path(settings.export_dir)
     log.info("export_started", export_dir=str(export_dir))
 
-    # Ensure export directory exists
     export_dir.mkdir(parents=True, exist_ok=True)
+    removed = clear_export_dir(export_dir)
+    if removed:
+        log.info("cleared_stale_exports", files_removed=removed)
 
-    # Connect to MySQL
-    db_host = settings.db_host
-    db_port = settings.db_port
-    db_name = settings.db_name
-    db_user = settings.db_user
-    db_password = settings.db_password
-
-    pool = await aiomysql.create_pool(
-        host=db_host,
-        port=db_port,
-        user=db_user,
-        password=db_password,
-        db=db_name,
-        autocommit=True,
+    db = MySQLConnection(
+        host=settings.db_host,
+        port=settings.db_port,
+        user=settings.db_user,
+        password=settings.db_password,
+        database=settings.db_name,
     )
+    await db.connect()
 
     try:
-        exported = {}
-        for table in SENSOR_TABLES:
-            try:
-                path = await export_table(pool, table, export_dir)
-                if path:
-                    exported[table] = datetime.now(UTC).isoformat()
-            except Exception as e:
-                log.error("export_failed", table=table, error=str(e))
+        all_devices = await db.get_all_devices()
+        log.info("found_devices", count=len(all_devices))
 
-        # Write metadata file with export timestamps per table
+        exported = {}
+        for device_id, info in all_devices.items():
+            try:
+                path = await export_device(db, device_id, info["tables"], export_dir)
+                if path:
+                    exported[device_id] = datetime.now(UTC).isoformat()
+            except Exception as e:
+                log.error("export_failed", device=device_id, error=str(e))
+
         metadata = {
             "exported_at": datetime.now(UTC).isoformat(),
-            "tables": exported,
+            "devices": exported,
         }
         metadata_path = export_dir / "metadata.json"
         metadata_path.write_text(json.dumps(metadata, indent=2))
 
-        log.info("export_completed", tables=list(exported.keys()))
+        log.info("export_completed", devices=list(exported.keys()))
 
     finally:
-        pool.close()
-        await pool.wait_closed()
+        await db.close()
 
 
 def main() -> None:

@@ -30,6 +30,8 @@ htmlcov/
 .models/
 # Exported data
 exports/
+red-exports/
+blue-exports/
 
 # Pesky temp microsoft files
 ~$*.docx

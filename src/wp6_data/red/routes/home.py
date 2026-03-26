@@ -21,7 +21,7 @@ async def home(user: str = Depends(verify_session_user)) -> str:
     all_devices = await deps.db.get_all_devices()
     sensors = await deps.db.get_available_sensors()
     export_meta = deps.get_export_metadata()
-    available_exports = export_meta.get("tables", {}) if export_meta else {}
+    available_exports = export_meta.get("devices", {}) if export_meta else {}
 
     # Build table → readings lookup for per-device reading estimates
     table_readings: dict[str, int] = {}
