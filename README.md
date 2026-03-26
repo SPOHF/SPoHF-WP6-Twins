@@ -41,6 +41,8 @@ uv run python -m wp6_data --yookr                     # Yookr direct sync
 # 4. Start dashboards
 uv run python -m wp6_data.blue.dashboard  # Blue dashboard (port 8000)
 uv run python -m wp6_data.red.dashboard   # Red dashboard (port 8000)
+# alternatively, run both dashboards together with hot reloading (port 8000 for blue, 8001 for red):
+./scripts/dev.sh
 ```
 
 ```bash
