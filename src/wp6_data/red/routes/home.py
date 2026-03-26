@@ -56,10 +56,13 @@ async def home(user: str = Depends(verify_session_user)) -> str:
         )}
 
         {render_card(
-            "Interactive Chart",
-            '<a href="/chart" role="button">Chart</a>',
-            description="Select any sensors and measurements to plot "
-            "on a customizable dual-axis chart.",
+            "Charts",
+            '<div style="display:flex;gap:0.5rem">'
+            '<a href="/chart" role="button">New Chart</a>'
+            '<a href="/dashboard" role="button" class="outline">'
+            'My Dashboard</a></div>',
+            description="Create custom dual-axis charts or view your "
+            "saved dashboard of bookmarked views.",
         )}
 
         {render_card("Browse by Sensor Type", sensor_table)}

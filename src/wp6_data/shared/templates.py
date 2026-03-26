@@ -1304,6 +1304,326 @@ UNIFIED_CHART_JS = """
 })();
 """
 
+DASHBOARD_CSS = """
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    gap: 1rem;
+}
+.dashboard-card {
+    position: relative;
+}
+.dashboard-card .mini-chart {
+    height: 250px;
+    width: 100%;
+}
+.card-actions {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 1;
+}
+.card-actions .delete-btn {
+    padding: 0.1rem 0.4rem;
+    font-size: 1.2rem;
+    line-height: 1;
+}
+.card-title {
+    cursor: pointer;
+}
+.card-title::after {
+    content: ' \\270E';
+    opacity: 0.3;
+    font-size: 0.8em;
+}
+.card-link {
+    display: block;
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+}
+.rename-input {
+    margin-bottom: 0.5rem;
+}
+[data-theme="dark"] .mini-chart {
+    filter: invert(0.88) hue-rotate(180deg);
+}
+"""
+
+DASHBOARD_JS = """
+(function() {
+    var dashboardId = document.documentElement.dataset.dashboard || 'blue';
+    var STORAGE_KEY = 'wp6-dashboard-' + dashboardId;
+    var grid = document.getElementById('dashboard-grid');
+    var emptyMsg = document.getElementById('dashboard-empty');
+
+    function load() {
+        try {
+            var raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return { version: 1, charts: [] };
+            var data = JSON.parse(raw);
+            return data && data.charts ? data : { version: 1, charts: [] };
+        } catch (e) {
+            return { version: 1, charts: [] };
+        }
+    }
+
+    function save(data) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+        catch (e) { alert('Could not save dashboard: storage may be full.'); }
+    }
+
+    function resolveDate(chart) {
+        if (chart.dateMode === 'relative') {
+            var end = new Date();
+            var start = new Date();
+            start.setDate(start.getDate() - (chart.relativeDays || 7));
+            return {
+                start: start.toISOString().slice(0, 10),
+                end: end.toISOString().slice(0, 10)
+            };
+        }
+        return { start: chart.start, end: chart.end };
+    }
+
+    function buildChartUrl(chart) {
+        var dates = resolveDate(chart);
+        var params = new URLSearchParams();
+        if (chart.s) params.set('s', chart.s);
+        if (chart.r) params.set('r', chart.r);
+        params.set('start', dates.start);
+        params.set('end', dates.end);
+        return '/chart?' + params.toString();
+    }
+
+    function renderCard(chart) {
+        var article = document.createElement('article');
+        article.className = 'dashboard-card';
+        article.dataset.chartId = chart.id;
+
+        var dates = resolveDate(chart);
+        var dateLabel = chart.dateMode === 'relative'
+            ? 'Last ' + chart.relativeDays + ' days'
+            : dates.start + ' to ' + dates.end;
+
+        article.innerHTML =
+            '<div class="card-actions">' +
+                '<button class="delete-btn outline secondary"' +
+                ' title="Remove from dashboard">&times;</button>' +
+            '</div>' +
+            '<h4 class="card-title" title="Click to rename">' + escapeHtml(chart.title) + '</h4>' +
+            '<small>' + dateLabel + '</small>' +
+            '<div class="mini-chart"><progress></progress></div>' +
+            '<a href="' + buildChartUrl(chart) + '" class="card-link">Open in chart &rarr;</a>';
+
+        article.querySelector('.delete-btn').addEventListener('click', function() {
+            deleteChart(chart.id);
+            article.remove();
+            var data = load();
+            if (data.charts.length === 0) emptyMsg.style.display = 'block';
+        });
+
+        var titleEl = article.querySelector('.card-title');
+        titleEl.addEventListener('click', function() {
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.value = chart.title;
+            input.className = 'rename-input';
+            titleEl.replaceWith(input);
+            input.focus();
+            input.select();
+            function finishRename() {
+                var newTitle = input.value.trim() || chart.title;
+                renameChart(chart.id, newTitle);
+                var newH4 = document.createElement('h4');
+                newH4.className = 'card-title';
+                newH4.title = 'Click to rename';
+                newH4.textContent = newTitle;
+                input.replaceWith(newH4);
+                newH4.addEventListener('click', titleEl.onclick);
+                titleEl = newH4;
+            }
+            input.addEventListener('blur', finishRename);
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+                if (e.key === 'Escape') { input.value = chart.title; input.blur(); }
+            });
+        });
+
+        return article;
+    }
+
+    function loadMiniChart(chart, divElement) {
+        var dates = resolveDate(chart);
+        var allKeys = [];
+        if (chart.s) chart.s.split(',').forEach(function(k) {
+            allKeys.push({key: k, axis: 'left'});
+        });
+        if (chart.r) chart.r.split(',').forEach(function(k) {
+            allKeys.push({key: k, axis: 'right'});
+        });
+
+        var promises = allKeys.map(function(item) {
+            var parts = item.key.split(':');
+            var url = '/api/series?device=' + encodeURIComponent(parts[0]) +
+                '&sensor=' + encodeURIComponent(parts.slice(1).join(':')) +
+                '&start=' + dates.start + '&end=' + dates.end;
+            return fetch(url)
+                .then(function(r) { return r.json(); })
+                .then(function(json) {
+                    return {key: item.key, axis: item.axis,
+                        data: json.data || []};
+                })
+                .catch(function() {
+                    return {key: item.key, axis: item.axis, data: []};
+                });
+        });
+
+        Promise.all(promises).then(function(results) {
+            var traces = results.map(function(r) {
+                var trace = {
+                    x: r.data.map(function(d) { return d.time; }),
+                    y: r.data.map(function(d) { return d.value; }),
+                    name: r.key,
+                    mode: 'lines',
+                    yaxis: r.axis === 'right' ? 'y2' : 'y'
+                };
+                if (r.axis === 'right') trace.line = { dash: 'dash' };
+                return trace;
+            });
+            var hasRight = results.some(function(r) { return r.axis === 'right'; });
+            var layout = {
+                height: 250,
+                margin: { t: 10, b: 30, l: 40, r: hasRight ? 40 : 10 },
+                showlegend: false,
+                xaxis: { type: 'date' },
+                yaxis: {},
+                yaxis2: { overlaying: 'y', side: 'right', showgrid: false },
+                template: 'plotly_white',
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)'
+            };
+            divElement.innerHTML = '';
+            if (traces.every(function(t) { return t.x.length === 0; })) {
+                divElement.innerHTML =
+                    '<p style="text-align:center;' +
+                    'color:var(--pico-muted-color)">' +
+                    'No data available</p>';
+                return;
+            }
+            Plotly.newPlot(divElement, traces, layout, { displayModeBar: false, responsive: true });
+        });
+    }
+
+    function deleteChart(id) {
+        var data = load();
+        data.charts = data.charts.filter(function(c) { return c.id !== id; });
+        save(data);
+    }
+
+    function renameChart(id, newTitle) {
+        var data = load();
+        data.charts.forEach(function(c) { if (c.id === id) c.title = newTitle; });
+        save(data);
+    }
+
+    function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    var data = load();
+    if (data.charts.length === 0) {
+        emptyMsg.style.display = 'block';
+        return;
+    }
+    emptyMsg.style.display = 'none';
+    data.charts.forEach(function(chart) {
+        var card = renderCard(chart);
+        grid.appendChild(card);
+        loadMiniChart(chart, card.querySelector('.mini-chart'));
+    });
+})();
+"""
+
+SAVE_TO_DASHBOARD_JS = """
+(function() {
+    var dashboardId = document.documentElement.dataset.dashboard || 'blue';
+    var STORAGE_KEY = 'wp6-dashboard-' + dashboardId;
+    var saveBtn = document.getElementById('save-to-dashboard');
+    var dialog = document.getElementById('save-dialog');
+    if (!saveBtn || !dialog) return;
+
+    saveBtn.addEventListener('click', function() {
+        var params = new URLSearchParams(window.location.search);
+        var s = params.get('s') || '';
+        var r = params.get('r') || '';
+        if (!s && !r) { alert('Select some sensors first.'); return; }
+
+        var allKeys = (s + (r ? ',' + r : '')).split(',').filter(Boolean);
+        var suggested = allKeys.slice(0, 3).join(', ') + (allKeys.length > 3 ? ' ...' : '');
+        dialog.querySelector('#save-title').value = suggested;
+
+        var start = params.get('start');
+        var end = params.get('end');
+        var days = 7;
+        if (start && end) {
+            days = Math.round((new Date(end) - new Date(start)) / 86400000);
+        }
+        dialog.querySelector('#save-relative-days').value = days;
+        dialog.querySelector('#save-date-mode').checked = true;
+        dialog.querySelector('#save-days-group').style.display = '';
+
+        dialog.showModal();
+    });
+
+    dialog.querySelector('#save-date-mode').addEventListener('change', function() {
+        dialog.querySelector('#save-days-group').style.display = this.checked ? '' : 'none';
+    });
+
+    dialog.querySelector('#save-confirm').addEventListener('click', function() {
+        var params = new URLSearchParams(window.location.search);
+        var title = dialog.querySelector('#save-title').value.trim();
+        if (!title) { alert('Please enter a title.'); return; }
+
+        var isRelative = dialog.querySelector('#save-date-mode').checked;
+        var chart = {
+            id: Math.random().toString(36).slice(2, 10),
+            title: title,
+            s: params.get('s') || '',
+            r: params.get('r') || '',
+            dateMode: isRelative ? 'relative' : 'absolute',
+            relativeDays: parseInt(dialog.querySelector('#save-relative-days').value) || 7,
+            start: params.get('start') || '',
+            end: params.get('end') || '',
+            createdAt: new Date().toISOString()
+        };
+
+        var raw = localStorage.getItem(STORAGE_KEY);
+        var data;
+        try { data = raw ? JSON.parse(raw) : { version: 1, charts: [] }; }
+        catch (e) { data = { version: 1, charts: [] }; }
+        data.charts.push(chart);
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        } catch (e) {
+            alert('Could not save: storage may be full.');
+            dialog.close();
+            return;
+        }
+
+        dialog.close();
+        var origText = saveBtn.textContent;
+        saveBtn.textContent = 'Saved!';
+        setTimeout(function() { saveBtn.textContent = origText; }, 2000);
+    });
+
+    dialog.querySelector('#save-cancel').addEventListener('click', function() {
+        dialog.close();
+    });
+})();
+"""
+
 _DASHBOARD_NAMES = {"blue": "SPoHF Blue", "red": "SPoHF Red"}
 
 
@@ -1340,6 +1660,7 @@ def render_nav_bar(*, data_source: str | None = None) -> str:
         <div class="nav-links">
             <a href="/">Home</a>
             <a href="/chart">Chart</a>
+            <a href="/dashboard">Dashboard</a>
             {user_html}
             {source_html}
             <button id="theme-toggle" title="Toggle dark mode">
@@ -1464,14 +1785,36 @@ to {end.isoformat()}</summary>
         <div class="chart-main">
             <button class="panel-toggle outline" id="panel-toggle">
                 Hide controls</button>
+            <button class="panel-toggle outline" id="save-to-dashboard"
+                title="Save current chart view to dashboard">&#9734; Save</button>
             <div class="chart-stats" id="chart-stats"></div>
             <div class="chart-empty" id="chart-empty">
                 Select sensors from the panel to start charting</div>
             <div id="chart-area"></div>
         </div>
+    <dialog id="save-dialog">
+        <article>
+            <header>Save to Dashboard</header>
+            <label for="save-title">Title</label>
+            <input type="text" id="save-title" placeholder="Chart title">
+            <label>
+                <input type="checkbox" id="save-date-mode" checked>
+                Use rolling date range
+            </label>
+            <div id="save-days-group">
+                <label for="save-relative-days">Number of days</label>
+                <input type="number" id="save-relative-days" min="1" value="7">
+            </div>
+            <footer>
+                <button id="save-cancel" class="secondary">Cancel</button>
+                <button id="save-confirm">Save</button>
+            </footer>
+        </article>
+    </dialog>
     </div>
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
     <script>{UNIFIED_CHART_JS}</script>
+    <script>{SAVE_TO_DASHBOARD_JS}</script>
     """
 
     title = f"{title_prefix} — Chart"
@@ -1484,5 +1827,32 @@ to {end.isoformat()}</summary>
         show_logo=False,
         show_footer=False,
         show_back_link=True,
+        data_source=data_source,
+    )
+
+
+def render_dashboard_page(
+    title_prefix: str,
+    *,
+    data_source: str | None = None,
+) -> str:
+    """Render the dashboard page showing saved chart bookmarks as live mini-charts."""
+    content = f"""
+    <h2>Dashboard</h2>
+    <p><small>Your dashboard is stored in this browser's local storage
+    and won't appear on other devices.</small></p>
+    <p id="dashboard-empty" style="display:none">
+        No saved charts yet. <a href="/chart">Open the chart</a> and use
+        the save button to bookmark views here.</p>
+    <div class="dashboard-grid" id="dashboard-grid"></div>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script>{DASHBOARD_JS}</script>
+    """
+    return render_page(
+        f"{title_prefix} — Dashboard",
+        content,
+        show_logo=False,
+        show_footer=True,
+        extra_css=DASHBOARD_CSS,
         data_source=data_source,
     )
