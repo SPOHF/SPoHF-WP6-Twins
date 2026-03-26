@@ -56,19 +56,21 @@ async def home(
             'New Chart</a></div>',
             description="Your bookmarked charts in one view. "
             "Or create a new chart from scratch.",
-            card_class="card-primary",
+            card_class="card card-bg card-bg-chart",
         )}
-
-        {render_card("Explore by Sensor Type", sensor_table)}
-
-        {render_card("Explore by Device", device_table)}
 
         {render_card(
             "Status &amp; Coverage",
             '<a href="/status" role="button">View Status</a>',
             description="Sync status, data coverage timeline, "
             "and maintenance tools.",
+            card_class="card-bg card-bg-status",
         )}
+
+        {render_card("Explore by Sensor Type", sensor_table)}
+
+        {render_card("Explore by Device", device_table)}
+
     """
 
     return render_page("SPoHF Blue Digital Twin", content, data_source=source_name)

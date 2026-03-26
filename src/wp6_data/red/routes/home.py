@@ -57,13 +57,14 @@ async def home(user: str = Depends(verify_session_user)) -> str:
             'New Chart</a></div>',
             description="Your bookmarked charts in one view. "
             "Or create a new chart from scratch.",
-            card_class="card-primary",
+            card_class="card card-bg card-bg-chart",
         )}
 
         {render_card(
             "Light Analysis (DLI)",
             '<a href="/dli" role="button">DLI Dashboard</a>',
             description="Daily Light Integral analysis and optimization tools.",
+            card_class="card-bg card-bg-sun",
         )}
 
         {render_card("Explore by Sensor Type", sensor_table)}

@@ -442,6 +442,7 @@ BASE_CSS = """
 
     /* --- Cards / articles --- */
     article {
+        position: relative; overflow: hidden;
         padding: 1rem; border-radius: 12px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
         transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -451,6 +452,33 @@ BASE_CSS = """
         box-shadow: 0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
     }
     .card-primary { border: 2px solid var(--pico-primary-background); }
+
+    /* Card background illustrations */
+    .card-bg::after {
+        content: ''; position: absolute;
+        top: -10%; bottom: -10%; left: 0; right: -3%;
+        pointer-events: none; z-index: 0;
+        background-size: auto 100%;
+        background-position: center right;
+        background-repeat: no-repeat;
+        -webkit-mask-image: linear-gradient(to right,
+            transparent 15%, black 65%);
+        mask-image: linear-gradient(to right,
+            transparent 15%, black 65%);
+    }
+    .card-bg > * { position: relative; z-index: 1; }
+    html:not([data-theme="dark"]) .card-bg::after {
+        filter: invert(1);
+    }
+    .card-bg-chart::after {
+        background-image: url(/static/cards/line_chart.svg);
+    }
+    .card-bg-sun::after {
+        background-image: url(/static/cards/sun.svg);
+    }
+    .card-bg-status::after {
+        background-image: url(/static/cards/status.svg);
+    }
 
     /* --- Stats cards --- */
     .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
@@ -487,13 +515,16 @@ BASE_CSS = """
     .date-inputs button { width: auto; padding: 0.25rem 0.75rem; margin-bottom: 0; }
 
     /* --- Tables --- */
-    thead {
-        background: var(--dashboard-primary);
-        color: #fff;
+    :root[data-dashboard] thead {
+        background: transparent;
     }
-    thead th {
-        color: #fff; --pico-color: #fff;
-        border-color: var(--dashboard-primary); user-select: none;
+    :root[data-dashboard] thead th {
+        background: transparent;
+        color: var(--dashboard-primary);
+        --pico-color: var(--dashboard-primary);
+        border-bottom: 2px solid var(--dashboard-primary);
+        user-select: none;
+        font-weight: 700;
     }
     thead th[onclick]:hover { opacity: 0.8; }
     tbody tr { transition: background 0.1s ease; }
