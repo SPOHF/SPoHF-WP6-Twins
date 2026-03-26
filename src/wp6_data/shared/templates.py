@@ -448,8 +448,10 @@ BASE_CSS = """
         transition: transform 0.15s ease, box-shadow 0.15s ease;
     }
     article:hover {
-        transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
+    }
+    [data-theme="dark"] article:hover {
+        box-shadow: 0 4px 12px rgba(255,255,255,0.08), 0 2px 4px rgba(255,255,255,0.05);
     }
     .card-primary { border: 2px solid var(--pico-primary-background); }
 
@@ -491,7 +493,6 @@ BASE_CSS = """
                                              var(--dashboard-gradient-end));
         color: #fff; border: none;
     }
-    .stats-grid article:hover { transform: translateY(-2px); }
     .stats-grid article small { color: rgba(255,255,255,0.85); }
     .stat-value { font-size: 1.6em; font-weight: 800; color: #fff; }
     .success { color: #16a34a !important; }
