@@ -50,13 +50,14 @@ async def home(user: str = Depends(verify_session_user)) -> str:
         <h1>{PAGE_TITLE}</h1>
 
         {render_card(
-            "Charts",
+            "Dashboard",
             '<div style="display:flex;gap:0.5rem">'
-            '<a href="/chart" role="button">New Chart</a>'
-            '<a href="/dashboard" role="button" class="outline">'
-            'My Dashboard</a></div>',
-            description="Create custom dual-axis charts or view your "
-            "saved dashboard of bookmarked views.",
+            '<a href="/dashboard" role="button">My Dashboard</a>'
+            '<a href="/chart" role="button" class="outline">'
+            'New Chart</a></div>',
+            description="Your bookmarked charts in one view. "
+            "Or create a new chart from scratch.",
+            card_class="card-primary",
         )}
 
         {render_card(

@@ -57,7 +57,6 @@ async def dli_home(request: Request) -> str:
                 grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
         .grid article { margin-bottom: 0; }
         .grid article h3 { margin-top: 0; }
-        .card-primary { border: 2px solid var(--pico-primary-background); }
         .card-disabled { opacity: 0.6; }
         .btn { display: inline-block; padding: 8px 16px; background: var(--pico-primary-background);
                color: var(--pico-primary-inverse); text-decoration: none; border-radius: 4px;

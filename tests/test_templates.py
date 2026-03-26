@@ -145,11 +145,11 @@ class TestRenderPage:
 
     def test_back_link_hidden_by_default(self):
         html = render_page("T", "content")
-        assert "Back to Dashboard" not in html
+        assert 'class="back"' not in html
 
     def test_back_link_shown(self):
         html = render_page("T", "content", show_back_link=True)
-        assert "Back to Dashboard" in html
+        assert 'class="back"' in html
         assert 'href="/"' in html
 
     def test_custom_back_url(self):

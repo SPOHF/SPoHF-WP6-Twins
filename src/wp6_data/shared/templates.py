@@ -114,10 +114,13 @@ def render_date_filter(start: date, end: date, extra_params: dict[str, str] | No
     """
 
 
-def render_card(title: str, body: str, *, description: str = "") -> str:
+def render_card(
+    title: str, body: str, *, description: str = "", card_class: str = "",
+) -> str:
     """Render content wrapped in a styled article card."""
     desc = f"<p>{description}</p>" if description else ""
-    return f"<article><h2>{title}</h2>{desc}{body}</article>"
+    cls = f' class="{card_class}"' if card_class else ""
+    return f"<article{cls}><h2>{title}</h2>{desc}{body}</article>"
 
 
 def render_table(headers: list[str], rows: list[list[str]], *, sortable: bool = True) -> str:
@@ -447,6 +450,7 @@ BASE_CSS = """
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
     }
+    .card-primary { border: 2px solid var(--pico-primary-background); }
 
     /* --- Stats cards --- */
     .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
@@ -1659,8 +1663,8 @@ def render_nav_bar(*, data_source: str | None = None) -> str:
         <a href="/" class="brand">{name}</a>
         <div class="nav-links">
             <a href="/">Home</a>
-            <a href="/chart">Chart</a>
             <a href="/dashboard">Dashboard</a>
+            <a href="/chart">Chart</a>
             {user_html}
             {source_html}
             <button id="theme-toggle" title="Toggle dark mode">
@@ -1698,7 +1702,7 @@ def render_page(
         Complete HTML document as string
     """
     back_html = (
-        f'<div class="back"><a href="{back_url}">&larr; Back to Dashboard</a></div>'
+        f'<div class="back"><a href="{back_url}">&larr; Home</a></div>'
         if show_back_link
         else ""
     )
