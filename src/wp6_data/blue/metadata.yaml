@@ -84,51 +84,59 @@ sensor_defaults:
 
 devices:
   "PH2 | 4D25":
+    position: "Std"
     type: "pH sensor"
 
   "PH1 | 4D1D":
+    position: "Org1"
     type: "pH sensor"
 
   "PH3 | 4D20":
+    position: "K2"
     type: "pH sensor"
 
   "SPoHF_EC-BV_rij1":
-    position: "Row 1"
+    position: "Org1"
     type: "EC/BV sensor"
 
   "SPoHF_EC-BV_rij2":
-    position: "Row 2"
+    position: "Org2"
     type: "EC/BV sensor"
 
   "SPoHF_EC-BV_rij3":
-    position: "Row 3"
+    position: "Std"
     type: "EC/BV sensor"
 
   "SPoHF_EC-BV_rij4":
-    position: "Row 4"
+    position: "Ca"
     type: "EC/BV sensor"
 
   "SPoHF_EC-BV_rij5":
-    position: "Row 5"
+    position: "K"
     type: "EC/BV sensor"
 
   "01 | 0E5E | BV + EC + BT":
+    position: "Ca1"
     type: "Soil sensor"
 
   "02 | 0E4F | BV + EC + BT":
+    position: "Org2"
     type: "Soil sensor"
 
   "03 | 0E09 | BV + EC + BT":
+    position: "K1"
     type: "Soil sensor"
 
   "04 | 0E69 | BV + EC + BT":
+    position: "K3"
     type: "Soil sensor"
 
   "BV + BT + EC | Nr. 6":
+    position: "Org1"
     type: "Soil sensor"
 
   "366D | LT + LV | Rij 1 Onder | 5":
-    position: "Row 1"
+    position: "Org1"
     type: "Climate sensor"
     sensors:
       temperature:
@@ -137,7 +145,7 @@ devices:
         intention: "Air humidity, lower canopy"
 
   "366F | LT + LV | Rij 1 Boven | 6":
-    position: "Row 1"
+    position: "Org1"
     type: "Climate sensor"
     sensors:
       temperature:
@@ -146,7 +154,7 @@ devices:
         intention: "Air humidity, upper canopy"
 
   "3670 | LT + LV | Rij 3 Onder | 3":
-    position: "Row 3"
+    position: "Std"
     type: "Climate sensor"
     sensors:
       temperature:
@@ -155,7 +163,7 @@ devices:
         intention: "Air humidity, lower canopy"
 
   "3671 | LT + LV | Rij 3 Boven | 4":
-    position: "Row 3"
+    position: "Std"
     type: "Climate sensor"
     sensors:
       temperature:
@@ -164,7 +172,7 @@ devices:
         intention: "Air humidity, upper canopy"
 
   "3672 | LT + LV | Rij 5 onder | 1":
-    position: "Row 5"
+    position: "K3"
     type: "Climate sensor"
     sensors:
       temperature:
@@ -173,7 +181,7 @@ devices:
         intention: "Air humidity, lower canopy"
 
   "366E | LT + LV | Rij 5 boven | 2":
-    position: "Row 5"
+    position: "K3"
     type: "Climate sensor"
     sensors:
       temperature:
@@ -188,6 +196,7 @@ devices:
         intention: "Photosynthetically active radiation"
 
   "DF1D | BN + BT | Midden control":
+    position: "Std"
     type: "Leaf sensor"
     sensors:
       leaf_moisture:
@@ -196,6 +205,7 @@ devices:
         intention: "Leaf temperature, middle control"
 
   "DF1C | BN + BT | Zijkant Biologisch":
+    position: "Org1"
     type: "Leaf sensor"
     sensors:
       leaf_moisture:
