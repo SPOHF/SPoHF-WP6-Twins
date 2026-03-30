@@ -68,6 +68,7 @@ class YookrSyncOrchestrator:
             "total_created": 0,
             "sensors_synced": 0,
             "sensors_failed": 0,
+            "warnings": [],
             "errors": [],
         }
 
@@ -125,7 +126,7 @@ class YookrSyncOrchestrator:
                                 error=str(e)[:200],
                             )
                             sensor_failed = True
-                            stats["errors"].append(
+                            stats["warnings"].append(
                                 f"{info.device_name}/{info.sensor_tag} "
                                 f"({win_start:%Y-%m-%d}): {e}"
                             )
@@ -290,6 +291,7 @@ class YookrSyncOrchestrator:
             total_duplicates=stats["total_records"] - stats["total_created"],
             sensors_synced=stats["sensors_synced"],
             sensors_failed=stats["sensors_failed"],
+            warnings=len(stats.get("warnings", [])),
             duration=f"{stats.get('duration_seconds', 0):.1f}s",
             by_tag=sensors,
         )

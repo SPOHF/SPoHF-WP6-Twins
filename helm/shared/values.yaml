@@ -10,7 +10,7 @@ image:
 timescaledb:
   enabled: true
 
-# SPoHF Sync CronJob (datalake API)
+# Combined sync CronJob (SPoHF API + Yookr API, sequential)
 sync:
   enabled: true
   schedule: "*/15 * * * *"
@@ -18,19 +18,6 @@ sync:
   endpoints: "yookr-data"
   mode: "incremental"  # "full" or "incremental"
   windowDays: 1
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-
-# Yookr Sync CronJob (direct API)
-yookrSync:
-  enabled: true
-  schedule: "5,20,35,50 * * * *"  # 5 min offset from SPoHF sync
-  mode: "incremental"  # "full" or "incremental"
   resources:
     requests:
       cpu: 100m

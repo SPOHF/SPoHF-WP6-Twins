@@ -82,8 +82,11 @@ def _run_yookr_sync(settings: Settings, logger: Any) -> int:
     stats = asyncio.run(orchestrator.run())
 
     if stats["errors"]:
-        logger.warning("yookr_sync_completed_with_errors", errors=stats["errors"])
+        logger.error("yookr_sync_failed", errors=stats["errors"])
         return 1
+
+    if stats.get("warnings"):
+        logger.warning("yookr_sync_completed_with_warnings", warnings=stats["warnings"])
 
     logger.info(
         "yookr_sync_success",

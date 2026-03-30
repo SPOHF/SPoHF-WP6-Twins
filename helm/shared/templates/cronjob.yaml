@@ -27,6 +27,7 @@ spec:
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               command: ["python", "-m", "wp6_data"]
               env:
+                # SPoHF API
                 - name: WP6_API_BASE_URL
                   value: {{ .Values.api.baseUrl | quote }}
                 - name: WP6_API_TOKEN
@@ -34,6 +35,18 @@ spec:
                     secretKeyRef:
                       name: {{ .Values.secrets.existingSecret | default "wp6-data-secrets" }}
                       key: api-token
+                # Yookr API
+                - name: WP6_YOOKR_EMAIL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secrets.existingSecret | default "wp6-data-secrets" }}
+                      key: yookr-email
+                - name: WP6_YOOKR_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secrets.existingSecret | default "wp6-data-secrets" }}
+                      key: yookr-password
+                # Shared
                 - name: WP6_TSDB_URL
                   valueFrom:
                     secretKeyRef:
