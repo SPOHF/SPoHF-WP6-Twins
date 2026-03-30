@@ -82,14 +82,50 @@ sensor_defaults:
 devices:
   "s2100-01-par":
     description: "PAR above lamp level"
-    position: "B4"
+    position: "B"
     sensors:
       par:
         intention: "Measures PAR above grow lamp"
 
   "s2100-02-par":
     description: "PAR at canopy level"
-    position: "B4"
+    position: "B"
     sensors:
       par:
         intention: "Measures PAR at plant height"
+
+  "s2101-01-temp-hum":
+    position: "B"
+
+  "s2103-01-temp-hum-co2":
+    position: "B"
+
+  "s2107-01-temp":
+    position: "B"
+
+  "s31-lb-01":
+    position: "B"
+
+  "s1000-wetherstation":
+    position: "B"
+
+  "dendro-01":
+    position: "B"
+
+  "dendro-02":
+    position: "B"
+
+  "lht65n-e5":
+    position: "B"
+
+  "lht65s-e5-02":
+    position: "B"
+
+  "lht65s-ne117":
+    position: "B"
+
+  "lht65s-ne117-02":
+    position: "B"
+
+  "lht65s-ne117-03":
+    position: "B"
