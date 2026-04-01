@@ -10,8 +10,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from wp6_data.shared import render_unified_chart_page, resolve_date_range
 from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.metadata import MetadataRegistry
-from wp6_data.shared.provider import SensorDataProvider, TwinConfig
 from wp6_data.shared.routes.deps import get_metadata, get_provider, get_twin_config
+from wp6_data.shared.twin import SensorDataProvider, TwinConfig
 
 router = APIRouter(dependencies=[Depends(verify_session_user)])
 

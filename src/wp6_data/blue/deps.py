@@ -17,10 +17,6 @@ from wp6_data.db import close_pool, get_pool, init_pool
 from wp6_data.shared.export import get_export_metadata as _get_export_metadata
 from wp6_data.shared.metadata import MetadataRegistry
 
-# Serve static files (logo, etc.) from project root
-# __file__ is src/wp6_data/blue/deps.py, so .parent x4 gets to wp6-data/
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-
 YOOKR_PROJECT = "yookr-direct"
 
 metadata = MetadataRegistry(Path(__file__).parent / "metadata.yaml")

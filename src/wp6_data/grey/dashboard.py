@@ -10,7 +10,7 @@ from wp6_data.grey.provider import GreySensorProvider
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
 from wp6_data.shared.metadata import MetadataRegistry
-from wp6_data.shared.provider import TwinConfig
+from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 
 
 def _herb_card() -> str:
@@ -25,9 +25,18 @@ def _herb_card() -> str:
 config = TwinConfig(
     twin_id="grey",
     title="SPoHF Grey Digital Twin (Demo)",
-    provider=GreySensorProvider(),
+    data_sources=[
+        DataSource(
+            key="in-memory", label="Synthetic Data",
+            provider=GreySensorProvider(),
+        ),
+    ],
     metadata=MetadataRegistry(Path(__file__).parent / "metadata.yaml"),
     export_dir=Path("/tmp/wp6-grey-exports"),
+    theme=ThemeColors(
+        primary="#6b7280", primary_light="#9ca3af", primary_dark="#4b5563",
+        accent="#8b5cf6", surface_rgb="107, 114, 128",
+    ),
     hero_cards=[_herb_card],
     require_auth=False,
 )

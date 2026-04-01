@@ -12,9 +12,6 @@ from wp6_data.shared.metadata import MetadataRegistry
 
 load_dotenv()
 
-# Serve static files (logo, etc.) from project root
-# __file__ is src/wp6_data/red/deps.py, so .parent x4 gets to wp6-data/
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 settings = RedSettings()
 metadata = MetadataRegistry(Path(__file__).parent / "metadata.yaml")
 

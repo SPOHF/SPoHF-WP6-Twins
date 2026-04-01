@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import RedirectResponse
 
 from wp6_data.shared.auth import verify_session_user
-from wp6_data.shared.provider import SensorDataProvider
 from wp6_data.shared.routes.deps import get_provider
+from wp6_data.shared.twin import SensorDataProvider
 
 router = APIRouter(dependencies=[Depends(verify_session_user)])
 

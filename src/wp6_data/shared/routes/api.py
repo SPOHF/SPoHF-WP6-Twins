@@ -9,9 +9,9 @@ from fastapi.responses import JSONResponse
 from wp6_data.config import Settings
 from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.metadata import MetadataRegistry
-from wp6_data.shared.provider import SensorDataProvider
 from wp6_data.shared.routes.deps import get_metadata, get_provider
 from wp6_data.shared.templates import resolve_date_range
+from wp6_data.shared.twin import SensorDataProvider
 
 _settings = Settings()
 

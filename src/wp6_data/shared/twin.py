@@ -1,4 +1,4 @@
-"""Sensor data provider protocol and twin configuration.
+"""Twin abstraction layer: data provider protocol, theme, and configuration.
 
 Defines the contract that every digital twin's data layer must satisfy,
 plus the TwinConfig dataclass that drives the app factory.
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 class SensorDataProvider(Protocol):
     """Minimal interface every twin's data layer must satisfy.
 
-    Shared routes depend only on these three methods.
+    Shared routes depend only on these methods.
     Twin-specific methods (e.g. red's get_par_readings) live on the
     concrete implementations and are accessed by twin-specific routes.
     """
@@ -61,11 +61,41 @@ class SensorDataProvider(Protocol):
 
     @property
     def data_source_label(self) -> str | None:
-        """Optional display label for multi-source twins (e.g. blue's source switcher).
+        """The active data source key, used by templates for the source toggle.
 
-        Returns None if the twin has a single source.
+        Returns the DataSource.key this provider belongs to, or None
+        if the twin has only one source (no toggle rendered).
         """
         ...
+
+
+@dataclass
+class ThemeColors:
+    """Colour palette for a twin's dashboard.
+
+    Used to generate CSS custom properties at startup.
+    ``surface_rgb`` is the comma-separated RGB triple used in rgba() values.
+    """
+
+    primary: str
+    primary_light: str
+    primary_dark: str
+    accent: str
+    surface_rgb: str  # e.g. "37, 99, 235"
+
+
+@dataclass
+class DataSource:
+    """A named data source with its provider.
+
+    When a twin has multiple data sources, the platform renders a
+    navigation toggle and manages the cookie-based switching.
+    The provider on each DataSource handles the actual data access.
+    """
+
+    key: str                      # cookie value, e.g. "spohf-datalake"
+    label: str                    # display name in toggle
+    provider: SensorDataProvider  # data access for this source
 
 
 @dataclass
@@ -74,16 +104,21 @@ class TwinConfig:
 
     twin_id: str
     title: str
-    provider: SensorDataProvider
+    data_sources: list[DataSource]
     metadata: MetadataRegistry
     export_dir: Path
+    theme: ThemeColors
     extra_routers: list[APIRouter] = field(default_factory=list)
     hero_cards: list[Callable[..., Awaitable[str] | str]] = field(
         default_factory=list,
     )
-    provider_dependency: Callable[..., Any] | None = None
     home_extra_html: str = ""
     require_auth: bool = True
     export_sanitise_names: bool = False
     lifespan_startup: Callable[..., Awaitable[None]] | None = None
     lifespan_shutdown: Callable[..., Awaitable[None]] | None = None
+
+    @property
+    def default_provider(self) -> SensorDataProvider:
+        """The first data source's provider (used as default)."""
+        return self.data_sources[0].provider

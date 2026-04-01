@@ -11,10 +11,10 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from wp6_data.shared.auth import NotAuthenticated, verify_session_user
 from wp6_data.shared.export import make_download_router
-from wp6_data.shared.provider import TwinConfig
 from wp6_data.shared.routes import api, charts, dashboard_page, health, home
 from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.templates import _current_user, configure_dashboard
+from wp6_data.shared.twin import SensorDataProvider, TwinConfig
 
 # Static files live at the project root (4 dirs up from shared/app_factory.py)
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -32,9 +32,29 @@ def _noop_auth() -> None:
     """No-op auth dependency for public twins."""
 
 
+def _make_provider_dependency(config: TwinConfig):
+    """Build a get_provider override that dispatches by cookie for multi-source twins."""
+    sources_by_key = {ds.key: ds.provider for ds in config.data_sources}
+    default = config.default_provider
+    cookie_name = f"wp6_{config.twin_id}_source"
+
+    async def _resolve_provider(request: Request) -> SensorDataProvider:
+        if len(config.data_sources) <= 1:
+            return default
+        active_key = request.cookies.get(cookie_name)
+        return sources_by_key.get(active_key, default) if active_key else default
+
+    return _resolve_provider
+
+
 def create_app(config: TwinConfig) -> FastAPI:
     """Build a complete sensor dashboard app from configuration."""
-    configure_dashboard(config.twin_id)
+    configure_dashboard(
+        config.twin_id,
+        title=config.title,
+        theme=config.theme,
+        data_sources=config.data_sources,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -54,10 +74,8 @@ def create_app(config: TwinConfig) -> FastAPI:
     # Store config on app state for shared route dependencies
     app.state.twin_config = config
 
-    # If the twin provides a per-request provider dependency (e.g. blue's
-    # cookie-based source dispatch), override the default get_provider
-    if config.provider_dependency is not None:
-        app.dependency_overrides[get_provider] = config.provider_dependency
+    # Cookie-based provider dispatch (noop for single-source twins)
+    app.dependency_overrides[get_provider] = _make_provider_dependency(config)
 
     # For public twins, disable auth on all shared routes
     if not config.require_auth:

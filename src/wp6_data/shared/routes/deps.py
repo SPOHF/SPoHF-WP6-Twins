@@ -8,7 +8,7 @@ from fastapi import Request
 
 if TYPE_CHECKING:
     from wp6_data.shared.metadata import MetadataRegistry
-    from wp6_data.shared.provider import SensorDataProvider, TwinConfig
+    from wp6_data.shared.twin import SensorDataProvider, TwinConfig
 
 
 def get_twin_config(request: Request) -> TwinConfig:
@@ -17,8 +17,12 @@ def get_twin_config(request: Request) -> TwinConfig:
 
 
 def get_provider(request: Request) -> SensorDataProvider:
-    """Extract the active SensorDataProvider."""
-    return request.app.state.twin_config.provider
+    """Extract the active SensorDataProvider.
+
+    This default is overridden by the app factory with a cookie-based
+    dispatcher for multi-source twins.
+    """
+    return request.app.state.twin_config.default_provider
 
 
 def get_metadata(request: Request) -> MetadataRegistry:

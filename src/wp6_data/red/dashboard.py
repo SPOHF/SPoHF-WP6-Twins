@@ -12,7 +12,7 @@ from wp6_data.red.routes import charts as red_charts
 from wp6_data.red.routes.dli_model.train import train_model_from_db
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
-from wp6_data.shared.provider import TwinConfig
+from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 
 log = structlog.get_logger()
 
@@ -64,9 +64,18 @@ def _dli_card() -> str:
 config = TwinConfig(
     twin_id="red",
     title="SPoHF Red Digital Twin",
-    provider=RedSensorProvider(),
+    data_sources=[
+        DataSource(
+            key="mysql", label="GTL (MySQL, LoRaWAN)",
+            provider=RedSensorProvider(),
+        ),
+    ],
     metadata=deps.metadata,
     export_dir=Path(deps.settings.export_dir),
+    theme=ThemeColors(
+        primary="#dc2626", primary_light="#ef4444", primary_dark="#b91c1c",
+        accent="#f97316", surface_rgb="220, 38, 38",
+    ),
     extra_routers=[browse.router, dli.router, dli_model.router, red_charts.router],
     hero_cards=[_dli_card],
     home_extra_html=(
