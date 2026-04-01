@@ -1,0 +1,67 @@
+"""Shared dashboard home page with pluggable hero cards."""
+
+import inspect
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
+from fastapi.responses import HTMLResponse
+
+from wp6_data.shared import build_home_tables, render_card, render_page
+from wp6_data.shared.auth import verify_session_user
+from wp6_data.shared.export import get_export_metadata
+from wp6_data.shared.provider import SensorDataProvider, TwinConfig
+from wp6_data.shared.routes.deps import get_provider, get_twin_config
+
+router = APIRouter(dependencies=[Depends(verify_session_user)])
+
+
+@router.get("/", response_class=HTMLResponse)
+async def home(
+    config: Annotated[TwinConfig, Depends(get_twin_config)],
+    provider: Annotated[SensorDataProvider, Depends(get_provider)],
+) -> str:
+    """Dashboard home page — sensor explorer with pluggable hero cards."""
+    device_data = await provider.fetch_device_data()
+
+    export_meta = get_export_metadata(config.export_dir)
+    available_exports = export_meta.get("devices", {}) if export_meta else {}
+
+    sensor_table, device_table = build_home_tables(
+        config.metadata, device_data, available_exports,
+    )
+
+    # Render hero cards (can be sync or async callables)
+    hero_html_parts = []
+    for card_fn in config.hero_cards:
+        result = card_fn()
+        if inspect.isawaitable(result):
+            result = await result
+        hero_html_parts.append(result)
+    hero_html = "\n".join(hero_html_parts)
+
+    data_source = provider.data_source_label
+
+    content = f"""
+        <h1>{config.title}</h1>
+
+        {render_card(
+            "Dashboard",
+            '<div style="display:flex;gap:0.5rem">'
+            '<a href="/dashboard" role="button">My Dashboard</a>'
+            '<a href="/chart" role="button" class="outline">'
+            'New Chart</a></div>',
+            description="Your bookmarked charts in one view. "
+            "Or create a new chart from scratch.",
+            card_class="card card-bg card-bg-chart",
+        )}
+
+        {hero_html}
+
+        {render_card("Explore by Sensor Type", sensor_table)}
+
+        {render_card("Explore by Device", device_table)}
+
+        {config.home_extra_html}
+    """
+
+    return render_page(config.title, content, data_source=data_source)

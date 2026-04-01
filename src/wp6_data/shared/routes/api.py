@@ -1,4 +1,4 @@
-"""Red dashboard JSON API endpoints for the unified chart page."""
+"""Shared JSON API endpoints for the unified chart page."""
 
 from datetime import date, datetime
 from typing import Annotated, Any
@@ -7,8 +7,10 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 from wp6_data.config import Settings
-from wp6_data.red import deps
 from wp6_data.shared.auth import verify_session_user
+from wp6_data.shared.metadata import MetadataRegistry
+from wp6_data.shared.provider import SensorDataProvider
+from wp6_data.shared.routes.deps import get_metadata, get_provider
 from wp6_data.shared.templates import resolve_date_range
 
 _settings = Settings()
@@ -17,17 +19,21 @@ router = APIRouter(prefix="/api", dependencies=[Depends(verify_session_user)])
 
 
 @router.get("/sensors")
-async def list_sensors() -> list[dict[str, str]]:
+async def list_sensors(
+    provider: Annotated[SensorDataProvider, Depends(get_provider)],
+    metadata: Annotated[MetadataRegistry, Depends(get_metadata)],
+) -> list[dict[str, str]]:
     """List all available device+sensor combos, for the side panel tree."""
-    if not deps.db:
+    try:
+        sensors = await provider.fetch_available_sensors()
+    except Exception:
         return JSONResponse(content={"error": "Database not connected"}, status_code=503)
 
-    devices = await deps.db.get_all_devices()
-    flat: list[dict[str, str]] = []
-    for device_id, info in sorted(devices.items()):
-        for measurement in sorted(info["measurements"]):
-            flat.append({"device": device_id, "sensor": measurement})
-    enriched = deps.metadata.enrich_sensor_list(flat)
+    flat = [
+        {"device": s["device"], "sensor": s["sensor"]}
+        for s in sorted(sensors, key=lambda s: (s["sensor"], s["device"]))
+    ]
+    enriched = metadata.enrich_sensor_list(flat)
     return JSONResponse(
         content=enriched,
         headers={"Cache-Control": "private, max-age=300"},
@@ -36,24 +42,29 @@ async def list_sensors() -> list[dict[str, str]]:
 
 @router.get("/series")
 async def get_series(
-    device: str = Query(..., description="Device ID"),
-    sensor: str = Query(..., description="Measurement name"),
+    provider: Annotated[SensorDataProvider, Depends(get_provider)],
+    device: str = Query(..., description="Device name"),
+    sensor: str = Query(..., description="Sensor tag"),
     start: Annotated[date | None, Query()] = None,
     end: Annotated[date | None, Query()] = None,
     limit: int = Query(default=None, description="Max records"),
 ) -> dict[str, Any]:
     """Fetch time-series data for a single device+sensor combo."""
-    if not deps.db:
-        return JSONResponse(content={"error": "Database not connected"}, status_code=503)
-
     if limit is None:
         limit = _settings.chart_query_limit
 
     _start, _end, start_dt, end_dt = resolve_date_range(start, end)
 
-    df = await deps.db.get_readings_for_comparison(
-        device, sensor, start=start_dt, end=end_dt, limit=limit,
-    )
+    try:
+        df = await provider.fetch_data(
+            sensor_tags=[sensor],
+            device_names=[device],
+            start=start_dt,
+            end=end_dt,
+            limit=limit,
+        )
+    except Exception:
+        return JSONResponse(content={"error": "Database not connected"}, status_code=503)
 
     if df.empty:
         return {"data": [], "truncated": False}

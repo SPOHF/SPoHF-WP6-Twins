@@ -1,0 +1,54 @@
+sensor_defaults:
+  temp:
+    type: climate
+    unit: "°C"
+    alias: Temperature
+  hum:
+    type: climate
+    unit: "%"
+    alias: Humidity
+  soil_moisture:
+    type: soil
+    unit: "%"
+    alias: Soil Moisture
+  light:
+    type: radiation
+    unit: "lux"
+    alias: Light Level
+
+devices:
+  herb-box-01:
+    description: "Basil planter - south window"
+    position: A1
+    type: herb box
+    sensors:
+      temp:
+        intention: "Ambient temperature near basil"
+      hum:
+        intention: "Ambient humidity near basil"
+      soil_moisture:
+        intention: "Soil moisture in basil planter"
+      light:
+        intention: "Light level at basil planter"
+  herb-box-02:
+    description: "Mint planter - east window"
+    position: A2
+    type: herb box
+    sensors:
+      temp:
+        intention: "Ambient temperature near mint"
+      hum:
+        intention: "Ambient humidity near mint"
+      soil_moisture:
+        intention: "Soil moisture in mint planter"
+  outdoor-station:
+    description: "Weather station on balcony"
+    position: EXT
+    type: weather station
+    sensors:
+      temp:
+        intention: "Outdoor temperature"
+      hum:
+        intention: "Outdoor humidity"
+      light:
+        intention: "Outdoor light level"

@@ -1,43 +1,24 @@
-"""WP6 Red Dashboard - MySQL-backed sensor visualization with authentication."""
+"""WP6 Red Dashboard - MySQL-backed sensor visualization with DLI analysis."""
 
-from contextlib import asynccontextmanager
+from pathlib import Path
 
 import structlog
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.sessions import SessionMiddleware
 
-from wp6_data.config import OIDCSettings
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
-from wp6_data.red.routes import (
-    api,
-    browse,
-    charts,
-    dashboard_page,
-    dli,
-    dli_model,
-    export,
-    health,
-    home,
-)
+from wp6_data.red.provider import RedSensorProvider
+from wp6_data.red.routes import browse, dli, dli_model
+from wp6_data.red.routes import charts as red_charts
 from wp6_data.red.routes.dli_model.train import train_model_from_db
-from wp6_data.shared.auth import NotAuthenticated, make_auth_router, startup_oidc
-from wp6_data.shared.templates import _current_user, configure_dashboard
-
-configure_dashboard("red")
+from wp6_data.shared import render_card
+from wp6_data.shared.app_factory import create_app
+from wp6_data.shared.provider import TwinConfig
 
 log = structlog.get_logger()
 
-oidc_settings = OIDCSettings()
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Manage database connection lifecycle."""
-    await startup_oidc(oidc_settings)
+async def _startup() -> None:
+    """Connect to MySQL and train DLI model if needed."""
     deps.db = MySQLConnection(
         host=deps.DB_HOST,
         port=deps.DB_PORT,
@@ -47,7 +28,6 @@ async def lifespan(app: FastAPI):
     )
     await deps.db.connect()
 
-    # Train DLI model on startup if not already saved on disk
     from wp6_data.red.dli import get_model
 
     model = get_model()
@@ -66,46 +46,39 @@ async def lifespan(app: FastAPI):
         except Exception:
             log.warning("dli_model_training_failed", exc_info=True)
 
-    yield
-    await deps.db.close()
+
+async def _shutdown() -> None:
+    if deps.db:
+        await deps.db.close()
 
 
-async def _set_user_context(request: Request, call_next):
-    token = _current_user.set(request.session.get("user"))
-    try:
-        return await call_next(request)
-    finally:
-        _current_user.reset(token)
+def _dli_card() -> str:
+    return render_card(
+        "Light Analysis (DLI)",
+        '<a href="/dli" role="button">DLI Dashboard</a>',
+        description="Daily Light Integral analysis and optimization tools.",
+        card_class="card-bg card-bg-sun",
+    )
 
 
-app = FastAPI(title="SPoHF Red Digital Twin", lifespan=lifespan)
-app.add_middleware(BaseHTTPMiddleware, dispatch=_set_user_context)
-app.add_middleware(SessionMiddleware, secret_key=oidc_settings.session_secret)
+config = TwinConfig(
+    twin_id="red",
+    title="SPoHF Red Digital Twin",
+    provider=RedSensorProvider(),
+    metadata=deps.metadata,
+    export_dir=Path(deps.settings.export_dir),
+    extra_routers=[browse.router, dli.router, dli_model.router, red_charts.router],
+    hero_cards=[_dli_card],
+    home_extra_html=(
+        '<a href="/static/red/sensor_locations.docx" download role="button"'
+        ' class="outline" style="width:100%">'
+        "Download Sensor Device Identification (docx)</a>"
+    ),
+    lifespan_startup=_startup,
+    lifespan_shutdown=_shutdown,
+)
 
-
-@app.exception_handler(NotAuthenticated)
-async def not_authenticated_handler(request: Request, _: NotAuthenticated) -> RedirectResponse:
-    request.session["next"] = str(request.url)
-    return RedirectResponse(url="/auth/login")
-
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon():
-    return FileResponse(deps.PROJECT_ROOT / "static" / "favicon.ico")
-
-# Serve static files
-if (deps.PROJECT_ROOT / "static").exists():
-    app.mount("/static", StaticFiles(directory=deps.PROJECT_ROOT / "static"), name="static")
-
-app.include_router(make_auth_router(oidc_settings))
-app.include_router(api.router)
-app.include_router(health.router)
-app.include_router(home.router)
-app.include_router(browse.router)
-app.include_router(charts.router)
-app.include_router(dashboard_page.router)
-app.include_router(export.router)
-app.include_router(dli.router)
-app.include_router(dli_model.router)
+app = create_app(config)
 
 if __name__ == "__main__":
     import uvicorn

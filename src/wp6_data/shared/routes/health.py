@@ -1,4 +1,4 @@
-"""Red dashboard health check (no auth)."""
+"""Health check endpoint (no auth, for k8s probes)."""
 
 from fastapi import APIRouter
 
@@ -7,5 +7,4 @@ router = APIRouter()
 
 @router.get("/health")
 async def health() -> dict[str, str]:
-    """Health check endpoint for k8s probes (no auth required)."""
     return {"status": "ok"}

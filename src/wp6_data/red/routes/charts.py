@@ -1,29 +1,17 @@
-"""Red dashboard chart endpoints."""
+"""Red-specific chart redirects: table-based sensor grouping."""
 
 from datetime import date
 from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 
 from wp6_data.red import deps
 from wp6_data.red.db import SENSOR_TABLES
-from wp6_data.shared import render_unified_chart_page, resolve_date_range
 from wp6_data.shared.auth import verify_session_user
 
 router = APIRouter(dependencies=[Depends(verify_session_user)])
-
-PAGE_TITLE = "SPoHF Red"
-
-@router.get("/chart", response_class=HTMLResponse)
-async def unified_chart(
-    start: Annotated[date | None, Query()] = None,
-    end: Annotated[date | None, Query()] = None,
-) -> str:
-    """Unified interactive chart page with side panel sensor selection."""
-    start, end, _, _ = resolve_date_range(start, end)
-    return render_unified_chart_page(PAGE_TITLE, start, end)
 
 
 @router.get("/chart/{table}")
