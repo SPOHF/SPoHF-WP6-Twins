@@ -7,7 +7,6 @@ from wp6_data.blue.provider import BlueSensorProvider
 from wp6_data.blue.routes import charts as blue_charts
 from wp6_data.blue.routes import ops
 from wp6_data.config import Settings
-from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
 from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 
@@ -22,16 +21,6 @@ async def _startup() -> None:
 
 async def _shutdown() -> None:
     await deps.close_db()
-
-
-def _status_card() -> str:
-    return render_card(
-        "Status &amp; Coverage",
-        '<a href="/status" role="button">View Status</a>',
-        description="Sync status, data coverage timeline, "
-        "and maintenance tools.",
-        card_class="card-bg card-bg-status",
-    )
 
 
 config = TwinConfig(
@@ -58,7 +47,7 @@ config = TwinConfig(
         accent="#0ea5e9", surface_rgb="37, 99, 235",
     ),
     extra_routers=[ops.router, blue_charts.router],
-    hero_cards=[_status_card],
+    hero_cards=[],
     export_sanitise_names=True,
     lifespan_startup=_startup,
     lifespan_shutdown=_shutdown,

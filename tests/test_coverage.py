@@ -22,21 +22,21 @@ class TestBuildWeeklyCoverage:
         assert df.iloc[0]["status"] == "good"
         assert df.iloc[0]["days_with_data"] == 7
 
-    def test_five_days_is_good(self):
-        records = _days("d1", "temp", date(2024, 4, 1), 5)
-        df = build_weekly_coverage(records, date(2024, 4, 1), date(2024, 4, 7))
-        assert df.iloc[0]["status"] == "good"
-
-    def test_four_days_is_partial(self):
-        records = _days("d1", "temp", date(2024, 4, 1), 4)
+    def test_six_days_is_partial(self):
+        records = _days("d1", "temp", date(2024, 4, 1), 6)
         df = build_weekly_coverage(records, date(2024, 4, 1), date(2024, 4, 7))
         assert df.iloc[0]["status"] == "partial"
 
-    def test_one_day_is_partial(self):
-        records = [{"device": "d1", "sensor": "temp", "day": date(2024, 4, 3)}]
+    def test_three_days_is_partial(self):
+        records = _days("d1", "temp", date(2024, 4, 1), 3)
         df = build_weekly_coverage(records, date(2024, 4, 1), date(2024, 4, 7))
         assert df.iloc[0]["status"] == "partial"
-        assert df.iloc[0]["days_with_data"] == 1
+
+    def test_two_days_is_none(self):
+        records = _days("d1", "temp", date(2024, 4, 1), 2)
+        df = build_weekly_coverage(records, date(2024, 4, 1), date(2024, 4, 7))
+        assert df.iloc[0]["status"] == "none"
+        assert df.iloc[0]["days_with_data"] == 2
 
     def test_no_data_week_is_none(self):
         # Data in week 1, nothing in week 2
@@ -81,8 +81,8 @@ class TestBuildWeeklyCoverage:
     def test_default_project_start(self):
         records = [{"device": "d1", "sensor": "temp", "day": date(2024, 3, 5)}]
         df = build_weekly_coverage(records, project_end=date(2024, 3, 7))
-        # Default start is 2024-03-01 (Fri), snapped to Monday 2024-02-26
-        assert df.iloc[0]["week_start"] == date(2024, 2, 26)
+        # Start derived from earliest record (2024-03-05 Tue), snapped to Monday 2024-03-04
+        assert df.iloc[0]["week_start"] == date(2024, 3, 4)
 
 
 class TestRenderCoverageGrid:

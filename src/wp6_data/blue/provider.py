@@ -50,6 +50,12 @@ class BlueSensorProvider:
     async def fetch_available_sensors(self) -> list[dict[str, Any]]:
         return await deps.fetch_available_sensors(project=self._project)
 
+    async def fetch_sync_metrics(self) -> list[dict[str, Any]]:
+        return await deps.fetch_sync_metrics(project=self._project)
+
+    async def fetch_daily_coverage(self) -> list[dict[str, Any]]:
+        return await deps.fetch_daily_coverage(project=self._project)
+
     async def fetch_device_data(self) -> dict[str, dict]:
         sensors = await self.fetch_available_sensors()
         device_data: dict[str, dict] = {}

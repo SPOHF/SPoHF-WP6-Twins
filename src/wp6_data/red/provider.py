@@ -12,6 +12,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
+from cachetools import TTLCache
+
+# Coverage only changes once per day — cache for 1 hour
+_coverage_cache: TTLCache[str, list[dict[str, Any]]] = TTLCache(maxsize=4, ttl=3600)
 
 if TYPE_CHECKING:
     from wp6_data.red.db import MySQLConnection
@@ -36,6 +40,42 @@ class RedSensorProvider:
     @property
     def data_source_label(self) -> str | None:
         return None
+
+    async def fetch_sync_metrics(self) -> list[dict[str, Any]]:
+        return []
+
+    async def fetch_daily_coverage(self) -> list[dict[str, Any]]:
+        """Derive daily coverage from MySQL sensor tables (cached 1 hour)."""
+        key = "red:coverage"
+        if key in _coverage_cache:
+            return _coverage_cache[key]
+        result = await self._fetch_daily_coverage()
+        _coverage_cache[key] = result
+        return result
+
+    async def _fetch_daily_coverage(self) -> list[dict[str, Any]]:
+        """Query MySQL for distinct (device, day) per sensor table."""
+        from wp6_data.red.db import SENSOR_TABLES
+
+        records: list[dict[str, Any]] = []
+        async with self.db.pool.acquire() as conn, conn.cursor() as cursor:
+            for table, measurements in SENSOR_TABLES.items():
+                try:
+                    await cursor.execute(
+                        f"SELECT DISTINCT device_id, DATE(received_at) AS day "
+                        f"FROM {table}",
+                    )
+                    rows = await cursor.fetchall()
+                except Exception:
+                    continue
+                for device_id, day in rows:
+                    for sensor in measurements:
+                        records.append({
+                            "device": device_id,
+                            "sensor": sensor,
+                            "day": day,
+                        })
+        return records
 
     async def fetch_data(
         self,

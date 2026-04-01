@@ -59,6 +59,22 @@ class SensorDataProvider(Protocol):
         """
         ...
 
+    async def fetch_sync_metrics(self) -> list[dict[str, Any]]:
+        """Sync run metadata for the status page.
+
+        Returns [{endpoint, last_run_at, last_run_success, ...}].
+        Empty list if the twin has no sync mechanism.
+        """
+        ...
+
+    async def fetch_daily_coverage(self) -> list[dict[str, Any]]:
+        """Daily data coverage for the status page timeline.
+
+        Returns [{device, sensor, day}, ...].
+        Empty list if coverage tracking is not available.
+        """
+        ...
+
     @property
     def data_source_label(self) -> str | None:
         """The active data source key, used by templates for the source toggle.

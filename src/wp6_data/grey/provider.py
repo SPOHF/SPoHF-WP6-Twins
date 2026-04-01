@@ -65,6 +65,12 @@ class GreySensorProvider:
     def data_source_label(self) -> str | None:
         return None
 
+    async def fetch_sync_metrics(self) -> list[dict[str, Any]]:
+        return []
+
+    async def fetch_daily_coverage(self) -> list[dict[str, Any]]:
+        return []
+
     async def fetch_data(
         self,
         sensor_tags: list[str] | None = None,

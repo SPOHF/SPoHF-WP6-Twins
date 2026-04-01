@@ -287,7 +287,7 @@ def build_weekly_coverage(
 
     Args:
         records: List of dicts with keys: device, sensor, day (date objects).
-        project_start: First Monday of the timeline (default: 2024-03-01).
+        project_start: First Monday of the timeline (default: earliest day in records).
         project_end: Last date of the timeline (default: today).
 
     Returns:
@@ -298,7 +298,8 @@ def build_weekly_coverage(
     from itertools import groupby
 
     if project_start is None:
-        project_start = date(2024, 3, 1)
+        days = [r["day"] for r in records if r.get("day")]
+        project_start = min(days) if days else date.today()
     if project_end is None:
         project_end = date.today()
 
@@ -330,12 +331,12 @@ def build_weekly_coverage(
             days_in_week = sum(
                 1 for d in day_set if week_start <= d <= week_end
             )
-            if days_in_week == 0:
-                status = "none"
-            elif days_in_week >= 5:
+            if days_in_week == 7:
                 status = "good"
-            else:
+            elif days_in_week >= 3:
                 status = "partial"
+            else:
+                status = "none"
             rows.append({
                 "device": device,
                 "sensor": sensor,
@@ -375,11 +376,15 @@ def render_coverage_grid(weekly_df: pd.DataFrame) -> str:
     html_parts.append('<div class="uptime-row uptime-header">')
     html_parts.append('<div class="uptime-label"></div>')
     html_parts.append('<div class="uptime-blocks">')
+    prev_label_idx = -100
     prev_month = None
-    for w in all_weeks:
+    for i, w in enumerate(all_weeks):
         month_label = ""
         if prev_month is None or w.month != prev_month:
-            month_label = w.strftime("%b %y")
+            # Only show label if enough space since last label (~7 blocks minimum)
+            if i - prev_label_idx >= 7:
+                month_label = w.strftime("%b %y")
+                prev_label_idx = i
             prev_month = w.month
         html_parts.append(
             f'<div class="uptime-month-mark">'
