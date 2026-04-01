@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run blue, red, and grey dashboards locally on different ports.
-# Blue: http://localhost:8000
-# Red:  http://localhost:8001
-# Grey: http://localhost:8002
+# Grey: http://localhost:8000
+# Blue: http://localhost:8001
+# Red:  http://localhost:8002
 
 set -e
 
@@ -26,8 +26,9 @@ for port in "${PORTS[@]}"; do
     fi
 done
 
-echo "Starting Blue on :8000, Red on :8001, Grey on :8002 ..."
-uv run uvicorn wp6_data.blue.dashboard:app --host 0.0.0.0 --port 8000 --reload &
-uv run uvicorn wp6_data.red.dashboard:app  --host 0.0.0.0 --port 8001 --reload &
-uv run uvicorn wp6_data.grey.dashboard:app --host 0.0.0.0 --port 8002 --reload &
+echo "Starting dashboards... grey at 8000, blue at 8001, red at 8002"
+uv run uvicorn wp6_data.grey.dashboard:app --host 0.0.0.0 --port 8000 --reload &
+uv run uvicorn wp6_data.blue.dashboard:app --host 0.0.0.0 --port 8001 --reload &
+uv run uvicorn wp6_data.red.dashboard:app  --host 0.0.0.0 --port 8002 --reload &
+
 wait
