@@ -420,7 +420,13 @@ BASE_CSS = """
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
         background-clip: text; color: transparent;
     }
-    .dashboard-nav .nav-links { display: flex; align-items: center; gap: 1rem; }
+    .dashboard-nav .nav-links { display: flex; align-items: center; gap: 0; }
+    .dashboard-nav .nav-group { display: flex; align-items: center; gap: 1rem; }
+    .dashboard-nav .nav-group + .nav-group::before {
+        content: ""; display: block;
+        width: 1px; height: 1.2rem; margin: 0 1rem;
+        background: currentColor; opacity: 0.2;
+    }
     .dashboard-nav .nav-links a {
         font-size: 0.85rem; text-decoration: none; opacity: 0.7;
     }
@@ -1657,19 +1663,35 @@ SAVE_TO_DASHBOARD_JS = """
 
 
 
-def _render_source_toggle(active_source: str | None) -> str:
-    """Render a data-source <select> dropdown from the configured data sources."""
-    if len(_data_sources) < 2:
+def _render_source_indicator(active_source: str | None) -> str:
+    """Render a data-source indicator in the nav bar.
+
+    Single source: static badge. Multiple sources: interactive dropdown.
+    """
+    if not _data_sources:
         return ""
+    icon = '<span style="font-size:0.9rem;opacity:0.6">\u26c1</span>'
+    if len(_data_sources) == 1:
+        label = _data_sources[0].label
+        return (
+            f'<span title="Data source: {label}"'
+            f' style="display:flex;align-items:center;gap:0.3rem;cursor:default">'
+            f"{icon}"
+            f'<span style="font-size:0.75rem;opacity:0.7">{label}</span>'
+            f"</span>"
+        )
     options = "".join(
         f'<option value="{ds.key}"{" selected" if ds.key == active_source else ""}>'
         f"{ds.label}</option>"
         for ds in _data_sources
     )
     return (
+        f'<span title="Data source"'
+        f' style="display:flex;align-items:center;gap:0.3rem">'
+        f"{icon}"
         f'<select id="source-toggle" onchange="switchSource(this.value)"'
         f' style="width:auto;margin:0;padding:0.2rem 0.5rem;font-size:0.8rem">'
-        f"{options}</select>"
+        f"{options}</select></span>"
     )
 
 
@@ -1690,25 +1712,36 @@ def render_nav_bar(*, data_source: str | None = None) -> str:
     """Render a sticky nav bar with dashboard name, home link, and dark mode toggle."""
     name = _dashboard_title
     user = _current_user.get()
-    user_html = (
-        f'<span class="nav-user">{user} | <a href="/auth/logout">Logout</a></span>'
-        if user
-        else ""
+    source_html = _render_source_indicator(data_source)
+
+    groups = [
+        '<div class="nav-group">'
+        '<a href="/">Home</a>'
+        '<a href="/dashboard">Dashboard</a>'
+        '<a href="/chart">Chart</a>'
+        "</div>",
+    ]
+    if source_html:
+        groups.append(f'<div class="nav-group">{source_html}</div>')
+    if user:
+        groups.append(
+            f'<div class="nav-group">'
+            f'<span class="nav-user">{user} | <a href="/auth/logout">Logout</a></span>'
+            f"</div>",
+        )
+    groups.append(
+        '<div class="nav-group">'
+        '<button id="theme-toggle" title="Toggle dark mode">'
+        '<span class="icon-sun">&#9788;</span>'
+        '<span class="icon-moon">&#9790;</span>'
+        "</button></div>",
     )
-    source_html = _render_source_toggle(data_source) if data_source else ""
+
     return f"""
     <nav class="dashboard-nav">
         <a href="/" class="brand">{name}</a>
         <div class="nav-links">
-            <a href="/">Home</a>
-            <a href="/dashboard">Dashboard</a>
-            <a href="/chart">Chart</a>
-            {user_html}
-            {source_html}
-            <button id="theme-toggle" title="Toggle dark mode">
-                <span class="icon-sun">&#9788;</span>
-                <span class="icon-moon">&#9790;</span>
-            </button>
+            {"".join(groups)}
         </div>
     </nav>
     """
