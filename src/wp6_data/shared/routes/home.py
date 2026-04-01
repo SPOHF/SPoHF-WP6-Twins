@@ -55,13 +55,6 @@ async def home(
             card_class="card card-bg card-bg-chart",
         )}
 
-        {render_card(
-            "Status &amp; Coverage",
-            '<a href="/status" role="button">View Status</a>',
-            description="Data coverage timeline and sync status.",
-            card_class="card-bg card-bg-status",
-        )}
-
         {hero_html}
 
         {render_card("Explore by Sensor Type", sensor_table)}
@@ -69,6 +62,13 @@ async def home(
         {render_card("Explore by Device", device_table)}
 
         {config.home_extra_html}
+
+        {render_card(
+            "Status &amp; Coverage",
+            '<a href="/status" role="button">View Status</a>',
+            description="Data coverage timeline and sync status.",
+            card_class="card-bg card-bg-status",
+        )}
     """
 
     return render_page(config.title, content, data_source=data_source)
