@@ -83,6 +83,7 @@ class TwinConfig:
     )
     provider_dependency: Callable[..., Any] | None = None
     home_extra_html: str = ""
+    require_auth: bool = True
     export_sanitise_names: bool = False
     lifespan_startup: Callable[..., Awaitable[None]] | None = None
     lifespan_shutdown: Callable[..., Awaitable[None]] | None = None

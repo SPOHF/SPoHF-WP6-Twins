@@ -42,6 +42,24 @@ secrets:
   oidcSessionSecret: ""  # Random string for signing session cookies (generate with: python -c "import secrets; print(secrets.token_hex(32))")
   tsdbUrl: ""        # e.g., postgresql://user:pass@host:5432/dbname
 
+# Grey Dashboard (in-memory demo, no auth, no database)
+grey:
+  enabled: false
+  replicas: 1
+  image:
+    repository: ""  # If empty, uses main image.repository with "-grey" suffix
+    tag: ""  # If empty, uses main image.tag
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  ingress:
+    enabled: true
+    host: ""  # Required if enabled: e.g., wp6-grey.example.com
+
 # Red Dashboard (MySQL backend with auth)
 red:
   enabled: false

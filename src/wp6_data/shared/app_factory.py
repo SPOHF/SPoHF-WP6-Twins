@@ -9,8 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from wp6_data.config import OIDCSettings
-from wp6_data.shared.auth import NotAuthenticated, make_auth_router, startup_oidc
+from wp6_data.shared.auth import NotAuthenticated, verify_session_user
 from wp6_data.shared.export import make_download_router
 from wp6_data.shared.provider import TwinConfig
 from wp6_data.shared.routes import api, charts, dashboard_page, health, home
@@ -29,14 +28,21 @@ async def _set_user_context(request: Request, call_next):
         _current_user.reset(token)
 
 
+def _noop_auth() -> None:
+    """No-op auth dependency for public twins."""
+
+
 def create_app(config: TwinConfig) -> FastAPI:
     """Build a complete sensor dashboard app from configuration."""
-    oidc_settings = OIDCSettings()
     configure_dashboard(config.twin_id)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        await startup_oidc(oidc_settings)
+        if config.require_auth:
+            from wp6_data.config import OIDCSettings
+            from wp6_data.shared.auth import startup_oidc
+
+            await startup_oidc(OIDCSettings())
         if config.lifespan_startup:
             await config.lifespan_startup()
         yield
@@ -53,17 +59,24 @@ def create_app(config: TwinConfig) -> FastAPI:
     if config.provider_dependency is not None:
         app.dependency_overrides[get_provider] = config.provider_dependency
 
-    # Middleware (order matters: session must be added last to be outermost)
-    app.add_middleware(BaseHTTPMiddleware, dispatch=_set_user_context)
-    app.add_middleware(SessionMiddleware, secret_key=oidc_settings.session_secret)
+    # For public twins, disable auth on all shared routes
+    if not config.require_auth:
+        app.dependency_overrides[verify_session_user] = _noop_auth
 
-    # Exception handler for unauthenticated requests
-    @app.exception_handler(NotAuthenticated)
-    async def not_authenticated_handler(
-        request: Request, _: NotAuthenticated,
-    ) -> RedirectResponse:
-        request.session["next"] = str(request.url)
-        return RedirectResponse(url="/auth/login")
+    # Middleware
+    if config.require_auth:
+        from wp6_data.config import OIDCSettings
+
+        session_secret = OIDCSettings().session_secret
+        app.add_middleware(BaseHTTPMiddleware, dispatch=_set_user_context)
+        app.add_middleware(SessionMiddleware, secret_key=session_secret)
+
+        @app.exception_handler(NotAuthenticated)
+        async def not_authenticated_handler(
+            request: Request, _: NotAuthenticated,
+        ) -> RedirectResponse:
+            request.session["next"] = str(request.url)
+            return RedirectResponse(url="/auth/login")
 
     # Favicon and static files
     @app.get("/favicon.ico", include_in_schema=False)
@@ -74,8 +87,14 @@ def create_app(config: TwinConfig) -> FastAPI:
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+    # Auth routes (only if auth is enabled)
+    if config.require_auth:
+        from wp6_data.config import OIDCSettings
+        from wp6_data.shared.auth import make_auth_router
+
+        app.include_router(make_auth_router(OIDCSettings()))
+
     # Shared routes
-    app.include_router(make_auth_router(oidc_settings))
     app.include_router(health.router)
     app.include_router(api.router)
     app.include_router(home.router)

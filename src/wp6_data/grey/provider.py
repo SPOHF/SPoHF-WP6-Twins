@@ -1,6 +1,6 @@
-"""Green sensor data provider — in-memory demo data.
+"""Grey sensor data provider — in-memory demo data.
 
-Generates synthetic sensor readings so the green twin can run without
+Generates synthetic sensor readings so the grey twin can run without
 any database. Useful as a POC and as a template for new twins.
 """
 
@@ -58,7 +58,7 @@ def _generate_readings(
     return records
 
 
-class GreenSensorProvider:
+class GreySensorProvider:
     """SensorDataProvider backed by in-memory generated data."""
 
     @property

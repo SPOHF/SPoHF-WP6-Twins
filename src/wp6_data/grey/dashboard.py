@@ -1,4 +1,4 @@
-"""WP6 Green Digital Twin — demo / proof-of-concept.
+"""WP6 Grey Digital Twin — demo / proof-of-concept.
 
 A minimal twin that runs entirely in-memory with generated sensor data.
 Demonstrates the platform: provider + metadata + this file = full dashboard.
@@ -6,7 +6,7 @@ Demonstrates the platform: provider + metadata + this file = full dashboard.
 
 from pathlib import Path
 
-from wp6_data.green.provider import GreenSensorProvider
+from wp6_data.grey.provider import GreySensorProvider
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
 from wp6_data.shared.metadata import MetadataRegistry
@@ -23,12 +23,13 @@ def _herb_card() -> str:
 
 
 config = TwinConfig(
-    twin_id="green",
-    title="SPoHF Green Digital Twin (Demo)",
-    provider=GreenSensorProvider(),
+    twin_id="grey",
+    title="SPoHF Grey Digital Twin (Demo)",
+    provider=GreySensorProvider(),
     metadata=MetadataRegistry(Path(__file__).parent / "metadata.yaml"),
-    export_dir=Path("/tmp/wp6-green-exports"),
+    export_dir=Path("/tmp/wp6-grey-exports"),
     hero_cards=[_herb_card],
+    require_auth=False,
 )
 
 app = create_app(config)

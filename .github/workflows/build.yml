@@ -48,6 +48,8 @@ jobs:
             image_suffix: "-blue"
           - target: red
             image_suffix: "-red"
+          - target: grey
+            image_suffix: "-grey"
 
     steps:
       - uses: actions/checkout@v4

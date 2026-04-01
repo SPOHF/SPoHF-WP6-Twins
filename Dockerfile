@@ -1,8 +1,9 @@
 # Multi-stage build for minimal image size
-# Supports building separate images for blue (TimescaleDB) and red (MySQL) dashboards
+# Supports building separate images for each digital twin dashboard
 #
 # Build blue: docker build --target blue -t wp6-data-blue .
 # Build red:  docker build --target red -t wp6-data-red .
+# Build grey: docker build --target grey -t wp6-data-grey .
 # Build default (blue): docker build -t wp6-data .
 
 FROM python:3.14-slim AS builder
@@ -47,6 +48,10 @@ CMD ["python", "-m", "wp6_data.blue.dashboard"]
 # Red twin
 FROM runtime AS red
 CMD ["python", "-m", "wp6_data.red.dashboard"]
+
+# Grey twin (demo / POC - in-memory data, no database needed)
+FROM runtime AS grey
+CMD ["python", "-m", "wp6_data.grey.dashboard"]
 
 # Default target is blue (for backwards compatibility)
 FROM blue

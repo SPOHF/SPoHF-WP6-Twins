@@ -342,6 +342,8 @@ BASE_CSS = """
                      Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
     }
 
+    /* TODO: DONT put dashboard-specific styles here */
+
     /* --- Dashboard identity: Blue --- */
     [data-dashboard="blue"] {
         --dashboard-primary: #2563eb;
@@ -352,6 +354,17 @@ BASE_CSS = """
         --dashboard-gradient-end: #0ea5e9;
         --dashboard-surface: rgba(37, 99, 235, 0.04);
         --dashboard-surface-hover: rgba(37, 99, 235, 0.08);
+    }
+    /* --- Dashboard identity: Grey --- */
+    [data-dashboard="grey"] {
+        --dashboard-primary: #6b7280;
+        --dashboard-primary-light: #9ca3af;
+        --dashboard-primary-dark: #4b5563;
+        --dashboard-accent: #8b5cf6;
+        --dashboard-gradient-start: #6b7280;
+        --dashboard-gradient-end: #8b5cf6;
+        --dashboard-surface: rgba(107, 114, 128, 0.04);
+        --dashboard-surface-hover: rgba(107, 114, 128, 0.08);
     }
     /* --- Dashboard identity: Red --- */
     [data-dashboard="red"] {
@@ -396,6 +409,10 @@ BASE_CSS = """
     [data-theme="dark"][data-dashboard="red"] {
         --dashboard-surface: rgba(220, 38, 38, 0.08);
         --dashboard-surface-hover: rgba(220, 38, 38, 0.14);
+    }
+    [data-theme="dark"][data-dashboard="grey"] {
+        --dashboard-surface: rgba(107, 114, 128, 0.08);
+        --dashboard-surface-hover: rgba(107, 114, 128, 0.14);
     }
 
     /* --- Typography --- */
@@ -1660,7 +1677,7 @@ SAVE_TO_DASHBOARD_JS = """
 })();
 """
 
-_DASHBOARD_NAMES = {"blue": "SPoHF Blue", "red": "SPoHF Red"}
+_DASHBOARD_NAMES = {"blue": "SPoHF Blue", "red": "SPoHF Red", "grey": "SPoHF Grey"}
 
 
 def _render_source_toggle(data_source: str) -> str:
