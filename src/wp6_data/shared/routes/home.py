@@ -23,7 +23,10 @@ async def home(
     """Dashboard home page — sensor explorer with pluggable hero cards."""
     device_data = await provider.fetch_device_data()
 
-    export_meta = get_export_metadata(config.export_dir)
+    # Exports are only generated for the default (first) data source
+    default_key = config.data_sources[0].key if config.data_sources else None
+    is_default_source = provider.data_source_label in (None, default_key)
+    export_meta = get_export_metadata(config.export_dir) if is_default_source else None
     available_exports = export_meta.get("devices", {}) if export_meta else {}
 
     sensor_table, device_table = build_home_tables(
