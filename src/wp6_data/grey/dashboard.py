@@ -16,8 +16,12 @@ from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 def _herb_card() -> str:
     return render_card(
         "Herb Garden",
-        "<p>This is a demo twin with synthetic sensor data. "
-        "No database needed &mdash; data is generated in-memory.</p>",
+        "<p>This is a demo of the <strong>SPoHF WP6 Data Platform</strong> "
+        "for digital twins. It uses synthetic sensor data generated "
+        "in-memory &mdash; no database or hardware needed.</p>"
+        '<p>Learn more about the project at '
+        '<a href="https://spohf.github.io/SPoHF-WP6-Twins/" '
+        'target="_blank">spohf.github.io/SPoHF-WP6-Twins</a>.</p>',
         card_class="card-bg card-bg-status",
     )
 
