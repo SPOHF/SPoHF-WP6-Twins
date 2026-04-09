@@ -18,10 +18,10 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v8
 
       - name: Set up Python
         run: uv python install
@@ -52,7 +52,7 @@ jobs:
             image_suffix: "-grey"
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Need full history for commit count
 
@@ -85,7 +85,7 @@ jobs:
             type=raw,value=${{ steps.version.outputs.version }}
 
       - name: Build and push (${{ matrix.target }})
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: ${{ matrix.target }}
