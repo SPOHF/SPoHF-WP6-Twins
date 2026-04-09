@@ -221,7 +221,7 @@ class MySQLConnection:
         return df
 
     async def _fetch_all_devices(self) -> dict[str, dict[str, list[str]]]:
-        """Query MySQL for all device IDs across all tables with their measurements."""
+        """Query MySQL for all devices with measurements and reading counts."""
         if not self.pool:
             raise RuntimeError("Not connected")
 
@@ -229,15 +229,20 @@ class MySQLConnection:
         async with self.pool.acquire() as conn, conn.cursor() as cursor:
             for table, cols in SENSOR_TABLES.items():
                 try:
-                    await cursor.execute(f"SELECT DISTINCT device_id FROM {table}")
+                    await cursor.execute(
+                        f"SELECT device_id, COUNT(*) FROM {table} GROUP BY device_id"
+                    )
                     rows = await cursor.fetchall()
                 except Exception:
                     continue
                 measurements = cols + COMMON_MEASUREMENTS
-                for (device_id,) in rows:
+                for device_id, count in rows:
                     if device_id not in devices:
-                        devices[device_id] = {"tables": [], "measurements": []}
+                        devices[device_id] = {
+                            "tables": [], "measurements": [], "readings": 0,
+                        }
                     devices[device_id]["tables"].append(table)
+                    devices[device_id]["readings"] += count
                     for m in measurements:
                         if m not in devices[device_id]["measurements"]:
                             devices[device_id]["measurements"].append(m)

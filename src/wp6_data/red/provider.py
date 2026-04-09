@@ -109,54 +109,29 @@ class RedSensorProvider:
     async def fetch_available_sensors(self) -> list[dict[str, Any]]:
         """Normalise red's device-centric model to [{device, sensor, readings}].
 
-        Red's get_all_devices() returns {device_id: {tables, measurements}}.
-        Red's get_available_sensors() returns [{table, devices, readings, measurements}].
-        We combine them into the blue-style flat list.
+        Red's get_all_devices() returns {device_id: {tables, measurements, readings}}.
+        We flatten into the blue-style flat list.
         """
         all_devices = await self.db.get_all_devices()
-        table_info = await self.db.get_available_sensors()
-
-        # Build lookup: table → {readings, device_count}
-        table_readings: dict[str, int] = {}
-        table_device_count: dict[str, int] = {}
-        for s in table_info:
-            table_readings[s["table"]] = s["readings"]
-            table_device_count[s["table"]] = s["devices"]
 
         result: list[dict[str, Any]] = []
         for device_id, info in sorted(all_devices.items()):
-            # Estimate per-device readings from table totals
-            total = sum(
-                table_readings.get(t, 0) // max(table_device_count.get(t, 1), 1)
-                for t in info["tables"]
-            )
             for measurement in sorted(info["measurements"]):
                 result.append({
                     "device": device_id,
                     "sensor": measurement,
-                    "readings": total,
+                    "readings": info["readings"],
                 })
         return result
 
     async def fetch_device_data(self) -> dict[str, dict]:
         """Device overview for the home page."""
         all_devices = await self.db.get_all_devices()
-        table_info = await self.db.get_available_sensors()
-
-        table_readings: dict[str, int] = {}
-        table_device_count: dict[str, int] = {}
-        for s in table_info:
-            table_readings[s["table"]] = s["readings"]
-            table_device_count[s["table"]] = s["devices"]
 
         device_data: dict[str, dict] = {}
         for device_id, info in all_devices.items():
-            total = sum(
-                table_readings.get(t, 0) // max(table_device_count.get(t, 1), 1)
-                for t in info["tables"]
-            )
             device_data[device_id] = {
                 "sensors": info["measurements"],
-                "readings": total,
+                "readings": info["readings"],
             }
         return device_data
