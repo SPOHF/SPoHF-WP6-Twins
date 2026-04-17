@@ -5,10 +5,9 @@ from typing import Annotated
 
 import plotly.graph_objects as go
 import structlog
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 
-from wp6_data.blue import deps
 from wp6_data.blue.gdd import (
     DEFAULT_BASE_TEMP,
     calculate_daily_gdd,
@@ -17,6 +16,8 @@ from wp6_data.blue.gdd import (
 )
 from wp6_data.red.dli.weather import OpenMeteoClient
 from wp6_data.shared import render_card, render_page
+from wp6_data.shared.routes.deps import get_provider
+from wp6_data.shared.twin import SensorDataProvider
 
 log = structlog.get_logger()
 
@@ -94,6 +95,7 @@ GDD_CSS = """
 
 @router.get("/gdd", response_class=HTMLResponse)
 async def gdd_tracker(
+    provider: Annotated[SensorDataProvider, Depends(get_provider)],
     year: Annotated[int | None, Query(description="Primary year")] = None,
     base: Annotated[float, Query(
         description="Base temperature °C")] = DEFAULT_BASE_TEMP,
@@ -103,11 +105,6 @@ async def gdd_tracker(
         description="Bloom start day of month")] = 1,
 ) -> str:
     """GDD tracker with per-year view and harvest threshold annotations."""
-    pool = deps.get_pool()
-    if pool is None:
-        return render_page(
-            PAGE_TITLE, "<h1>Database not connected</h1>",
-            show_back_link=True)
 
     current_year = date.today().year
     if year is None:
@@ -117,10 +114,9 @@ async def gdd_tracker(
 
     # Fetch ALL data once (cheaper than per-year queries)
     try:
-        df = await deps.fetch_data(
+        df = await provider.fetch_data(
             sensor_tags=[SENSOR_TAG],
             device_names=[DEVICE_NAME],
-            project="yookr-direct",
         )
     except Exception as e:
         return render_page(
