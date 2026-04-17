@@ -5,12 +5,22 @@ from pathlib import Path
 from wp6_data.blue import deps
 from wp6_data.blue.provider import BlueSensorProvider
 from wp6_data.blue.routes import charts as blue_charts
+from wp6_data.blue.routes import gdd as blue_gdd
 from wp6_data.blue.routes import ops
 from wp6_data.config import Settings
+from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
 from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 
 settings = Settings()
+
+
+def _gdd_card() -> str:
+    return render_card(
+        "GDD Tracker",
+        '<a href="/gdd" role="button">GDD Dashboard</a>',
+        description="Growing Degree Days — track cumulative heat for harvest prediction.",
+    )
 
 YOOKR_PROJECT = "yookr-direct"
 
@@ -46,8 +56,8 @@ config = TwinConfig(
         primary="#2563eb", primary_light="#3b82f6", primary_dark="#1d4ed8",
         accent="#0ea5e9", surface_rgb="37, 99, 235",
     ),
-    extra_routers=[ops.router, blue_charts.router],
-    hero_cards=[],
+    extra_routers=[ops.router, blue_charts.router, blue_gdd.router],
+    hero_cards=[_gdd_card],
     export_sanitise_names=True,
     lifespan_startup=_startup,
     lifespan_shutdown=_shutdown,
