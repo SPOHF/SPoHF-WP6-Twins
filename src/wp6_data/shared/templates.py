@@ -1256,6 +1256,21 @@ UNIFIED_CHART_JS = """
         });
     }
 
+    // Deterministic color per series key (avoids color shuffling on reload)
+    var TRACE_COLORS = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+        '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
+        '#c49c94', '#f7b6d2', '#c7c7c7', '#dbdb8d', '#9edae5'
+    ];
+    function keyColor(str) {
+        var h = 0;
+        for (var i = 0; i < str.length; i++) {
+            h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+        }
+        return TRACE_COLORS[Math.abs(h) % TRACE_COLORS.length];
+    }
+
     function bucketTime(isoStr, minutes) {
         if (minutes <= 0) return isoStr;
         var d = new Date(isoStr);
@@ -1312,13 +1327,15 @@ UNIFIED_CHART_JS = """
                 var sd = seriesData[k];
                 if (!sd) return;
                 var axis = activeSeries[k].axis;
+                var color = keyColor(k);
                 var trace = {
                     x: sd.times, y: sd.values,
                     name: sensorLabel(k),
                     mode: 'lines',
-                    yaxis: axis === 'right' ? 'y2' : 'y'
+                    yaxis: axis === 'right' ? 'y2' : 'y',
+                    line: {color: color}
                 };
-                if (axis === 'right') { trace.line = {dash: 'dash'}; }
+                if (axis === 'right') { trace.line.dash = 'dash'; }
                 traces.push(trace);
             });
             if (traces.length > 0) Plotly.addTraces(chartDiv, traces);
@@ -1369,13 +1386,15 @@ UNIFIED_CHART_JS = """
                 var suffix = g.series.length > 1
                     ? ' [' + aggregateFunc.toUpperCase() + '\u00d7' + g.series.length + ']'
                     : '';
+                var color = keyColor(g.label);
                 var trace = {
                     x: merged.times, y: merged.values,
                     name: g.label + suffix,
                     mode: 'lines',
-                    yaxis: g.axis === 'right' ? 'y2' : 'y'
+                    yaxis: g.axis === 'right' ? 'y2' : 'y',
+                    line: {color: color}
                 };
-                if (g.axis === 'right') { trace.line = {dash: 'dash'}; }
+                if (g.axis === 'right') { trace.line.dash = 'dash'; }
                 traces.push(trace);
             });
 
@@ -1415,13 +1434,15 @@ UNIFIED_CHART_JS = """
                 if (aggregateEnabled) {
                     rebuildTraces();
                 } else {
+                    var color = keyColor(key);
                     var trace = {
                         x: times, y: values,
                         name: sensorLabel(key),
                         mode: 'lines',
-                        yaxis: axis === 'right' ? 'y2' : 'y'
+                        yaxis: axis === 'right' ? 'y2' : 'y',
+                        line: {color: color}
                     };
-                    if (axis === 'right') { trace.line = {dash: 'dash'}; }
+                    if (axis === 'right') { trace.line.dash = 'dash'; }
                     Plotly.addTraces(chartDiv, [trace]);
                     activeSeries[key].traceIdx = chartDiv.data.length - 1;
                 }
