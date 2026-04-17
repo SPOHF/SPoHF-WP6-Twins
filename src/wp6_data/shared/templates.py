@@ -728,7 +728,7 @@ BASE_CSS = """
         overflow: hidden;
         border: 1px solid var(--dashboard-primary);
     }
-    .group-btn {
+    .group-btn, .label-btn {
         flex: 1;
         font-size: 0.72rem;
         padding: 0.25rem 0.3rem;
@@ -740,14 +740,14 @@ BASE_CSS = """
         color: var(--dashboard-primary);
         transition: background 0.15s, color 0.15s;
     }
-    .group-btn:not(:last-child) {
+    .group-btn:not(:last-child), .label-btn:not(:last-child) {
         border-right: 1px solid var(--dashboard-primary);
     }
-    .group-btn.active {
+    .group-btn.active, .label-btn.active {
         background: var(--dashboard-primary);
         color: #fff;
     }
-    .group-btn:not(.active):hover {
+    .group-btn:not(.active):hover, .label-btn:not(.active):hover {
         background: color-mix(in srgb, var(--dashboard-primary) 12%, transparent);
     }
     .unit-badge {
@@ -845,6 +845,7 @@ UNIFIED_CHART_JS = """
     // State: map of "device:sensor" -> {axis: "left"|"right", traceIdx: number}
     var activeSeries = {};
     var totalPoints = 0;
+    var currentLabelFormat = 'smart';
 
     // Parse URL params
     var params = new URLSearchParams(window.location.search);
@@ -852,6 +853,10 @@ UNIFIED_CHART_JS = """
     var rightSpecs = (params.get('r') || '').split(',').filter(Boolean);
     var startDate = params.get('start') || '';
     var endDate = params.get('end') || '';
+    var savedLabelFormat = params.get('lbl') || '';
+    if (savedLabelFormat && ['smart', 'short', 'raw'].indexOf(savedLabelFormat) !== -1) {
+        currentLabelFormat = savedLabelFormat;
+    }
 
     // Build initial active set from URL
     var initialLeft = {};
@@ -942,6 +947,22 @@ UNIFIED_CHART_JS = """
                 b.classList.toggle('active', b === btn);
             });
             buildTree(allSensors, currentGrouping);
+        });
+    });
+
+    // Label format toggle
+    var labelBtns = document.querySelectorAll('.label-btn');
+    labelBtns.forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.label === currentLabelFormat);
+        btn.addEventListener('click', function() {
+            var fmt = btn.dataset.label;
+            if (fmt === currentLabelFormat) return;
+            currentLabelFormat = fmt;
+            labelBtns.forEach(function(b) {
+                b.classList.toggle('active', b === btn);
+            });
+            relabelAllTraces();
+            syncUrl();
         });
     });
 
@@ -1122,8 +1143,34 @@ UNIFIED_CHART_JS = """
             return s.device + ':' + s.sensor === key;
         });
         if (!s) return key;
-        var alias = (s.sensor_meta && s.sensor_meta.alias) || s.sensor;
-        return s.device + ' | ' + alias;
+        var sm = s.sensor_meta || {};
+        var dm = s.device_meta || {};
+        var alias = sm.alias || s.sensor;
+
+        if (currentLabelFormat === 'raw') {
+            return s.device + ' | ' + s.sensor;
+        }
+        var pos = dm.position || s.device;
+        if (currentLabelFormat === 'short') {
+            return pos + ' \u2014 ' + alias;
+        }
+        // 'smart': position + alias + intention snippet
+        var label = pos + ' \u2014 ' + alias;
+        if (sm.intention) {
+            var snippet = sm.intention.split(',')[0];
+            if (snippet.length > 30) snippet = snippet.substring(0, 30) + '\u2026';
+            label += ' (' + snippet + ')';
+        }
+        return label;
+    }
+
+    function relabelAllTraces() {
+        var keys = Object.keys(activeSeries);
+        if (keys.length === 0) return;
+        keys.forEach(function(k) {
+            var idx = activeSeries[k].traceIdx;
+            Plotly.restyle(chartDiv, { name: sensorLabel(k) }, [idx]);
+        });
     }
 
     function fetchAndAdd(key, axis, cb) {
@@ -1289,6 +1336,8 @@ UNIFIED_CHART_JS = """
         else p.delete('s');
         if (right.length) p.set('r', right.join(','));
         else p.delete('r');
+        if (currentLabelFormat !== 'smart') p.set('lbl', currentLabelFormat);
+        else p.delete('lbl');
         var newUrl = window.location.pathname;
         var qs = p.toString();
         if (qs) newUrl += '?' + qs;
@@ -1303,7 +1352,7 @@ UNIFIED_CHART_JS = """
     var dateForm = document.getElementById('dateFilter');
     if (dateForm) {
         var params = new URLSearchParams(window.location.search);
-        ['s', 'r'].forEach(function(name) {
+        ['s', 'r', 'lbl'].forEach(function(name) {
             var val = params.get(name);
             if (val) {
                 var input = document.createElement('input');
@@ -1318,7 +1367,7 @@ UNIFIED_CHART_JS = """
     // Also keep hidden fields in sync when series change
     function syncDateFormParams() {
         if (!dateForm) return;
-        ['s', 'r'].forEach(function(name) {
+        ['s', 'r', 'lbl'].forEach(function(name) {
             var existing = dateForm.querySelector(
                 'input[name="' + name + '"]');
             var p = new URLSearchParams(window.location.search);
@@ -1633,6 +1682,7 @@ SAVE_TO_DASHBOARD_JS = """
             relativeDays: parseInt(dialog.querySelector('#save-relative-days').value) || 7,
             start: params.get('start') || '',
             end: params.get('end') || '',
+            lbl: params.get('lbl') || '',
             createdAt: new Date().toISOString()
         };
 
@@ -1857,6 +1907,15 @@ to {end.isoformat()}</summary>
                     >By position</button>
             </div>
             <div id="sensor-panel">Loading sensors...</div>
+            <h4>Labels</h4>
+            <div class="group-toggle">
+                <button class="label-btn active" data-label="smart"
+                    >Smart</button>
+                <button class="label-btn" data-label="short"
+                    >Short</button>
+                <button class="label-btn" data-label="raw"
+                    >Raw ID</button>
+            </div>
         </div>
         <div class="chart-main">
             <button class="panel-toggle outline" id="panel-toggle">
