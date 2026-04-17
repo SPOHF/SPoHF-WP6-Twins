@@ -42,7 +42,7 @@ def render_download_link(name: str, available_exports: dict[str, str]) -> str:
     Returns a link with timestamp if the export exists, or "-" otherwise.
     """
     if name in available_exports:
-        export_ts = available_exports[name][:16].replace("T", " ")
+        export_ts = available_exports[name][:16].replace("T", " ") + " UTC"
         return (
             f'<a href="/download/{name}" title="Download CSV">CSV</a> '
             f"<small>({export_ts})</small>"

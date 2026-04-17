@@ -11,6 +11,7 @@ from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.metadata import MetadataRegistry
 from wp6_data.shared.routes.deps import get_metadata, get_provider
 from wp6_data.shared.templates import resolve_date_range
+from wp6_data.shared.time import to_local_isoformat
 from wp6_data.shared.twin import SensorDataProvider
 
 _settings = Settings()
@@ -74,7 +75,7 @@ async def get_series(
     for _, row in df.iterrows():
         t: datetime = row["time"]
         records.append({
-            "time": t.isoformat(),
+            "time": to_local_isoformat(t),
             "value": None if row["value"] is None else float(row["value"]),
         })
     return {"data": records, "truncated": truncated, "limit": limit}

@@ -25,6 +25,7 @@ from wp6_data.red.dli import (
     predict_natural_dli_from_weather,
 )
 from wp6_data.shared import make_schedule_chart, render_page, utc_day_bounds
+from wp6_data.shared.time import display_tz
 
 router = APIRouter()
 
@@ -255,6 +256,12 @@ async def dli_forecast(
         remainder_dli = estimate_remaining_dli(predicted_df, today, current_hour)
         daily_dli[today]["estimated"] = today_vals_tmp["actual"] + remainder_dli
 
+    # Convert datetimes from UTC to display timezone for chart rendering
+    tz = display_tz()
+    for df in (actual_df, predicted_df, natural_df):
+        if df is not None and not df.empty and "datetime" in df.columns:
+            df["datetime"] = df["datetime"].dt.tz_convert(tz).dt.tz_localize(None)
+
     # Build chart
     title = f"Light Schedule - {start_date}" if start_date == end_date else \
             f"Light Schedule - {start_date} to {end_date}"
@@ -269,7 +276,7 @@ async def dli_forecast(
     for d, values in sorted(daily_dli.items()):
         if d < start_date or d > end_date:
             continue
-        noon = datetime(d.year, d.month, d.day, 12, tzinfo=UTC)
+        noon = datetime(d.year, d.month, d.day, 12)
         parts = []
         if "actual" in values:
             parts.append(f"A:{values['actual']:.1f}")
