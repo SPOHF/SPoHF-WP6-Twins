@@ -620,6 +620,11 @@ BASE_CSS = """
         gap: 0;
         min-height: 600px;
     }
+    body:has(.chart-layout) main {
+        max-width: none;
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
     .sensor-panel {
         width: 260px;
         min-width: 260px;
@@ -895,7 +900,7 @@ UNIFIED_CHART_JS = """
         plot_bgcolor: 'rgba(0,0,0,0)',
         yaxis2: {overlaying: 'y', side: 'right', showgrid: false}
     };
-    Plotly.newPlot(chartDiv, [], layout);
+    Plotly.newPlot(chartDiv, [], layout, {responsive: true});
 
     // Toggle panel
     if (toggleBtn) {
