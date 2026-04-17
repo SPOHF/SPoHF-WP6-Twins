@@ -728,7 +728,7 @@ BASE_CSS = """
         overflow: hidden;
         border: 1px solid var(--dashboard-primary);
     }
-    .group-btn, .label-btn {
+    .group-btn, .label-btn, .agg-btn {
         flex: 1;
         font-size: 0.72rem;
         padding: 0.25rem 0.3rem;
@@ -740,15 +740,23 @@ BASE_CSS = """
         color: var(--dashboard-primary);
         transition: background 0.15s, color 0.15s;
     }
-    .group-btn:not(:last-child), .label-btn:not(:last-child) {
+    .group-btn:not(:last-child), .label-btn:not(:last-child), .agg-btn:not(:last-child) {
         border-right: 1px solid var(--dashboard-primary);
     }
-    .group-btn.active, .label-btn.active {
+    .group-btn.active, .label-btn.active, .agg-btn.active {
         background: var(--dashboard-primary);
         color: #fff;
     }
-    .group-btn:not(.active):hover, .label-btn:not(.active):hover {
+    .group-btn:not(.active):hover, .label-btn:not(.active):hover, .agg-btn:not(.active):hover {
         background: color-mix(in srgb, var(--dashboard-primary) 12%, transparent);
+    }
+    .bucket-slider {
+        font-size: 0.75rem;
+        margin: 0.3rem 0;
+    }
+    .bucket-slider input[type="range"] {
+        width: 100%;
+        margin: 0.2rem 0 0;
     }
     .unit-badge {
         font-size: 0.65rem;
@@ -844,8 +852,13 @@ UNIFIED_CHART_JS = """
 
     // State: map of "device:sensor" -> {axis: "left"|"right", traceIdx: number}
     var activeSeries = {};
+    var seriesData = {};  // key -> {times: [], values: []}
     var totalPoints = 0;
     var currentLabelFormat = 'smart';
+    var aggregateEnabled = false;
+    var aggregateFunc = 'avg';
+    var BUCKET_STEPS = [0, 1, 5, 10, 15, 30, 60, 120, 360, 720, 1440];
+    var bucketMinutes = 10;
 
     // Parse URL params
     var params = new URLSearchParams(window.location.search);
@@ -856,6 +869,15 @@ UNIFIED_CHART_JS = """
     var savedLabelFormat = params.get('lbl') || '';
     if (savedLabelFormat && ['smart', 'short', 'raw'].indexOf(savedLabelFormat) !== -1) {
         currentLabelFormat = savedLabelFormat;
+    }
+    var savedAgg = params.get('agg') || '';
+    if (savedAgg && ['avg', 'max', 'min', 'sum'].indexOf(savedAgg) !== -1) {
+        aggregateEnabled = true;
+        aggregateFunc = savedAgg;
+    }
+    var savedBkt = parseInt(params.get('bkt'));
+    if (!isNaN(savedBkt) && BUCKET_STEPS.indexOf(savedBkt) !== -1) {
+        bucketMinutes = savedBkt;
     }
 
     // Build initial active set from URL
@@ -899,6 +921,7 @@ UNIFIED_CHART_JS = """
             }).sort(function(a, b) { return b - a; });
             Plotly.deleteTraces(chartDiv, indices);
             activeSeries = {};
+            seriesData = {};
             totalPoints = 0;
             // Uncheck all checkboxes
             var cbs = panelDiv.querySelectorAll(
@@ -965,6 +988,60 @@ UNIFIED_CHART_JS = """
             syncUrl();
         });
     });
+
+    // Aggregate toggle (OFF / AVG / MAX / MIN / SUM)
+    var aggBtns = document.querySelectorAll('.agg-btn');
+    function syncAggControls() {
+        if (bucketSlider) bucketSlider.disabled = !aggregateEnabled;
+    }
+    function activeAggValue() {
+        return aggregateEnabled ? aggregateFunc : 'off';
+    }
+    aggBtns.forEach(function(btn) {
+        btn.classList.toggle('active',
+            btn.dataset.agg === activeAggValue());
+        btn.addEventListener('click', function() {
+            var fn = btn.dataset.agg;
+            if (fn === activeAggValue()) return;
+            if (fn === 'off') {
+                aggregateEnabled = false;
+            } else {
+                aggregateEnabled = true;
+                aggregateFunc = fn;
+            }
+            aggBtns.forEach(function(b) {
+                b.classList.toggle('active',
+                    b.dataset.agg === activeAggValue());
+            });
+            syncAggControls();
+            rebuildTraces();
+            syncUrl();
+            updateStats();
+            updateY2();
+        });
+    });
+
+    // Bucket slider
+    var bucketSlider = document.getElementById('bucket-slider');
+    var bucketLabelEl = document.getElementById('bucket-label');
+    if (bucketSlider) {
+        // Set slider position from bucketMinutes value
+        var initIdx = BUCKET_STEPS.indexOf(bucketMinutes);
+        if (initIdx < 0) initIdx = 3;
+        bucketSlider.value = initIdx;
+        bucketLabelEl.textContent = formatBucket(bucketMinutes);
+        bucketSlider.addEventListener('input', function() {
+            bucketLabelEl.textContent = formatBucket(BUCKET_STEPS[parseInt(bucketSlider.value)]);
+        });
+        bucketSlider.addEventListener('change', function() {
+            bucketMinutes = BUCKET_STEPS[parseInt(bucketSlider.value)];
+            if (aggregateEnabled) {
+                rebuildTraces();
+                syncUrl();
+            }
+        });
+    }
+    syncAggControls();
 
     function buildTree(sensors, groupBy) {
         // Group sensors into {groupKey: [{device, sensor, ...}, ...]}
@@ -1165,12 +1242,142 @@ UNIFIED_CHART_JS = """
     }
 
     function relabelAllTraces() {
+        if (aggregateEnabled) { rebuildTraces(); return; }
         var keys = Object.keys(activeSeries);
         if (keys.length === 0) return;
         keys.forEach(function(k) {
             var idx = activeSeries[k].traceIdx;
             Plotly.restyle(chartDiv, { name: sensorLabel(k) }, [idx]);
         });
+    }
+
+    function bucketTime(isoStr, minutes) {
+        if (minutes <= 0) return isoStr;
+        var d = new Date(isoStr);
+        var ms = minutes * 60000;
+        var bucketed = new Date(Math.round(d.getTime() / ms) * ms);
+        var pad = function(n) { return n < 10 ? '0' + n : n; };
+        var Y = bucketed.getFullYear();
+        var M = pad(bucketed.getMonth()+1);
+        var D = pad(bucketed.getDate());
+        var h = pad(bucketed.getHours());
+        var m = pad(bucketed.getMinutes());
+        return Y + '-' + M + '-' + D + 'T' + h + ':' + m + ':00.000000';
+    }
+
+    function formatBucket(mins) {
+        if (mins === 0) return 'Off';
+        if (mins < 60) return mins + ' min';
+        if (mins === 60) return '1h';
+        if (mins < 1440) {
+            var h = mins / 60;
+            return (mins % 60 ? h.toFixed(1) : h.toFixed(0)) + 'h';
+        }
+        return '1 day';
+    }
+
+    function applyAgg(values) {
+        var nums = values.filter(function(v) { return v !== null; });
+        if (nums.length === 0) return null;
+        if (aggregateFunc === 'max') return Math.max.apply(null, nums);
+        if (aggregateFunc === 'min') return Math.min.apply(null, nums);
+        if (aggregateFunc === 'sum') {
+            var s = 0; nums.forEach(function(v) { s += v; }); return s;
+        }
+        // avg
+        var s = 0; nums.forEach(function(v) { s += v; }); return s / nums.length;
+    }
+
+    function rebuildTraces() {
+        // Clear all Plotly traces
+        var traceCount = chartDiv.data ? chartDiv.data.length : 0;
+        if (traceCount > 0) {
+            var indices = [];
+            for (var i = 0; i < traceCount; i++) indices.push(i);
+            Plotly.deleteTraces(chartDiv, indices);
+        }
+
+        var keys = Object.keys(activeSeries);
+        if (keys.length === 0) return;
+
+        if (!aggregateEnabled) {
+            // Individual traces
+            var traces = [];
+            keys.forEach(function(k) {
+                var sd = seriesData[k];
+                if (!sd) return;
+                var axis = activeSeries[k].axis;
+                var trace = {
+                    x: sd.times, y: sd.values,
+                    name: sensorLabel(k),
+                    mode: 'lines',
+                    yaxis: axis === 'right' ? 'y2' : 'y'
+                };
+                if (axis === 'right') { trace.line = {dash: 'dash'}; }
+                traces.push(trace);
+            });
+            if (traces.length > 0) Plotly.addTraces(chartDiv, traces);
+            // Update traceIdx
+            var ti = 0;
+            keys.forEach(function(k) {
+                if (seriesData[k]) { activeSeries[k].traceIdx = ti; ti++; }
+            });
+        } else {
+            // Group by smart label + axis
+            var groups = {};
+            keys.forEach(function(k) {
+                var sd = seriesData[k];
+                if (!sd) return;
+                var label = sensorLabel(k);
+                var axis = activeSeries[k].axis;
+                var groupKey = label + '||' + axis;
+                if (!groups[groupKey]) {
+                    groups[groupKey] = { label: label, axis: axis, series: [] };
+                }
+                groups[groupKey].series.push(sd);
+            });
+
+            var traces = [];
+            var groupKeys = Object.keys(groups);
+            groupKeys.forEach(function(gk) {
+                var g = groups[gk];
+                var merged;
+                if (g.series.length === 1 && bucketMinutes <= 0) {
+                    merged = { times: g.series[0].times, values: g.series[0].values };
+                } else {
+                    // Collect all timestamps into a sorted set
+                    var timeSet = {};
+                    g.series.forEach(function(sd) {
+                        sd.times.forEach(function(t, i) {
+                            var bt = bucketTime(t, bucketMinutes);
+                            if (!timeSet[bt]) timeSet[bt] = [];
+                            if (sd.values[i] !== null) timeSet[bt].push(sd.values[i]);
+                        });
+                    });
+                    var sortedTimes = Object.keys(timeSet).sort();
+                    var aggValues = sortedTimes.map(function(t) {
+                        return applyAgg(timeSet[t]);
+                    });
+                    merged = { times: sortedTimes, values: aggValues };
+                }
+
+                var suffix = g.series.length > 1
+                    ? ' [' + aggregateFunc.toUpperCase() + '\u00d7' + g.series.length + ']'
+                    : '';
+                var trace = {
+                    x: merged.times, y: merged.values,
+                    name: g.label + suffix,
+                    mode: 'lines',
+                    yaxis: g.axis === 'right' ? 'y2' : 'y'
+                };
+                if (g.axis === 'right') { trace.line = {dash: 'dash'}; }
+                traces.push(trace);
+            });
+
+            if (traces.length > 0) Plotly.addTraces(chartDiv, traces);
+            // In aggregate mode, traceIdx doesn't map 1:1 — set to -1
+            keys.forEach(function(k) { activeSeries[k].traceIdx = -1; });
+        }
     }
 
     function fetchAndAdd(key, axis, cb) {
@@ -1189,32 +1396,30 @@ UNIFIED_CHART_JS = """
                 var data = resp.data || [];
                 if (data.length === 0) { if (cb) cb(); return; }
 
-                var times = data.map(function(d) {
-                    return d.time;
-                });
-                var values = data.map(function(d) {
-                    return d.value;
-                });
+                var times = data.map(function(d) { return d.time; });
+                var values = data.map(function(d) { return d.value; });
 
-                var trace = {
-                    x: times,
-                    y: values,
-                    name: sensorLabel(key),
-                    mode: 'lines',
-                    yaxis: axis === 'right' ? 'y2' : 'y'
-                };
-                if (axis === 'right') {
-                    trace.line = {dash: 'dash'};
-                }
-
-                Plotly.addTraces(chartDiv, [trace]);
-                var idx = chartDiv.data.length - 1;
+                seriesData[key] = { times: times, values: values };
                 activeSeries[key] = {
-                    axis: axis, traceIdx: idx, points: data.length,
+                    axis: axis, traceIdx: -1, points: data.length,
                     truncated: !!resp.truncated,
                     limit: resp.limit || 0
                 };
                 totalPoints += data.length;
+
+                if (aggregateEnabled) {
+                    rebuildTraces();
+                } else {
+                    var trace = {
+                        x: times, y: values,
+                        name: sensorLabel(key),
+                        mode: 'lines',
+                        yaxis: axis === 'right' ? 'y2' : 'y'
+                    };
+                    if (axis === 'right') { trace.line = {dash: 'dash'}; }
+                    Plotly.addTraces(chartDiv, [trace]);
+                    activeSeries[key].traceIdx = chartDiv.data.length - 1;
+                }
                 showEmpty(false);
                 if (cb) cb();
             });
@@ -1222,14 +1427,18 @@ UNIFIED_CHART_JS = """
 
     function addOrUpdateSeries(key, axis) {
         if (activeSeries[key]) {
-            // Already loaded — just switch axis (synchronous)
-            var idx = activeSeries[key].traceIdx;
-            var yaxis = axis === 'right' ? 'y2' : 'y';
-            var dash = axis === 'right' ? 'dash' : 'solid';
-            Plotly.restyle(chartDiv, {
-                yaxis: yaxis, 'line.dash': dash, visible: true
-            }, [idx]);
+            // Already loaded — just switch axis
             activeSeries[key].axis = axis;
+            if (aggregateEnabled) {
+                rebuildTraces();
+            } else {
+                var idx = activeSeries[key].traceIdx;
+                var yaxis = axis === 'right' ? 'y2' : 'y';
+                var dash = axis === 'right' ? 'dash' : 'solid';
+                Plotly.restyle(chartDiv, {
+                    yaxis: yaxis, 'line.dash': dash, visible: true
+                }, [idx]);
+            }
             syncUrl();
             updateStats();
             updateY2();
@@ -1248,14 +1457,19 @@ UNIFIED_CHART_JS = """
         if (!activeSeries[key]) return;
         var idx = activeSeries[key].traceIdx;
         totalPoints -= activeSeries[key].points || 0;
-        Plotly.deleteTraces(chartDiv, [idx]);
         delete activeSeries[key];
-        // Reindex remaining traces
-        Object.keys(activeSeries).forEach(function(k) {
-            if (activeSeries[k].traceIdx > idx) {
-                activeSeries[k].traceIdx--;
-            }
-        });
+        delete seriesData[key];
+        if (aggregateEnabled) {
+            rebuildTraces();
+        } else {
+            Plotly.deleteTraces(chartDiv, [idx]);
+            // Reindex remaining traces
+            Object.keys(activeSeries).forEach(function(k) {
+                if (activeSeries[k].traceIdx > idx) {
+                    activeSeries[k].traceIdx--;
+                }
+            });
+        }
         if (Object.keys(activeSeries).length === 0) {
             showEmpty(true);
         }
@@ -1338,6 +1552,10 @@ UNIFIED_CHART_JS = """
         else p.delete('r');
         if (currentLabelFormat !== 'smart') p.set('lbl', currentLabelFormat);
         else p.delete('lbl');
+        if (aggregateEnabled) p.set('agg', aggregateFunc);
+        else p.delete('agg');
+        if (aggregateEnabled && bucketMinutes !== 10) p.set('bkt', bucketMinutes);
+        else p.delete('bkt');
         var newUrl = window.location.pathname;
         var qs = p.toString();
         if (qs) newUrl += '?' + qs;
@@ -1352,7 +1570,7 @@ UNIFIED_CHART_JS = """
     var dateForm = document.getElementById('dateFilter');
     if (dateForm) {
         var params = new URLSearchParams(window.location.search);
-        ['s', 'r', 'lbl'].forEach(function(name) {
+        ['s', 'r', 'lbl', 'agg', 'bkt'].forEach(function(name) {
             var val = params.get(name);
             if (val) {
                 var input = document.createElement('input');
@@ -1367,7 +1585,7 @@ UNIFIED_CHART_JS = """
     // Also keep hidden fields in sync when series change
     function syncDateFormParams() {
         if (!dateForm) return;
-        ['s', 'r', 'lbl'].forEach(function(name) {
+        ['s', 'r', 'lbl', 'agg', 'bkt'].forEach(function(name) {
             var existing = dateForm.querySelector(
                 'input[name="' + name + '"]');
             var p = new URLSearchParams(window.location.search);
@@ -1683,6 +1901,8 @@ SAVE_TO_DASHBOARD_JS = """
             start: params.get('start') || '',
             end: params.get('end') || '',
             lbl: params.get('lbl') || '',
+            agg: params.get('agg') || '',
+            bkt: params.get('bkt') || '',
             createdAt: new Date().toISOString()
         };
 
@@ -1915,6 +2135,19 @@ to {end.isoformat()}</summary>
                     >Short</button>
                 <button class="label-btn" data-label="raw"
                     >Raw ID</button>
+            </div>
+            <small>Aggregate matching labels</small>
+            <div class="group-toggle">
+                <button class="agg-btn active" data-agg="off">OFF</button>
+                <button class="agg-btn" data-agg="avg">AVG</button>
+                <button class="agg-btn" data-agg="max">MAX</button>
+                <button class="agg-btn" data-agg="min">MIN</button>
+                <button class="agg-btn" data-agg="sum">SUM</button>
+            </div>
+            <div class="bucket-slider">
+                <label>Bucket: <span id="bucket-label">10 min</span></label>
+                <input type="range" id="bucket-slider"
+                    min="0" max="10" value="3" step="1">
             </div>
         </div>
         <div class="chart-main">
