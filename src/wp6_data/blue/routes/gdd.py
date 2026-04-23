@@ -27,19 +27,22 @@ SENSOR_TAG = "airTemperature"
 DEVICE_NAME = "weatherstation"
 PAGE_TITLE = "SPoHF Blue - GDD Tracker"
 
-VARIETY = "Duke"
+VARIETY = "Cargo"
 
-# Duke bloom-to-harvest thresholds (GDD base 7.2°C, from full bloom).
-# Source: Carlson & Hancock (1991), section 2.3 of research doc.
-# Calibrate locally over 2-3 seasons by recording actual event dates.
+# Cargo bloom-to-harvest thresholds (GDD base 7.2°C, from full bloom).
+# No published Cargo-specific GDD data exists; these are Duke values
+# (Carlson & Hancock 1991) scaled ×1.40 because Cargo is classified
+# Mid/Late season (MSU E3490, 2024) vs Duke Early — see
+# docs/research/cargo-blueberry-gdd.md. Calibrate locally over 2-3
+# seasons by recording actual event dates.
 THRESHOLDS = [
-    (100, "Petal fall", "#84cc16"),
-    (300, "Green fruit", "#65a30d"),
-    (500, "Fruit coloring — start monitoring", "#f59e0b"),
-    (650, "First pick — start scouting", "#f97316"),
-    (750, "First harvest", "#ef4444"),
-    (850, "Peak harvest", "#dc2626"),
-    (900, "Late harvest", "#991b1b"),
+    (140, "Petal fall", "#84cc16"),
+    (420, "Green fruit", "#65a30d"),
+    (700, "Fruit coloring — start monitoring", "#f59e0b"),
+    (910, "First pick — start scouting", "#f97316"),
+    (1050, "First harvest", "#ef4444"),
+    (1190, "Peak harvest", "#dc2626"),
+    (1260, "Late harvest", "#991b1b"),
 ]
 
 # Colors for year traces
