@@ -26,7 +26,7 @@ echo "=== SPoHF Datalake Full Sync ==="
 
 echo "--- Suspending CronJobs ---"
 for cj in "${CRONJOBS[@]}"; do
-  kubectl patch cronjob "$cj" -n "$NAMESPACE" -p '{"spec":{"suspend":true}}'
+  kubectl patch cronjob "$cj" -n "$NAMESPACE" -p '{"spec":{"suspend":true}}' 2>/dev/null || true
 done
 
 kubectl delete job "$JOB_NAME" -n "$NAMESPACE" --ignore-not-found

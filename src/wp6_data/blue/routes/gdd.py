@@ -229,14 +229,14 @@ async def gdd_tracker(
     if predicted_total is not None:
         pred_card = f"""
             <article>
-                <div class="stat-value">{predicted_total:.0f}</div>
+                <div class="stat-value">{predicted_total:.0f} °C·d</div>
                 <small>Predicted +14d</small>
             </article>"""
 
     stats_html = f"""
         <div class="stats-grid">
             <article>
-                <div class="stat-value">{total_gdd:.0f}</div>
+                <div class="stat-value">{total_gdd:.0f} °C·d</div>
                 <small>Cumulative GDD ({year})</small>
             </article>
             {pred_card}
@@ -245,7 +245,7 @@ async def gdd_tracker(
                 <small>Days since bloom</small>
             </article>
             <article>
-                <div class="stat-value">{avg_daily:.1f}</div>
+                <div class="stat-value">{avg_daily:.1f} °C·d</div>
                 <small>Avg daily GDD</small>
             </article>
         </div>"""
@@ -257,10 +257,19 @@ async def gdd_tracker(
     # Data table for primary year
     table_html = _build_table(year_curves.get(year, {}).get("df"))
 
+    formula_html = f"""
+        <code>Daily GDD = max(0, (T<sub>max</sub> + T<sub>min</sub>)
+        / 2 &minus; {base}°C)</code><br>
+        <small>Each day's GDD (in °C·d) is the average temperature
+        minus the base, clamped to zero. Accumulated from full bloom.
+        </small>
+    """
+
     content = f"""
         <h1>GDD Tracker — {VARIETY}</h1>
         {year_toggle}
         {controls}
+        {render_card("How GDD works", formula_html)}
         {render_card("Summary", stats_html)}
         {chart_html}
         {render_card("Daily GDD — " + str(year), table_html)}
@@ -305,7 +314,7 @@ def _controls_html(
             <div>
                 <label for="base">Base temp (°C)</label>
                 <input type="number" id="base" name="base"
-                    value="{base}" step="0.5" min="0" max="20">
+                    value="{base}" step="0.1" min="0" max="20">
             </div>
             <div>
                 <label for="biofix_month">Full bloom month</label>
@@ -423,7 +432,7 @@ def _build_chart(
     fig.update_layout(
         template="plotly_white",
         title=f"{VARIETY} — Cumulative GDD (base {base}°C, full bloom {bloom_label})",
-        yaxis_title="GDD",
+        yaxis_title="GDD (°C·d)",
         xaxis={"type": "date", "tickformat": "%b %d"},
         height=500,
         hovermode="x unified",
