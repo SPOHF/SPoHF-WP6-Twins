@@ -42,7 +42,7 @@ config = TwinConfig(
             label="SPoHF Datalake",
             provider=BlueSensorProvider(
                 source_key="spohf-datalake",
-                weather_station_device="351516175282524",
+                weather_station_device="weatherstation",
             ),
         ),
         DataSource(
