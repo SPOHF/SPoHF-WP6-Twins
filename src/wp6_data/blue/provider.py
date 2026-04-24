@@ -22,13 +22,24 @@ class BlueSensorProvider:
         *,
         project: str | None = None,
         source_key: str | None = None,
+        weather_station_device: str | None = None,
     ) -> None:
         self._project = project
         self._source_key = source_key
+        self._weather_station_device = weather_station_device
 
     @property
     def data_source_label(self) -> str | None:
         return self._source_key
+
+    @property
+    def weather_station_device(self) -> str | None:
+        """Device name this source uses for the outdoor weather station.
+
+        ``None`` when the source has no weather station — callers (e.g.
+        the GDD tracker) should render an explicit "not available" state.
+        """
+        return self._weather_station_device
 
     async def fetch_data(
         self,

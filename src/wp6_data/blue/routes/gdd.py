@@ -14,10 +14,10 @@ from wp6_data.blue.gdd import (
     cumulative_gdd_from_biofix,
     gdd_from_forecasts,
 )
+from wp6_data.blue.provider import BlueSensorProvider
 from wp6_data.red.dli.weather import OpenMeteoClient
 from wp6_data.shared import render_card, render_page
 from wp6_data.shared.routes.deps import get_provider
-from wp6_data.shared.twin import SensorDataProvider
 
 log = structlog.get_logger()
 
@@ -37,9 +37,9 @@ THRESHOLDS = [
     (393, "Shoot flowering (376–409)", "#81ec48"),
     (559, "Peak flowering (552–565)", "#1bbe18"),
     (768, "90% bud break (619–917)", "#0bf5e2"),
-    (1100, "Early harvest (?) (1100)", "#2790db"),
+    (1200, "Early harvest (?) (1200)", "#2790db"),
     (1500, "Full harvest (?) (1500)", "#1634f9"),
-    (1700, "Late harvest (?) (1700)", "#6e179d")
+    (1650, "Late harvest (?) (1650)", "#6e179d")
 ]
 
 # Colors for year traces
@@ -93,24 +93,9 @@ GDD_CSS = """
 """
 
 
-async def _resolve_devices_for_sensor(
-    provider: SensorDataProvider,
-    sensor_tag: str,
-) -> list[str]:
-    """Return device_names on this provider that publish ``sensor_tag``.
-
-    The yookr and spohf-datalake sources label the same physical weather
-    station differently (yookr maps to "weatherstation" via its sensor
-    registry; spohf-datalake uses the raw IMEI). Resolving at request time
-    keeps the chart working on both without hardcoding either label.
-    """
-    sensors = await provider.fetch_available_sensors()
-    return [s["device"] for s in sensors if s.get("sensor") == sensor_tag]
-
-
 @router.get("/gdd", response_class=HTMLResponse)
 async def gdd_tracker(
-    provider: Annotated[SensorDataProvider, Depends(get_provider)],
+    provider: Annotated[BlueSensorProvider, Depends(get_provider)],
     year: Annotated[int | None, Query(description="Primary year")] = None,
     base: Annotated[float, Query(
         description="Base temperature °C")] = DEFAULT_BASE_TEMP,
@@ -127,28 +112,23 @@ async def gdd_tracker(
 
     biofix_md = (biofix_month, biofix_day)
 
-    # Resolve which device(s) on this data source publish airTemperature
-    # (device naming differs between yookr and spohf-datalake).
-    try:
-        device_names = await _resolve_devices_for_sensor(provider, SENSOR_TAG)
-    except Exception as e:
-        return render_page(
-            PAGE_TITLE, f"<h1>Error: {e}</h1>",
-            show_back_link=True)
-
-    if not device_names:
+    # Each data source declares its own weather-station device name — yookr
+    # labels it "weatherstation" via its CSV registry, spohf-datalake uses
+    # the raw IMEI or has no weather station at all. Provider owns that fact.
+    device = provider.weather_station_device
+    if device is None:
         return render_page(
             PAGE_TITLE,
             "<h1>GDD Tracker</h1>"
-            f"<p>No device publishes <code>{SENSOR_TAG}</code> "
-            "on this data source.</p>",
+            "<p>GDD is not available on this data source "
+            "(no weather station configured).</p>",
             show_back_link=True, extra_css=GDD_CSS)
 
     # Fetch ALL data once (cheaper than per-year queries)
     try:
         df = await provider.fetch_data(
             sensor_tags=[SENSOR_TAG],
-            device_names=device_names,
+            device_names=[device],
         )
     except Exception as e:
         return render_page(
@@ -160,7 +140,7 @@ async def gdd_tracker(
             PAGE_TITLE,
             "<h1>GDD Tracker</h1>"
             f"<p>No <code>{SENSOR_TAG}</code> readings found "
-            f"(devices: {', '.join(device_names)}).</p>",
+            f"on <code>{device}</code>.</p>",
             show_back_link=True, extra_css=GDD_CSS)
 
     # Calculate daily GDD for ALL data

@@ -40,13 +40,18 @@ config = TwinConfig(
         DataSource(
             key="spohf-datalake",
             label="SPoHF Datalake",
-            provider=BlueSensorProvider(source_key="spohf-datalake"),
+            provider=BlueSensorProvider(
+                source_key="spohf-datalake",
+                weather_station_device="351516175282524",
+            ),
         ),
         DataSource(
             key="yookr",
             label="Yookr API",
             provider=BlueSensorProvider(
-                project=YOOKR_PROJECT, source_key="yookr",
+                project=YOOKR_PROJECT,
+                source_key="yookr",
+                weather_station_device="weatherstation",
             ),
         ),
     ],
