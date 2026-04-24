@@ -862,7 +862,7 @@ UNIFIED_CHART_JS = """
     var currentLabelFormat = 'smart';
     var aggregateEnabled = false;
     var aggregateFunc = 'avg';
-    var BUCKET_STEPS = [0, 1, 5, 10, 15, 30, 60, 120, 360, 720, 1440];
+    var BUCKET_STEPS = [0, 1, 5, 10, 15, 30, 60, 120, 360, 720, 1440, 10080, 20160, 43200];
     var bucketMinutes = 10;
 
     // Parse URL params
@@ -1293,7 +1293,11 @@ UNIFIED_CHART_JS = """
             var h = mins / 60;
             return (mins % 60 ? h.toFixed(1) : h.toFixed(0)) + 'h';
         }
-        return '1 day';
+        if (mins === 1440) return '1 day';
+        if (mins === 10080) return '1 week';
+        if (mins === 20160) return '2 weeks';
+        if (mins === 43200) return '1 month';
+        return (mins / 1440) + ' days';
     }
 
     function applyAgg(values) {
@@ -2173,7 +2177,7 @@ to {end.isoformat()}</summary>
             <div class="bucket-slider">
                 <label>Bucket: <span id="bucket-label">10 min</span></label>
                 <input type="range" id="bucket-slider"
-                    min="0" max="10" value="3" step="1">
+                    min="0" max="13" value="3" step="1">
             </div>
         </div>
         <div class="chart-main">
