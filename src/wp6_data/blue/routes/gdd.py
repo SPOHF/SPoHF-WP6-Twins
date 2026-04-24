@@ -24,25 +24,22 @@ log = structlog.get_logger()
 router = APIRouter()
 
 SENSOR_TAG = "airTemperature"
-DEVICE_NAME = "weatherstation"
 PAGE_TITLE = "SPoHF Blue - GDD Tracker"
 
 VARIETY = "Cargo"
 
-# Cargo bloom-to-harvest thresholds (GDD base 7.2°C, from full bloom).
-# No published Cargo-specific GDD data exists; these are Duke values
-# (Carlson & Hancock 1991) scaled ×1.40 because Cargo is classified
-# Mid/Late season (MSU E3490, 2024) vs Duke Early — see
-# docs/research/cargo-blueberry-gdd.md. Calibrate locally over 2-3
-# seasons by recording actual event dates.
+# Phenology thresholds — GDD base 0°C accumulated from Jan 1 (European
+# convention). Values from private communication; no published Cargo-
+# specific data. Ripening thresholds are intentionally absent — calibrate
+# locally once observed pick dates are available.
 THRESHOLDS = [
-    (140, "Petal fall", "#84cc16"),
-    (420, "Green fruit", "#65a30d"),
-    (700, "Fruit coloring — start monitoring", "#f59e0b"),
-    (910, "First pick — start scouting", "#f97316"),
-    (1050, "First harvest", "#ef4444"),
-    (1190, "Peak harvest", "#dc2626"),
-    (1260, "Late harvest", "#991b1b"),
+    (243, "Bud break (222–265)", "#cc7716"),
+    (393, "Shoot flowering (376–409)", "#81ec48"),
+    (559, "Peak flowering (552–565)", "#1bbe18"),
+    (768, "90% bud break (619–917)", "#0bf5e2"),
+    (1100, "Early harvest (?) (1100)", "#2790db"),
+    (1400, "Full harvest (?) (1400)", "#1634f9"),
+    (1600, "Late harvest (?) (1600)", "#6e179d")
 ]
 
 # Colors for year traces
@@ -96,6 +93,21 @@ GDD_CSS = """
 """
 
 
+async def _resolve_devices_for_sensor(
+    provider: SensorDataProvider,
+    sensor_tag: str,
+) -> list[str]:
+    """Return device_names on this provider that publish ``sensor_tag``.
+
+    The yookr and spohf-datalake sources label the same physical weather
+    station differently (yookr maps to "weatherstation" via its sensor
+    registry; spohf-datalake uses the raw IMEI). Resolving at request time
+    keeps the chart working on both without hardcoding either label.
+    """
+    sensors = await provider.fetch_available_sensors()
+    return [s["device"] for s in sensors if s.get("sensor") == sensor_tag]
+
+
 @router.get("/gdd", response_class=HTMLResponse)
 async def gdd_tracker(
     provider: Annotated[SensorDataProvider, Depends(get_provider)],
@@ -103,9 +115,9 @@ async def gdd_tracker(
     base: Annotated[float, Query(
         description="Base temperature °C")] = DEFAULT_BASE_TEMP,
     biofix_month: Annotated[int, Query(
-        description="Bloom start month (1-12)")] = 4,
+        description="Biofix month (1-12)")] = 1,
     biofix_day: Annotated[int, Query(
-        description="Bloom start day of month")] = 1,
+        description="Biofix day of month")] = 1,
 ) -> str:
     """GDD tracker with per-year view and harvest threshold annotations."""
 
@@ -115,11 +127,28 @@ async def gdd_tracker(
 
     biofix_md = (biofix_month, biofix_day)
 
+    # Resolve which device(s) on this data source publish airTemperature
+    # (device naming differs between yookr and spohf-datalake).
+    try:
+        device_names = await _resolve_devices_for_sensor(provider, SENSOR_TAG)
+    except Exception as e:
+        return render_page(
+            PAGE_TITLE, f"<h1>Error: {e}</h1>",
+            show_back_link=True)
+
+    if not device_names:
+        return render_page(
+            PAGE_TITLE,
+            "<h1>GDD Tracker</h1>"
+            f"<p>No device publishes <code>{SENSOR_TAG}</code> "
+            "on this data source.</p>",
+            show_back_link=True, extra_css=GDD_CSS)
+
     # Fetch ALL data once (cheaper than per-year queries)
     try:
         df = await provider.fetch_data(
             sensor_tags=[SENSOR_TAG],
-            device_names=[DEVICE_NAME],
+            device_names=device_names,
         )
     except Exception as e:
         return render_page(
@@ -130,7 +159,8 @@ async def gdd_tracker(
         return render_page(
             PAGE_TITLE,
             "<h1>GDD Tracker</h1>"
-            f"<p>No temperature data for {DEVICE_NAME}:{SENSOR_TAG}.</p>",
+            f"<p>No <code>{SENSOR_TAG}</code> readings found "
+            f"(devices: {', '.join(device_names)}).</p>",
             show_back_link=True, extra_css=GDD_CSS)
 
     # Calculate daily GDD for ALL data
@@ -146,7 +176,7 @@ async def gdd_tracker(
     try:
         primary_biofix = date(year, *biofix_md)
     except ValueError:
-        primary_biofix = date(year, 4, 15)
+        primary_biofix = date(year, 1, 1)
 
     year_curves: dict[int, dict] = {}
     for y in available_years:
@@ -245,7 +275,7 @@ async def gdd_tracker(
             {pred_card}
             <article>
                 <div class="stat-value">{days_count}</div>
-                <small>Days since bloom</small>
+                <small>Days since biofix</small>
             </article>
             <article>
                 <div class="stat-value">{avg_daily:.1f} °C·d</div>
@@ -264,7 +294,8 @@ async def gdd_tracker(
         <code>Daily GDD = max(0, (T<sub>max</sub> + T<sub>min</sub>)
         / 2 &minus; {base}°C)</code><br>
         <small>Each day's GDD (in °C·d) is the average temperature
-        minus the base, clamped to zero. Accumulated from full bloom.
+        minus the base, clamped to zero. Accumulated from biofix
+        (default: Jan 1, European convention).
         </small>
     """
 
@@ -310,7 +341,7 @@ def _controls_html(
     biofix_md: tuple[int, int],
     year: int,
 ) -> str:
-    """Render base temp and bloom date controls."""
+    """Render base temp and biofix controls."""
     return f"""
         <form method="get" class="gdd-controls">
             <input type="hidden" name="year" value="{year}">
@@ -320,19 +351,19 @@ def _controls_html(
                     value="{base}" step="0.1" min="0" max="20">
             </div>
             <div>
-                <label for="biofix_month">Full bloom month</label>
+                <label for="biofix_month">Biofix month</label>
                 <input type="number" id="biofix_month"
                     name="biofix_month"
                     value="{biofix_md[0]}" min="1" max="12">
             </div>
             <div>
-                <label for="biofix_day">Full bloom day</label>
+                <label for="biofix_day">Biofix day</label>
                 <input type="number" id="biofix_day"
                     name="biofix_day"
                     value="{biofix_md[1]}" min="1" max="31">
             </div>
             <small style="align-self:center;opacity:0.7">
-                ~50% of flowers open</small>
+                GDD accumulation start</small>
             <button type="submit">Update</button>
         </form>
     """
@@ -431,10 +462,10 @@ def _build_chart(
             annotation_font_color=color,
         )
 
-    bloom_label = f"{biofix_md[1]}/{biofix_md[0]}"
+    biofix_label = f"{biofix_md[1]}/{biofix_md[0]}"
     fig.update_layout(
         template="plotly_white",
-        title=f"{VARIETY} — Cumulative GDD (base {base}°C, full bloom {bloom_label})",
+        title=f"{VARIETY} — Cumulative GDD (base {base}°C, biofix {biofix_label})",
         yaxis_title="GDD (°C·d)",
         xaxis={"type": "date", "tickformat": "%b %d"},
         height=500,

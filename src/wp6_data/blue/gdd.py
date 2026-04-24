@@ -19,10 +19,7 @@ import pandas as pd
 if TYPE_CHECKING:
     from wp6_data.red.dli.weather import DailyForecast
 
-DEFAULT_BASE_TEMP = 7.2  # °C (45°F), standard for northern highbush blueberry
-DEFAULT_CHILL_THRESHOLD = 7.2  # °C — hours below this count as chill hours
-# hours for Cargo dormancy break; 800–1000h bucket per US PP24,661.
-DEFAULT_CHILL_REQUIREMENT = 1000
+DEFAULT_BASE_TEMP = 5.0  # °C, European convention; biofix = Jan 1
 
 # Physically plausible range for outdoor air temperature (°C).
 # Values outside this range are sensor errors (e.g. 0xFFFFFFFF overflow).
