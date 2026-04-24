@@ -56,12 +56,10 @@ A setup is being made for measuring at different heights:
 - light (PAR)
 - temperature
 - humidity
-- fruit thickness
 
-From here we can visualize and model the microclimate around a single plant and its growth.
+From here we can visualize and model the microclimate around a single plant.
 
 This ultimately prescribe actions that lead to reduced costs without impacting the harvest.
-
 these actions may include: leaf maintenance, heat control, light control and positioning and water control.
 
 
