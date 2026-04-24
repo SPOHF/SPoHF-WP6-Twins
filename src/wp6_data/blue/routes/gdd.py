@@ -38,8 +38,8 @@ THRESHOLDS = [
     (559, "Peak flowering (552–565)", "#1bbe18"),
     (768, "90% bud break (619–917)", "#0bf5e2"),
     (1100, "Early harvest (?) (1100)", "#2790db"),
-    (1400, "Full harvest (?) (1400)", "#1634f9"),
-    (1600, "Late harvest (?) (1600)", "#6e179d")
+    (1500, "Full harvest (?) (1500)", "#1634f9"),
+    (1700, "Late harvest (?) (1700)", "#6e179d")
 ]
 
 # Colors for year traces
