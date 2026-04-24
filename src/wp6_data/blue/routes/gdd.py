@@ -14,16 +14,17 @@ from wp6_data.blue.gdd import (
     cumulative_gdd_from_biofix,
     gdd_from_forecasts,
 )
-from wp6_data.blue.provider import BlueSensorProvider
 from wp6_data.red.dli.weather import OpenMeteoClient
 from wp6_data.shared import render_card, render_page
 from wp6_data.shared.routes.deps import get_provider
+from wp6_data.shared.twin import SensorDataProvider
 
 log = structlog.get_logger()
 
 router = APIRouter()
 
 SENSOR_TAG = "airTemperature"
+DEVICE_NAME = "weatherstation"
 PAGE_TITLE = "SPoHF Blue - GDD Tracker"
 
 VARIETY = "Cargo"
@@ -95,7 +96,7 @@ GDD_CSS = """
 
 @router.get("/gdd", response_class=HTMLResponse)
 async def gdd_tracker(
-    provider: Annotated[BlueSensorProvider, Depends(get_provider)],
+    provider: Annotated[SensorDataProvider, Depends(get_provider)],
     year: Annotated[int | None, Query(description="Primary year")] = None,
     base: Annotated[float, Query(
         description="Base temperature °C")] = DEFAULT_BASE_TEMP,
@@ -112,36 +113,25 @@ async def gdd_tracker(
 
     biofix_md = (biofix_month, biofix_day)
 
-    # Each data source declares its own weather-station device name — yookr
-    # labels it "weatherstation" via its CSV registry, spohf-datalake uses
-    # the raw IMEI or has no weather station at all. Provider owns that fact.
-    device = provider.weather_station_device
-    if device is None:
-        return render_page(
-            PAGE_TITLE,
-            "<h1>GDD Tracker</h1>"
-            "<p>GDD is not available on this data source "
-            "(no weather station configured).</p>",
-            show_back_link=True, extra_css=GDD_CSS)
-
     # Fetch ALL data once (cheaper than per-year queries)
     try:
         df = await provider.fetch_data(
             sensor_tags=[SENSOR_TAG],
-            device_names=[device],
+            device_names=[DEVICE_NAME],
         )
     except Exception as e:
         return render_page(
             PAGE_TITLE, f"<h1>Error: {e}</h1>",
-            show_back_link=True)
+            show_back_link=True,
+            data_source=provider.data_source_label)
 
     if df.empty:
         return render_page(
             PAGE_TITLE,
             "<h1>GDD Tracker</h1>"
-            f"<p>No <code>{SENSOR_TAG}</code> readings found "
-            f"on <code>{device}</code>.</p>",
-            show_back_link=True, extra_css=GDD_CSS)
+            f"<p>No temperature data for {DEVICE_NAME}:{SENSOR_TAG}.</p>",
+            show_back_link=True, extra_css=GDD_CSS,
+            data_source=provider.data_source_label)
 
     # Calculate daily GDD for ALL data
     daily_all = calculate_daily_gdd(df, base_temp=base)
@@ -291,7 +281,8 @@ async def gdd_tracker(
 
     return render_page(
         PAGE_TITLE, content,
-        show_back_link=True, extra_css=GDD_CSS)
+        show_back_link=True, extra_css=GDD_CSS,
+        data_source=provider.data_source_label)
 
 
 def _year_toggle_html(
