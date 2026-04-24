@@ -27,8 +27,8 @@ for port in "${PORTS[@]}"; do
 done
 
 echo "Starting dashboards... grey at 8000, blue at 8001, red at 8002"
-uv run uvicorn wp6_data.grey.dashboard:app --host 0.0.0.0 --port 8000 --reload &
-uv run uvicorn wp6_data.blue.dashboard:app --host 0.0.0.0 --port 8001 --reload &
-uv run uvicorn wp6_data.red.dashboard:app  --host 0.0.0.0 --port 8002 --reload &
+uv run uvicorn wp6_data.grey.dashboard:app --host 0.0.0.0 --port 8000 --reload --reload-dir src/wp6_data &
+uv run uvicorn wp6_data.blue.dashboard:app --host 0.0.0.0 --port 8001 --reload --reload-dir src/wp6_data &
+uv run uvicorn wp6_data.red.dashboard:app  --host 0.0.0.0 --port 8002 --reload --reload-dir src/wp6_data &
 
 wait
