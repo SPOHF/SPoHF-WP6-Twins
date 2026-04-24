@@ -15,10 +15,11 @@ The project contains two twins that are based on studies from other work package
 
 ### Dashboards
 
-| Dashboard | Status | Reason/remark | Data source | Auth | URL |
-|-----------|--------| -------|---------|------|-----|
-| **Blue** |🔴 Usage discouraged | Data source not ready | Synced from SPoHF API (AppComm) | Public | [wp6-blue.spohf.fontysvenlo.dev](https://wp6-blue.spohf.fontysvenlo.dev) |
-| **Red** | 🟢 Ready for use | Temporary data source (data from october 2025) | Fontys GreenTechLab database | Basic Auth | [wp6-red.spohf.fontysvenlo.dev](https://wp6-red.spohf.fontysvenlo.dev) |
+| Dashboard | Status | Reason/remark | Data source | URL |
+|-----------|--------| -------|---------|-----|
+| **Blue** |🟢 Ready for use | SPoHF data lake | Synced from SPoHF API (AppComm) | [wp6-blue.spohf.fontysvenlo.dev](https://wp6-blue.spohf.fontysvenlo.dev) |
+| **Red** | 🟢 Ready for use | Temporary data source (data from october 2025) | Fontys GreenTechLab database | [wp6-red.spohf.fontysvenlo.dev](https://wp6-red.spohf.fontysvenlo.dev) |
+| **Grey** | 🟡 Public demo only | Demonstrating generic platform capabilities (public)  | Fake data | [wp6-grey.spohf.fontysvenlo.dev](https://wp6-grey.spohf.fontysvenlo.dev) |
 
 ## Two twins
 
