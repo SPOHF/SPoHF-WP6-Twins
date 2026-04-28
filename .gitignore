@@ -36,3 +36,9 @@ exports-blue/
 
 # Pesky temp microsoft files
 ~$*.docx
+
+# Experiments with dashboards
+dev/data/
+*.parquet
+*.csv
+.ipynb_checkpoints/

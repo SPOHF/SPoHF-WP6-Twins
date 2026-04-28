@@ -1,0 +1,25 @@
+<svg width="670" height="609" viewBox="0 0 670 609" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Frame 1">
+<g id="greenhouse">
+<path id="roof" d="M334.543 1.36035C334.83 1.21277 335.17 1.21277 335.457 1.36035L617.316 146.36C618.249 146.84 617.907 148.25 616.858 148.25H53.1416C52.0926 148.25 51.7508 146.84 52.6836 146.36L334.543 1.36035Z" stroke="black" stroke-width="2"/>
+<rect id="greenhouse_2" x="51" y="152" width="568" height="456" rx="3" stroke="black" stroke-width="2"/>
+<line id="node" x1="334.5" y1="590" x2="334.5" y2="253" stroke="black"/>
+</g>
+<g id="sensors">
+<rect id="s_01" x="320.5" y="94.5" width="29" height="29" rx="0.5" stroke="black"/>
+<rect id="s_02" x="320.5" y="194.5" width="29" height="29" rx="0.5" stroke="black"/>
+<rect id="s_10" x="320.5" y="301.5" width="29" height="29" rx="0.5" stroke="black"/>
+<rect id="s_14" x="320.5" y="513.5" width="29" height="29" rx="0.5" stroke="black"/>
+<rect id="s_13" x="320.5" y="460.5" width="29" height="29" rx="0.5" stroke="black"/>
+<rect id="s_12" x="320.5" y="407.5" width="29" height="29" rx="0.5" stroke="black"/>
+<rect id="s_11" x="320.5" y="354.5" width="29" height="29" rx="0.5" stroke="black"/>
+<rect id="s_01_bg" x="200" y="84" width="270" height="50" fill="#D9D9D9" fill-opacity="0.01"/>
+<rect id="s_02_bg" x="200" y="183" width="270" height="50" fill="#D9D9D9" fill-opacity="0.01"/>
+<rect id="s_12_bg" x="200" y="399" width="270" height="50" fill="#D9D9D9" fill-opacity="0.01"/>
+<rect id="s_10_bg" x="200" y="293" width="270" height="50" fill="#D9D9D9" fill-opacity="0.01"/>
+<rect id="s_11_bg" x="200" y="346" width="270" height="50" fill="#D9D9D9" fill-opacity="0.01"/>
+<rect id="s_14_bg" x="200" y="505" width="270" height="50" fill="#D9D9D9" fill-opacity="0.01"/>
+<rect id="s_13_bg" x="200" y="452" width="270" height="50" fill="#D9D9D9" fill-opacity="0.01"/>
+</g>
+</g>
+</svg>
