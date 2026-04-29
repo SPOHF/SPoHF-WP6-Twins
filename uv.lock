@@ -8,7 +8,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-04-21T15:29:00.7648567Z"
+exclude-newer = "2026-04-22T12:07:25.5778797Z"
 exclude-newer-span = "P1W"
 
 [[package]]
@@ -1159,15 +1159,12 @@ dependencies = [
     { name = "cachetools" },
     { name = "fastapi" },
     { name = "httpx" },
-    { name = "ipython" },
     { name = "itsdangerous" },
-    { name = "nbformat" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "plotly" },
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
-    { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dateutil" },
@@ -1188,6 +1185,13 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "ipython" },
+    { name = "nbformat" },
+    { name = "pyarrow" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiomysql", specifier = ">=0.2" },
@@ -1195,15 +1199,12 @@ requires-dist = [
     { name = "cachetools", specifier = ">=5.5" },
     { name = "fastapi", specifier = ">=0.128.0" },
     { name = "httpx", specifier = ">=0.28" },
-    { name = "ipython", specifier = ">=9.12.0" },
     { name = "itsdangerous", specifier = ">=2.1" },
-    { name = "nbformat", specifier = ">=5.10.4" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pandas", specifier = ">=3.0.0" },
     { name = "plotly", specifier = ">=6.5.2" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "psycopg-pool", specifier = ">=3.2" },
-    { name = "pyarrow", specifier = ">=24.0.0" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pydantic-settings", specifier = ">=2.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -1220,3 +1221,10 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.40.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "ipython", specifier = ">=9.12.0" },
+    { name = "nbformat", specifier = ">=5.10.4" },
+    { name = "pyarrow", specifier = ">=24.0.0" },
+]

@@ -25,9 +25,6 @@ dependencies = [
     "tenacity>=9.0",
     "uvicorn>=0.40.0",
     "pyyaml>=6.0",
-    "pyarrow>=24.0.0",
-    "nbformat>=5.10.4",
-    "ipython>=9.12.0",
 ]
 
 [project.optional-dependencies]
@@ -67,3 +64,10 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "--ignore=tests/e2e"
 markers = ["e2e: end-to-end tests requiring TimescaleDB"]
+
+[dependency-groups]
+dev = [
+    "ipython>=9.12.0",
+    "nbformat>=5.10.4",
+    "pyarrow>=24.0.0",
+]
