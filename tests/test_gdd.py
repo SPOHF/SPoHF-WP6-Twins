@@ -21,7 +21,7 @@ def _make_readings(temps: list[tuple[str, float]]) -> pd.DataFrame:
 
 class TestCalculateDailyGdd:
     def test_basic_gdd(self):
-        """A day with min=5, max=25 → avg=15, GDD=15-7.2=7.8."""
+        """A day with min=5, max=25 → avg=15, GDD=15-0=15."""
         df = _make_readings([
             ("2026-04-15T06:00", 5.0),
             ("2026-04-15T14:00", 25.0),
@@ -30,32 +30,36 @@ class TestCalculateDailyGdd:
         assert len(result) == 1
         assert result.iloc[0]["t_min"] == 5.0
         assert result.iloc[0]["t_max"] == 25.0
-        assert result.iloc[0]["daily_gdd"] == pytest.approx(7.8)
+        assert result.iloc[0]["daily_gdd"] == pytest.approx(
+            15.0 - DEFAULT_BASE_TEMP,
+        )
 
     def test_below_base_gives_zero(self):
         """All temps below base → GDD = 0."""
+        # avg = -3.0, below any non-negative base → clamped to 0
         df = _make_readings([
-            ("2026-01-15T06:00", 0.0),
-            ("2026-01-15T14:00", 6.0),
+            ("2026-01-15T06:00", -6.0),
+            ("2026-01-15T14:00", 0.0),
         ])
         result = calculate_daily_gdd(df, base_temp=DEFAULT_BASE_TEMP)
-        # avg = 3.0, below base 7.2 → clamped to 0
         assert result.iloc[0]["daily_gdd"] == 0.0
 
     def test_cumulative_across_days(self):
         """Cumulative GDD sums correctly across multiple days."""
         df = _make_readings([
-            # Day 1: avg = 15, GDD = 15-7.2 = 7.8
+            # Day 1: avg = 15, GDD = 15 - base
             ("2026-04-15T06:00", 5.0),
             ("2026-04-15T14:00", 25.0),
-            # Day 2: avg = 20, GDD = 20-7.2 = 12.8
+            # Day 2: avg = 20, GDD = 20 - base
             ("2026-04-16T06:00", 15.0),
             ("2026-04-16T14:00", 25.0),
         ])
         result = calculate_daily_gdd(df, base_temp=DEFAULT_BASE_TEMP)
         assert len(result) == 2
-        assert result.iloc[0]["cumulative_gdd"] == pytest.approx(7.8)
-        assert result.iloc[1]["cumulative_gdd"] == pytest.approx(20.6)
+        day1 = 15.0 - DEFAULT_BASE_TEMP
+        day2 = 20.0 - DEFAULT_BASE_TEMP
+        assert result.iloc[0]["cumulative_gdd"] == pytest.approx(day1)
+        assert result.iloc[1]["cumulative_gdd"] == pytest.approx(day1 + day2)
 
     def test_custom_base_temp(self):
         """Different base temperature changes GDD values."""
@@ -87,8 +91,10 @@ class TestCalculateDailyGdd:
         result = calculate_daily_gdd(df, base_temp=DEFAULT_BASE_TEMP)
         assert result.iloc[0]["t_min"] == 6.0
         assert result.iloc[0]["t_max"] == 22.0
-        # avg = 14, GDD = 14 - 7.2 = 6.8
-        assert result.iloc[0]["daily_gdd"] == pytest.approx(6.8)
+        # avg = (6 + 22) / 2 = 14
+        assert result.iloc[0]["daily_gdd"] == pytest.approx(
+            14.0 - DEFAULT_BASE_TEMP,
+        )
 
 
 class TestCumulativeGddFromBiofix:
@@ -107,8 +113,10 @@ class TestCumulativeGddFromBiofix:
         assert len(result) == 2
         assert result.iloc[0]["date"] == date(2026, 4, 15)
         # Cumulative resets from biofix
-        assert result.iloc[0]["cumulative_gdd"] == pytest.approx(7.8)
-        assert result.iloc[1]["cumulative_gdd"] == pytest.approx(20.6)
+        day1 = 15.0 - DEFAULT_BASE_TEMP
+        day2 = 20.0 - DEFAULT_BASE_TEMP
+        assert result.iloc[0]["cumulative_gdd"] == pytest.approx(day1)
+        assert result.iloc[1]["cumulative_gdd"] == pytest.approx(day1 + day2)
 
     def test_biofix_after_all_data(self):
         """Biofix after all data returns empty."""

@@ -7,12 +7,16 @@
 set -e
 
 PORTS=(8000 8001 8002)
+PIDS=()
 
 cleanup() {
+    trap - EXIT INT TERM HUP
     echo ""
     echo "Shutting down..."
-    kill 0 2>/dev/null
-    wait 2>/dev/null
+    for pid in "${PIDS[@]}"; do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM HUP
 
@@ -27,8 +31,11 @@ for port in "${PORTS[@]}"; do
 done
 
 echo "Starting dashboards... grey at 8000, blue at 8001, red at 8002"
-uv run uvicorn wp6_data.grey.dashboard:app --host 0.0.0.0 --port 8000 --reload &
-uv run uvicorn wp6_data.blue.dashboard:app --host 0.0.0.0 --port 8001 --reload &
-uv run uvicorn wp6_data.red.dashboard:app  --host 0.0.0.0 --port 8002 --reload &
+uv run uvicorn wp6_data.grey.dashboard:app --host 0.0.0.0 --port 8000 --reload --reload-dir src/wp6_data &
+PIDS+=($!)
+uv run uvicorn wp6_data.blue.dashboard:app --host 0.0.0.0 --port 8001 --reload --reload-dir src/wp6_data &
+PIDS+=($!)
+uv run uvicorn wp6_data.red.dashboard:app  --host 0.0.0.0 --port 8002 --reload --reload-dir src/wp6_data &
+PIDS+=($!)
 
 wait

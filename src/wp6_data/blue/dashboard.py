@@ -46,7 +46,8 @@ config = TwinConfig(
             key="yookr",
             label="Yookr API",
             provider=BlueSensorProvider(
-                project=YOOKR_PROJECT, source_key="yookr",
+                project=YOOKR_PROJECT,
+                source_key="yookr",
             ),
         ),
     ],
