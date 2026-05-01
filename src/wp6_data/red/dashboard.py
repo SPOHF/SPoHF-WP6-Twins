@@ -14,6 +14,8 @@ from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
 from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 
+from wp6_data.red.routes import par_profile as par_profile_routes
+
 log = structlog.get_logger()
 
 
@@ -76,7 +78,8 @@ config = TwinConfig(
         primary="#dc2626", primary_light="#ef4444", primary_dark="#b91c1c",
         accent="#f97316", surface_rgb="220, 38, 38",
     ),
-    extra_routers=[browse.router, dli.router, dli_model.router, red_charts.router],
+    extra_routers=[browse.router, dli.router, dli_model.router, red_charts.router, \
+                   par_profile_routes.router],
     hero_cards=[_dli_card],
     home_extra_html=(
         '<a href="/static/red/sensor_locations.docx" download role="button"'
