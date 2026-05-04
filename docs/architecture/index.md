@@ -273,15 +273,11 @@ graph TB
         end
 
         subgraph data_engine["Data Engine"]
-            spohf_sync["SPoHF Sync Job
+            sync_job["wp6-data Sync Job
             [Container: Python CronJob]
-            Windowed incremental sync
-            every 15 minutes"]:::cronjob
-
-            yookr_sync["Yookr Sync Job
-            [Container: Python CronJob]
-            Per-sensor monthly sync
-            every 15 minutes"]:::cronjob
+            python -m wp6_data:
+            SPoHF + Yookr ingest
+            (sequential, every 15 min)"]:::cronjob
 
             blue_export["Blue CSV Export Job
             [Container: Python CronJob]
@@ -335,12 +331,10 @@ graph TB
     red_dash -->|"Daily forecast\n(HTTPS)"| openmeteo
     %% grey_dash has no datastore (in-memory)
 
-    %% Sync jobs
-    spohf_sync -->|"Paginated fetch\n(httpx)"| spohf
-    spohf_sync -->|"Batch upsert"| tsdb
-
-    yookr_sync -->|"Per-sensor fetch\n(httpx)"| yookr
-    yookr_sync -->|"Batch upsert"| tsdb
+    %% Sync job (single process runs both ingests sequentially)
+    sync_job -->|"Paginated fetch\n(httpx)"| spohf
+    sync_job -->|"Per-sensor fetch\n(httpx)"| yookr
+    sync_job -->|"Batch upsert"| tsdb
 
     %% Export jobs
     blue_export -->|"Read readings"| tsdb
@@ -622,9 +616,11 @@ graph TB
 
 ### Deployment view
 
-Kubernetes topology across the two clusters (Fontys for user-facing dashboards,
-ProcEvolution for the data warehouse and sync jobs), the external Fontys GTL
-MySQL, and how secrets are split between clusters.
+Current state: every workload runs in the Fontys Kubernetes cluster. The only
+external datastore is the Fontys GreenTechLab MySQL (Red twin). The desired
+split with ProcEvolution hosting the data warehouse and sync jobs is described
+in *Operations* above; the diagram intentionally reflects what's deployed today,
+not the target architecture.
 
 ```mermaid
 ---
@@ -633,6 +629,9 @@ title: "WP6 Digital Twins - Deployment Diagram"
 graph TB
     %% SSOT — also embedded in docs/architecture/index.md.
     %% Edit this file first, then mirror into index.md.
+    %% Current state: everything runs in the Fontys K8s cluster.
+    %% (The desired-state split with ProcEvolution is described in
+    %% the "Operations" section of architecture/index.md.)
     classDef k8s fill:#326ce5,color:#fff,stroke:none
     classDef pod fill:#438dd5,color:#fff,stroke:none
     classDef storage fill:#1168bd,color:#fff,stroke:none
@@ -651,10 +650,11 @@ graph TB
     oidc_ext["OIDC Provider"]:::external
     mysql_ext[("Fontys GTL MySQL 8
     [External Managed DB]
-    Greenhouse sensor tables")]:::external
+    Greenhouse sensor tables
+    (85.215.61.145:3306)")]:::external
 
-    %% ── Fontys cluster — user-facing dashboards ──
-    subgraph fontys["Fontys Kubernetes Cluster"]
+    %% ── Fontys IDP cluster, namespace spohf-system ──
+    subgraph fontys["Fontys IDP K8s Cluster — namespace: spohf-system"]
         direction TB
 
         blue_ingress["Ingress
@@ -675,21 +675,18 @@ graph TB
         FastAPI + Uvicorn
         (no DB, no auth)"]:::pod
 
+        sync_cron["wp6-data Sync
+        [CronJob: */15 * * * *]
+        python -m wp6_data:
+        SPoHF + Yookr (sequential)
+        (uses wp6-data-blue image)"]:::cronjob
+
         blue_export_cron["Blue CSV Export
         [CronJob: 0 2 * * *]
         Nightly Blue export"]:::cronjob
         red_export_cron["Red CSV Export
         [CronJob: 0 2 * * *]
         Nightly Red sensor export"]:::cronjob
-
-        fontys_secrets["Kubernetes Secret
-        OIDC client/session,
-        TSDB URL, MySQL creds"]:::k8s
-    end
-
-    %% ── ProcEvolution cluster — data warehouse + sync ──
-    subgraph procevo["ProcEvolution Kubernetes Cluster"]
-        direction TB
 
         tsdb_sts["TimescaleDB
         [StatefulSet: 1 replica]
@@ -699,17 +696,15 @@ graph TB
         tsdb_pvc[("PersistentVolumeClaim
         timescaledb-data")]:::storage
 
-        spohf_cron["SPoHF Sync
-        [CronJob: */15 * * * *]
-        Incremental windowed sync"]:::cronjob
+        secret_main["wp6-data-secrets
+        [Secret, externally provisioned]
+        OIDC client/session,
+        TSDB URL,
+        SPoHF + Yookr API tokens"]:::k8s
 
-        yookr_cron["Yookr Sync
-        [CronJob: */15 * * * *]
-        Per-sensor monthly sync"]:::cronjob
-
-        procevo_secrets["Kubernetes Secret
-        SPoHF/Yookr API tokens,
-        TSDB credentials"]:::k8s
+        secret_red["wp6-data-red-secrets
+        [Secret, externally provisioned]
+        MySQL password (Red)"]:::k8s
     end
 
     %% ── User → Ingress → Deployment ──
@@ -724,29 +719,32 @@ graph TB
     blue_deploy -.->|"OIDC"| oidc_ext
     red_deploy -.->|"OIDC"| oidc_ext
 
-    %% ── Cross-cluster + external data access ──
+    %% ── Dashboard data access ──
     blue_deploy -->|"psycopg3\nport 5432"| tsdb_sts
-    blue_export_cron -->|"port 5432"| tsdb_sts
     red_deploy -->|"aiomysql\nport 3306"| mysql_ext
-    red_export_cron -->|"port 3306"| mysql_ext
     red_deploy -->|"HTTPS"| openmeteo_ext
 
     %% ── Storage ──
     tsdb_sts --- tsdb_pvc
 
-    %% ── Sync jobs ──
-    spohf_cron -->|"HTTPS"| spohf_ext
-    spohf_cron -->|"port 5432"| tsdb_sts
-    yookr_cron -->|"HTTPS"| yookr_ext
-    yookr_cron -->|"port 5432"| tsdb_sts
+    %% ── Sync job (single process, runs both ingests sequentially) ──
+    sync_cron -->|"HTTPS"| spohf_ext
+    sync_cron -->|"HTTPS"| yookr_ext
+    sync_cron -->|"port 5432"| tsdb_sts
+
+    %% ── Export jobs ──
+    blue_export_cron -->|"port 5432"| tsdb_sts
+    red_export_cron -->|"port 3306"| mysql_ext
 
     %% ── Secret mounts ──
-    fontys_secrets -.->|"mounted"| blue_deploy
-    fontys_secrets -.->|"mounted"| red_deploy
-    fontys_secrets -.->|"mounted"| blue_export_cron
-    fontys_secrets -.->|"mounted"| red_export_cron
-    procevo_secrets -.->|"mounted"| spohf_cron
-    procevo_secrets -.->|"mounted"| yookr_cron
+    %% Main secret feeds Blue, sync, and Blue export
+    secret_main -.->|"mounted"| blue_deploy
+    secret_main -.->|"mounted"| sync_cron
+    secret_main -.->|"mounted"| blue_export_cron
+    %% Red dashboard reads OIDC/TSDB from main, MySQL password from red secret
+    secret_main -.->|"mounted"| red_deploy
+    secret_red -.->|"mounted"| red_deploy
+    secret_red -.->|"mounted"| red_export_cron
     %% grey_deploy needs no secrets — it's stateless and public
 ```
 
