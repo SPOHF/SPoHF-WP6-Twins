@@ -1,4 +1,4 @@
-"""GET /gdd — Growing Degree Day tracker for blueberry harvest prediction."""
+"""GET /monitor/gdd — Growing Degree Day tracker for blueberry harvest prediction."""
 
 from datetime import date, timedelta
 from typing import Annotated
@@ -122,7 +122,7 @@ async def gdd_tracker(
     except Exception as e:
         return render_page(
             PAGE_TITLE, f"<h1>Error: {e}</h1>",
-            show_back_link=True,
+            show_back_link=True, back_url="/monitor",
             data_source=provider.data_source_label)
 
     if df.empty:
@@ -130,7 +130,7 @@ async def gdd_tracker(
             PAGE_TITLE,
             "<h1>GDD Tracker</h1>"
             f"<p>No temperature data for {DEVICE_NAME}:{SENSOR_TAG}.</p>",
-            show_back_link=True, extra_css=GDD_CSS,
+            show_back_link=True, back_url="/monitor", extra_css=GDD_CSS,
             data_source=provider.data_source_label)
 
     # Calculate daily GDD for ALL data
@@ -281,7 +281,7 @@ async def gdd_tracker(
 
     return render_page(
         PAGE_TITLE, content,
-        show_back_link=True, extra_css=GDD_CSS,
+        show_back_link=True, back_url="/monitor", extra_css=GDD_CSS,
         data_source=provider.data_source_label)
 
 
@@ -301,7 +301,7 @@ def _year_toggle_html(
             f"&biofix_day={biofix_md[1]}"
         )
         buttons.append(
-            f'<a href="/gdd{params}" class="year-btn {active}">'
+            f'<a href="/monitor/gdd{params}" class="year-btn {active}">'
             f'{y}</a>')
 
     return f'<div class="year-toggle">{"".join(buttons)}</div>'
@@ -474,5 +474,3 @@ def _build_table(df) -> str:
             </tr></thead>
             <tbody>{rows}</tbody>
         </table>"""
-
-
