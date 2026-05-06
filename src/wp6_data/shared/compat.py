@@ -3,12 +3,10 @@
 import asyncio
 import sys
 from collections.abc import Coroutine
-from typing import Any, TypeVar
-
-_T = TypeVar("_T")
+from typing import Any
 
 
-def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
+def run_async[T](coro: Coroutine[Any, Any, T]) -> T:
     """Run *coro* in a new event loop, using SelectorEventLoop on Windows.
 
     psycopg3 (and aiomysql) use ``add_reader()`` internally, which is not
