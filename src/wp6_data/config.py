@@ -70,6 +70,7 @@ class OIDCSettings(BaseSettings):
     client_secret: str = ""  # Required at startup - set via WP6_OIDC_CLIENT_SECRET
     session_secret: str = ""  # Required at startup - set via WP6_OIDC_SESSION_SECRET
     redirect_base: str = ""  # Public base URL of the app, e.g. https://wp6-red.example.com
+    dev_auth: bool = False  # Skip OIDC entirely and inject a fake user (development only)
 
 
 class RedSettings(BaseSettings):
