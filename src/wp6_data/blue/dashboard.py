@@ -5,8 +5,8 @@ from pathlib import Path
 from wp6_data.blue import deps
 from wp6_data.blue.provider import BlueSensorProvider
 from wp6_data.blue.routes import charts as blue_charts
-from wp6_data.blue.routes import gdd as blue_gdd
 from wp6_data.blue.routes import ops
+from wp6_data.blue.routes.monitor import router as monitor_router
 from wp6_data.config import Settings
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
@@ -15,11 +15,11 @@ from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 settings = Settings()
 
 
-def _gdd_card() -> str:
+def _monitor_card() -> str:
     return render_card(
-        "GDD Tracker",
-        '<a href="/gdd" role="button">GDD Dashboard</a>',
-        description="Growing Degree Days — track cumulative heat for harvest prediction.",
+        "Plant Monitor",
+        '<a href="/monitor" role="button">Plant Monitor</a>',
+        description="GDD, soil conditions, light, and microclimate analytics.",
     )
 
 YOOKR_PROJECT = "yookr-direct"
@@ -57,9 +57,10 @@ config = TwinConfig(
         primary="#2563eb", primary_light="#3b82f6", primary_dark="#1d4ed8",
         accent="#0ea5e9", surface_rgb="37, 99, 235",
     ),
-    extra_routers=[ops.router, blue_charts.router, blue_gdd.router],
-    hero_cards=[_gdd_card],
+    extra_routers=[ops.router, blue_charts.router, monitor_router],
+    hero_cards=[_monitor_card],
     export_sanitise_names=True,
+    require_auth=False,
     lifespan_startup=_startup,
     lifespan_shutdown=_shutdown,
 )
@@ -69,4 +70,10 @@ app = create_app(config)
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    from wp6_data.shared.compat import run_async
+
+    async def _serve() -> None:
+        cfg = uvicorn.Config(app, host="0.0.0.0", port=8000)
+        await uvicorn.Server(cfg).serve()
+
+    run_async(_serve())
