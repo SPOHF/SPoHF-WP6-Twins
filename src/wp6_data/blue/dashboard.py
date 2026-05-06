@@ -68,22 +68,12 @@ config = TwinConfig(
 app = create_app(config)
 
 if __name__ == "__main__":
-    import asyncio
-    import selectors
-    import sys
-
     import uvicorn
 
-    async def _serve() -> None:
-        config = uvicorn.Config(app, host="0.0.0.0", port=8000)
-        await uvicorn.Server(config).serve()
+    from wp6_data.shared.compat import run_async
 
-    if sys.platform == "win32":
-        # psycopg3 requires SelectorEventLoop; uvicorn's default on Windows is
-        # ProactorEventLoop so we drive the loop ourselves with an explicit factory.
-        asyncio.run(
-            _serve(),
-            loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
-        )
-    else:
-        asyncio.run(_serve())
+    async def _serve() -> None:
+        cfg = uvicorn.Config(app, host="0.0.0.0", port=8000)
+        await uvicorn.Server(cfg).serve()
+
+    run_async(_serve())

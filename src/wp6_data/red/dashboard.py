@@ -92,4 +92,10 @@ app = create_app(config)
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    from wp6_data.shared.compat import run_async
+
+    async def _serve() -> None:
+        cfg = uvicorn.Config(app, host="0.0.0.0", port=8000)
+        await uvicorn.Server(cfg).serve()
+
+    run_async(_serve())
