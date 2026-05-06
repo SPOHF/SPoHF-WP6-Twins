@@ -12,6 +12,7 @@ from fastapi.responses import RedirectResponse
 from wp6_data.config import OIDCSettings
 
 _endpoints: dict[str, str] = {}
+_dev_auth: bool = False
 
 
 class NotAuthenticated(Exception):
@@ -20,11 +21,20 @@ class NotAuthenticated(Exception):
 
 async def startup_oidc(settings: OIDCSettings) -> None:
     """Fetch OIDC discovery document and cache endpoints."""
+    global _endpoints, _dev_auth
+    if settings.dev_auth:
+        # Sanity check
+        if settings.redirect_base:
+            raise RuntimeError(
+                "WP6_OIDC_DEV_AUTH cannot be enabled when WP6_OIDC_REDIRECT_BASE is set — "
+                "dev auth must not be used in production"
+            )
+        _dev_auth = True
+        return
     if not settings.client_secret:
         raise RuntimeError("WP6_OIDC_CLIENT_SECRET is not set")
     if not settings.session_secret:
         raise RuntimeError("WP6_OIDC_SESSION_SECRET is not set")
-    global _endpoints
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{settings.issuer}/.well-known/openid-configuration")
         resp.raise_for_status()
@@ -49,6 +59,11 @@ def make_auth_router(settings: OIDCSettings) -> APIRouter:
 
     @router.get("/login")
     async def login(request: Request):
+        if _dev_auth:
+            request.session["user"] = "dev-user"
+            request.session["groups"] = ["/wp6-admins"]
+            next_url = request.session.pop("next", "/")
+            return RedirectResponse(url=next_url, status_code=302)
         verifier, challenge = _pkce_pair()
         state = urlsafe_b64encode(os.urandom(16)).rstrip(b"=").decode()
         request.session["code_verifier"] = verifier
