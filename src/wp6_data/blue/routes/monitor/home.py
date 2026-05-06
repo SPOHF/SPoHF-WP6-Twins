@@ -46,9 +46,10 @@ async def monitor_home() -> str:
             </article>
 
             <article>
-                <h3>Light (PAR)</h3>
-                <p>Photosynthetically Active Radiation — all PAR
-                   sensors in the unified chart view.</p>
+                <h3>Light</h3>
+                <p>Photosynthetically Active Radiation (PAR) from
+                   in-canopy sensors, plus outdoor solar radiation
+                   from the weather station.</p>
                 <a href="/monitor/light" class="btn">View Light</a>
             </article>
 

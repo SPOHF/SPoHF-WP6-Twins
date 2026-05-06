@@ -90,8 +90,7 @@ def _build_chart(df) -> str:
 
     fig = make_subplots(
         rows=4, cols=1, shared_xaxes=True,
-        subplot_titles=[p[2] for p in _PANELS],
-        vertical_spacing=0.06,
+        vertical_spacing=0.09,
     )
 
     seen_treatments: set[str] = set()
@@ -138,9 +137,11 @@ def _build_chart(df) -> str:
             )
         fig.update_yaxes(title_text=y_label, row=row, col=1)
 
+    fig.update_xaxes(showticklabels=True, tickformat="%d %b %Y", tickangle=-30)
+
     fig.update_layout(
         template="plotly_white",
-        height=900,
+        height=1000,
         hovermode="x unified",
         legend={"orientation": "v", "yanchor": "top", "y": 1,
                 "xanchor": "left", "x": 1.02},
