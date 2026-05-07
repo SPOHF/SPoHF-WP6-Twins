@@ -1,5 +1,13 @@
 """Shared test fixtures for api/, db/, and sync/ modules."""
 
+import os
+
+# Pydantic Settings validation runs at import time; ensure required envs
+# exist before any test module imports red.deps / RedSettings.
+os.environ.setdefault(
+    "WP6_RED_TSDB_URL", "postgresql://wp6_red:wp6dev@localhost:5433/wp6_red",
+)
+
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 

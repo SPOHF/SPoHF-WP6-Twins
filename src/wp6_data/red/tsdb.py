@@ -1,11 +1,21 @@
-"""TimescaleDB schema bootstrap for the red twin (manual_uploads + readings).
+"""TimescaleDB schema bootstrap and read helpers for the red twin.
 
 Mirrors the column shape of blue's `readings` table, except `project` is
 renamed to `source` and a nullable `upload_id` foreign key links rows that
 came from a manual Excel upload back to their `manual_uploads` audit row.
+
+Read helpers (`fetch_*_tsdb`) are used by the federated `RedSensorProvider`
+to serve sensor_tags whose `source` is set in metadata.yaml.
 """
 
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+import pandas as pd
 import structlog
+from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 logger = structlog.get_logger()
@@ -50,3 +60,74 @@ async def ensure_schema_red(pool: AsyncConnectionPool) -> None:
         await conn.execute(SCHEMA_SQL)
         await conn.commit()
     logger.info("red_tsdb_schema_ensured")
+
+
+_EMPTY_READINGS = pd.DataFrame(columns=["device", "sensor", "time", "value"])
+
+
+async def fetch_data_tsdb(
+    sensor_tags: list[str] | None = None,
+    device_names: list[str] | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    limit: int = 500_000,
+) -> pd.DataFrame:
+    """Fetch readings from the red TSDB `readings` table.
+
+    Returns DataFrame with columns: device, sensor, time, value.
+    """
+    from wp6_data.db.pool import get_pool
+
+    if not sensor_tags:
+        return _EMPTY_READINGS.copy()
+
+    conditions = ["sensor_tag = ANY(%(tags)s)"]
+    params: dict[str, Any] = {"tags": sensor_tags}
+    if device_names:
+        conditions.append("device_name = ANY(%(devices)s)")
+        params["devices"] = device_names
+    if start:
+        conditions.append("time >= %(start)s")
+        params["start"] = start
+    if end:
+        conditions.append("time <= %(end)s")
+        params["end"] = end
+    params["limit"] = limit
+
+    where = " AND ".join(conditions)
+    query = f"""
+        SELECT device_name AS device, sensor_tag AS sensor, time, value
+        FROM readings
+        WHERE {where}
+        ORDER BY time
+        LIMIT %(limit)s
+    """
+
+    pool = get_pool()
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(query, params)
+        records = await cur.fetchall()
+
+    if not records:
+        return _EMPTY_READINGS.copy()
+    df = pd.DataFrame(records)
+    df["time"] = pd.to_datetime(df["time"], utc=True)
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    return df.sort_values("time")
+
+
+async def fetch_daily_coverage_tsdb() -> list[dict[str, Any]]:
+    """Distinct (device, sensor, day) triples from the red `readings` table."""
+    from wp6_data.db.pool import get_pool
+
+    query = """
+        SELECT device_name AS device, sensor_tag AS sensor,
+               DATE(time) AS day
+        FROM readings
+        GROUP BY device_name, sensor_tag, DATE(time)
+        ORDER BY device, sensor, day
+    """
+    pool = get_pool()
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(query)
+        return list(await cur.fetchall())

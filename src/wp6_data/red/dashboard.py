@@ -73,7 +73,7 @@ config = TwinConfig(
     data_sources=[
         DataSource(
             key="mysql", label="GTL (MySQL, LoRaWAN)",
-            provider=RedSensorProvider(),
+            provider=RedSensorProvider(metadata=deps.metadata),
         ),
     ],
     metadata=deps.metadata,

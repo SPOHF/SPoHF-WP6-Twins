@@ -82,6 +82,16 @@ class MetadataRegistry:
         """Return the global default metadata for a measurement key."""
         return self._meta.sensor_defaults.get(sensor_key, SensorMetadata())
 
+    @property
+    def sensor_defaults(self) -> dict[str, SensorMetadata]:
+        """Read-only view of all sensor_defaults entries."""
+        return self._meta.sensor_defaults
+
+    @property
+    def devices(self) -> dict[str, DeviceMetadata]:
+        """Read-only view of all device entries."""
+        return self._meta.devices
+
     def sensor(
         self, sensor_key: str, device_key: str | None = None,
     ) -> SensorMetadata:
