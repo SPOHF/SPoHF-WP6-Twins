@@ -9,6 +9,7 @@ import pytest
 
 from wp6_data.red.sijia.parser import (
     COLUMN_TO_SENSOR,
+    DEFAULT_MEASUREMENT_HOUR,
     EXPECTED_HEADERS,
     SHEET_NAME,
     SOURCE,
@@ -48,6 +49,33 @@ def test_parse_seed_returns_readings_tagged_with_source_sijia(seed_readings) -> 
 
     assert len(readings) > 0
     assert all(r.source == SOURCE for r in readings)
+
+
+def test_parse_defaults_missing_time_to_one_pm(seed_readings) -> None:
+    """Excel rows in the seed have only a date (time = 00:00). The parser
+    fills that gap with a sensible mid-day default so charts don't bunch
+    all measurements at midnight."""
+    assert all(r.time.hour == DEFAULT_MEASUREMENT_HOUR for r in seed_readings)
+    assert all(r.time.minute == 0 for r in seed_readings)
+    assert all(r.time.second == 0 for r in seed_readings)
+
+
+def test_parse_preserves_explicit_time_when_present() -> None:
+    """If a future Excel row has a real measurement time, the parser keeps it
+    — only midnight (the Excel default for date-only cells) is gap-filled."""
+    headers = list(EXPECTED_HEADERS)
+    # Row with an explicit measurement time of 09:30
+    row = [1, "TestVariety", "B", 2034, datetime(2025, 8, 7, 9, 30)] + [
+        None
+    ] * len(COLUMN_TO_SENSOR)
+    # Put a value in the first sensor column so the row produces a Reading
+    row[len(("Sample No.", "Variety", "Block", "Row", "Date"))] = 0.5
+
+    xlsx = _xlsx_bytes(SHEET_NAME, headers, [row])
+    readings = parse(xlsx)
+
+    assert readings, "expected at least one Reading from the test row"
+    assert all(r.time.hour == 9 and r.time.minute == 30 for r in readings)
 
 
 def test_parse_emits_neurath_block_row_variety_device_names(seed_readings) -> None:

@@ -4,12 +4,17 @@ import hashlib
 import io
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 import pandas as pd
 
 SOURCE = "sijia"
 SHEET_NAME = "2025-26_Measurement"
+
+# Excel rows record only a date, no time of day. Anchor measurements at 13:00
+# so charts plot them at a sensible mid-day point (and so all readings from a
+# single visit cluster at the same instant per (device, sensor)).
+DEFAULT_MEASUREMENT_HOUR = 13
 
 META_COLUMNS: tuple[str, ...] = ("Sample No.", "Variety", "Block", "Row", "Date")
 
@@ -103,7 +108,9 @@ def _extract(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
     for idx, r in df.iterrows():
         excel_row = int(idx) + 2  # +1 for 1-based, +1 for the header row
         device = _device_name(r["Variety"], r["Block"], r["Row"])
-        time = r["Date"].to_pydatetime()
+        ts = r["Date"].to_pydatetime()
+        if ts.time() == time(0, 0):
+            ts = ts.replace(hour=DEFAULT_MEASUREMENT_HOUR)
 
         row_cells: list[tuple[str, float]] = []
         error: str | None = None
@@ -122,17 +129,17 @@ def _extract(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
             skipped.append(SkippedRow(row_index=excel_row, reason=error))
             continue
         for sensor, scaled in row_cells:
-            buckets[(device, time, sensor)].append(scaled)
+            buckets[(device, ts, sensor)].append(scaled)
 
     readings = [
         Reading(
             source=SOURCE,
             device_name=device,
             sensor_tag=sensor,
-            time=time,
+            time=ts,
             value=sum(values) / len(values),
         )
-        for (device, time, sensor), values in buckets.items()
+        for (device, ts, sensor), values in buckets.items()
     ]
     return readings, skipped, total_rows
 
