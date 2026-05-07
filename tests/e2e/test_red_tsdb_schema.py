@@ -174,3 +174,76 @@ async def test_same_device_sensor_time_can_coexist_across_sources(clean_red_db, 
             ("e2e-shared-device",),
         )
         assert (await cur.fetchone())["n"] == 2
+
+
+async def test_reading_with_invalid_upload_id_violates_foreign_key(clean_red_db, red_pool):
+    """An upload_id that doesn't exist in manual_uploads must be rejected by the FK."""
+    await ensure_schema_red(red_pool)
+
+    async with clean_red_db.cursor() as cur:
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            await cur.execute(
+                "INSERT INTO readings "
+                "(time, device_name, sensor_tag, value, source, upload_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (datetime(2025, 6, 1, 9, 0, tzinfo=UTC),
+                 "e2e-d", "e2e-s", 1.0, "e2e-sijia", 999999),
+            )
+    await clean_red_db.rollback()
+
+
+async def test_manual_uploads_carries_all_provenance_columns(clean_red_db, red_pool):
+    """Schema records every provenance fact the audit flow needs (PRD §Storage)."""
+    await ensure_schema_red(red_pool)
+
+    async with clean_red_db.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "INSERT INTO manual_uploads "
+            "(source, filename, file_hash, file_path, row_count) "
+            "VALUES (%s, %s, %s, %s, %s) "
+            "RETURNING id, file_pruned, uploaded_at, file_path, row_count, error",
+            ("e2e-sijia", "seed.xlsx", "deadbeef",
+             "/data/manual-uploads/e2e-sijia/abc.xlsx", 112),
+        )
+        row = await cur.fetchone()
+    await clean_red_db.commit()
+
+    assert row["file_pruned"] is False  # default FALSE
+    assert row["uploaded_at"] is not None  # default NOW()
+    assert row["file_path"] == "/data/manual-uploads/e2e-sijia/abc.xlsx"
+    assert row["row_count"] == 112
+    assert row["error"] is None  # nullable, defaults to NULL
+
+
+async def test_readings_column_shape_matches_blue_with_source_and_upload_id(
+    clean_red_db, red_pool,
+):
+    """Red readings shares blue's column shape (project → source) plus upload_id."""
+    await ensure_schema_red(red_pool)
+    expected = {
+        "time", "device_name", "sensor_tag", "value", "raw_value",
+        "source", "synced_at", "upload_id",
+    }
+
+    async with clean_red_db.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'readings' AND table_schema = 'public'"
+        )
+        actual = {row["column_name"] for row in await cur.fetchall()}
+
+    assert actual == expected
+
+
+async def test_readings_is_a_timescaledb_hypertable(clean_red_db, red_pool):
+    """create_hypertable is part of the schema bootstrap so time-partitioning works."""
+    await ensure_schema_red(red_pool)
+
+    async with clean_red_db.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT hypertable_name FROM timescaledb_information.hypertables "
+            "WHERE hypertable_schema = 'public'"
+        )
+        hypertables = {row["hypertable_name"] for row in await cur.fetchall()}
+
+    assert "readings" in hypertables
