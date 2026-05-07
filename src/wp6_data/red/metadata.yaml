@@ -79,6 +79,78 @@ sensor_defaults:
     unit: "dB"
     alias: "SNR"
 
+  # ── Sijia / Neurath manual fruit-chemistry measurements ──
+  chlorophyll:
+    type: "fruit chemistry"
+    unit: "index"
+    alias: "Chlorophyll"
+    source: "sijia"
+  flavonoids:
+    type: "fruit chemistry"
+    unit: "index"
+    alias: "Flavonoids"
+    source: "sijia"
+  anthocyanins:
+    type: "fruit chemistry"
+    unit: "index"
+    alias: "Anthocyanins"
+    source: "sijia"
+  nfi:
+    type: "fruit chemistry"
+    unit: "index"
+    alias: "NFI"
+    source: "sijia"
+  water_content:
+    type: "fruit chemistry"
+    unit: "%"
+    alias: "Water Content"
+    source: "sijia"
+  minerals:
+    type: "fruit chemistry"
+    unit: "%"
+    alias: "Minerals"
+    source: "sijia"
+  diameter:
+    type: "fruit chemistry"
+    unit: "mm"
+    alias: "Diameter"
+    source: "sijia"
+  weight:
+    type: "fruit chemistry"
+    unit: "g"
+    alias: "Weight"
+    source: "sijia"
+  vitamin_c_fresh:
+    type: "fruit chemistry"
+    unit: "mg/100 g"
+    alias: "Vit C (Fresh)"
+    source: "sijia"
+  vitamin_c_dry:
+    type: "fruit chemistry"
+    unit: "mg/100 g"
+    alias: "Vit C (Dry)"
+    source: "sijia"
+  total_phenols_fresh:
+    type: "fruit chemistry"
+    unit: "mg GAE/100 g"
+    alias: "Phenols (Fresh)"
+    source: "sijia"
+  total_phenols_dry:
+    type: "fruit chemistry"
+    unit: "mg GAE/100 g"
+    alias: "Phenols (Dry)"
+    source: "sijia"
+  antioxidant_capacity_fresh:
+    type: "fruit chemistry"
+    unit: "mmol TAE/100 g"
+    alias: "Antioxidants (Fresh)"
+    source: "sijia"
+  antioxidant_capacity_dry:
+    type: "fruit chemistry"
+    unit: "mmol TAE/100 g"
+    alias: "Antioxidants (Dry)"
+    source: "sijia"
+
 devices:
   "s2100-01-par":
     description: "PAR above lamp level"
@@ -129,3 +201,14 @@ devices:
 
   "lht65s-ne117-03":
     position: "B"
+
+  # ── Sijia / Neurath manual measurement plants (one device per cultivar+row) ──
+  "neurath-B-2034-strabelina":
+    description: "Strabelina cultivar at row 2034"
+    position: "B"
+    source: "sijia"
+
+  "neurath-B-2012-shivious":
+    description: "Shivious cultivar at row 2012"
+    position: "B"
+    source: "sijia"

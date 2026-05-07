@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from wp6_data.red.sijia.parser import COLUMN_TO_SENSOR
 from wp6_data.shared.metadata import (
     DeviceMetadata,
     MetadataRegistry,
@@ -106,3 +107,40 @@ def test_enrich_omits_empty_meta() -> None:
     assert len(enriched) == 1
     assert "meta" not in enriched[0]
     assert "meta" not in enriched[0]["sensors"][0]
+
+
+def test_red_chlorophyll_sensor_default_carries_sijia_source() -> None:
+    registry = MetadataRegistry(RED_YAML)
+    meta = registry.sensor_default("chlorophyll")
+    assert meta.source == "sijia"
+
+
+def test_existing_sensor_without_source_field_defaults_to_empty_string() -> None:
+    # Back-compat: yaml entries that pre-date the source field must
+    # continue to load cleanly and default source to "" (no routing override).
+    registry = MetadataRegistry(RED_YAML)
+    par_meta = registry.sensor_default("par")
+    assert par_meta.source == ""
+
+
+def test_red_neurath_devices_are_registered_with_sijia_source() -> None:
+    registry = MetadataRegistry(RED_YAML)
+    strabelina = registry.device("neurath-B-2034-strabelina")
+    shivious = registry.device("neurath-B-2012-shivious")
+
+    assert strabelina.source == "sijia"
+    assert strabelina.position == "B"
+    assert shivious.source == "sijia"
+    assert shivious.position == "B"
+
+
+def test_every_sijia_parser_sensor_has_a_red_metadata_entry() -> None:
+    # SSOT consistency: a parser-emitted sensor that is missing from
+    # metadata.yaml would be silently routed back to MySQL by the
+    # federated provider. Bind metadata structurally to the parser.
+    registry = MetadataRegistry(RED_YAML)
+    expected_tags = sorted(set(COLUMN_TO_SENSOR.values()))
+    missing = [
+        tag for tag in expected_tags if registry.sensor_default(tag).source != "sijia"
+    ]
+    assert missing == []

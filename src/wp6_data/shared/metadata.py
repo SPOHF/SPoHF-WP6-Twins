@@ -41,6 +41,7 @@ class SensorMetadata(BaseModel):
     unit: str = ""
     alias: str = ""
     intention: str = ""
+    source: str = ""  # routing key; "" = MySQL default for red, datalake for blue
 
 
 class DeviceMetadata(BaseModel):
@@ -51,6 +52,7 @@ class DeviceMetadata(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     type: str = ""
+    source: str = ""  # UI-labelling hint; canonical routing is sensor-level
     sensors: dict[str, SensorMetadata] = {}
 
 
