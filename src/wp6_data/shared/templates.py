@@ -763,6 +763,20 @@ BASE_CSS = """
         width: 100%;
         margin: 0.2rem 0 0;
     }
+    .axis-split-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        margin: 0.5rem 0 0.3rem;
+        cursor: pointer;
+    }
+    .axis-split-toggle input[type="checkbox"] {
+        margin: 0;
+    }
+    #axis-controls-split h4 {
+        margin: 0.6rem 0 0.2rem;
+    }
     .unit-badge {
         font-size: 0.65rem;
         opacity: 0.5;
@@ -859,11 +873,19 @@ UNIFIED_CHART_JS = """
     var activeSeries = {};
     var seriesData = {};  // key -> {times: [], values: []}
     var totalPoints = 0;
-    var currentLabelFormat = 'smart';
-    var aggregateEnabled = false;
-    var aggregateFunc = 'avg';
     var BUCKET_STEPS = [0, 1, 5, 10, 15, 30, 60, 120, 360, 720, 1440, 10080, 20160, 43200];
-    var bucketMinutes = 10;
+
+    var splitMode = false;
+    function defaultAxisCfg() {
+        return {
+            labelFormat: 'smart',
+            aggregateEnabled: false,
+            aggregateFunc: 'avg',
+            bucketMinutes: 10
+        };
+    }
+    var axisCfg = { left: defaultAxisCfg(), right: defaultAxisCfg() };
+    function cfgFor(axis) { return splitMode ? axisCfg[axis] : axisCfg.left; }
 
     // Parse URL params
     var params = new URLSearchParams(window.location.search);
@@ -871,18 +893,34 @@ UNIFIED_CHART_JS = """
     var rightSpecs = (params.get('r') || '').split(',').filter(Boolean);
     var startDate = params.get('start') || '';
     var endDate = params.get('end') || '';
-    var savedLabelFormat = params.get('lbl') || '';
-    if (savedLabelFormat && ['smart', 'short', 'raw'].indexOf(savedLabelFormat) !== -1) {
-        currentLabelFormat = savedLabelFormat;
+
+    function readLabelFormat(name, fallback) {
+        var v = params.get(name) || '';
+        return ['smart', 'short', 'raw'].indexOf(v) !== -1 ? v : fallback;
     }
-    var savedAgg = params.get('agg') || '';
-    if (savedAgg && ['avg', 'max', 'min', 'sum'].indexOf(savedAgg) !== -1) {
-        aggregateEnabled = true;
-        aggregateFunc = savedAgg;
+    function readAggInto(cfg, aggName, bktName) {
+        var agg = params.get(aggName);
+        if (agg === 'off') {
+            cfg.aggregateEnabled = false;
+        } else if (agg && ['avg', 'max', 'min', 'sum'].indexOf(agg) !== -1) {
+            cfg.aggregateEnabled = true;
+            cfg.aggregateFunc = agg;
+        }
+        var bkt = parseInt(params.get(bktName));
+        if (!isNaN(bkt) && BUCKET_STEPS.indexOf(bkt) !== -1) {
+            cfg.bucketMinutes = bkt;
+        }
     }
-    var savedBkt = parseInt(params.get('bkt'));
-    if (!isNaN(savedBkt) && BUCKET_STEPS.indexOf(savedBkt) !== -1) {
-        bucketMinutes = savedBkt;
+    axisCfg.left.labelFormat = readLabelFormat('lbl', 'smart');
+    readAggInto(axisCfg.left, 'agg', 'bkt');
+    if (params.get('split') === '1') {
+        splitMode = true;
+        // Right-axis values fall back to left for any param not explicitly set
+        axisCfg.right.labelFormat = readLabelFormat('lbl_r', axisCfg.left.labelFormat);
+        axisCfg.right.aggregateEnabled = axisCfg.left.aggregateEnabled;
+        axisCfg.right.aggregateFunc = axisCfg.left.aggregateFunc;
+        axisCfg.right.bucketMinutes = axisCfg.left.bucketMinutes;
+        readAggInto(axisCfg.right, 'agg_r', 'bkt_r');
     }
 
     // Build initial active set from URL
@@ -978,75 +1016,115 @@ UNIFIED_CHART_JS = """
         });
     });
 
-    // Label format toggle
-    var labelBtns = document.querySelectorAll('.label-btn');
-    labelBtns.forEach(function(btn) {
-        btn.classList.toggle('active', btn.dataset.label === currentLabelFormat);
-        btn.addEventListener('click', function() {
-            var fmt = btn.dataset.label;
-            if (fmt === currentLabelFormat) return;
-            currentLabelFormat = fmt;
-            labelBtns.forEach(function(b) {
-                b.classList.toggle('active', b === btn);
-            });
-            relabelAllTraces();
-            syncUrl();
-        });
-    });
+    function activeAggValueFor(axis) {
+        var c = axisCfg[axis];
+        return c.aggregateEnabled ? c.aggregateFunc : 'off';
+    }
 
-    // Aggregate toggle (OFF / AVG / MAX / MIN / SUM)
-    var aggBtns = document.querySelectorAll('.agg-btn');
-    function syncAggControls() {
-        if (bucketSlider) bucketSlider.disabled = !aggregateEnabled;
+    function refreshControlActiveStates() {
+        document.querySelectorAll('.label-btn').forEach(function(btn) {
+            var axis = btn.dataset.axis;
+            btn.classList.toggle('active',
+                btn.dataset.label === axisCfg[axis].labelFormat);
+        });
+        document.querySelectorAll('.agg-btn').forEach(function(btn) {
+            var axis = btn.dataset.axis;
+            btn.classList.toggle('active',
+                btn.dataset.agg === activeAggValueFor(axis));
+        });
+        document.querySelectorAll('.bucket-slider-input').forEach(function(slider) {
+            var axis = slider.dataset.axis;
+            var c = axisCfg[axis];
+            var idx = BUCKET_STEPS.indexOf(c.bucketMinutes);
+            if (idx < 0) idx = 3;
+            slider.value = idx;
+            slider.disabled = !c.aggregateEnabled;
+            var labelEl = slider.parentElement.querySelector(
+                '.bucket-label[data-axis="' + axis + '"]');
+            if (labelEl) labelEl.textContent = formatBucket(c.bucketMinutes);
+        });
     }
-    function activeAggValue() {
-        return aggregateEnabled ? aggregateFunc : 'off';
-    }
-    aggBtns.forEach(function(btn) {
-        btn.classList.toggle('active',
-            btn.dataset.agg === activeAggValue());
-        btn.addEventListener('click', function() {
-            var fn = btn.dataset.agg;
-            if (fn === activeAggValue()) return;
-            if (fn === 'off') {
-                aggregateEnabled = false;
-            } else {
-                aggregateEnabled = true;
-                aggregateFunc = fn;
-            }
-            aggBtns.forEach(function(b) {
-                b.classList.toggle('active',
-                    b.dataset.agg === activeAggValue());
+
+    function wireAxisControls(rootEl) {
+        rootEl.querySelectorAll('.label-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var axis = btn.dataset.axis;
+                var fmt = btn.dataset.label;
+                if (fmt === axisCfg[axis].labelFormat) return;
+                axisCfg[axis].labelFormat = fmt;
+                refreshControlActiveStates();
+                relabelAllTraces();
+                syncUrl();
             });
-            syncAggControls();
+        });
+        rootEl.querySelectorAll('.agg-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var axis = btn.dataset.axis;
+                var fn = btn.dataset.agg;
+                if (fn === activeAggValueFor(axis)) return;
+                if (fn === 'off') {
+                    axisCfg[axis].aggregateEnabled = false;
+                } else {
+                    axisCfg[axis].aggregateEnabled = true;
+                    axisCfg[axis].aggregateFunc = fn;
+                }
+                refreshControlActiveStates();
+                rebuildTraces();
+                syncUrl();
+                updateStats();
+                updateY2();
+            });
+        });
+        rootEl.querySelectorAll('.bucket-slider-input').forEach(function(slider) {
+            slider.addEventListener('input', function() {
+                var axis = slider.dataset.axis;
+                var minutes = BUCKET_STEPS[parseInt(slider.value)];
+                var labelEl = slider.parentElement.querySelector(
+                    '.bucket-label[data-axis="' + axis + '"]');
+                if (labelEl) labelEl.textContent = formatBucket(minutes);
+            });
+            slider.addEventListener('change', function() {
+                var axis = slider.dataset.axis;
+                axisCfg[axis].bucketMinutes = BUCKET_STEPS[parseInt(slider.value)];
+                if (axisCfg[axis].aggregateEnabled) {
+                    rebuildTraces();
+                    syncUrl();
+                }
+            });
+        });
+    }
+
+    var unifiedBlock = document.getElementById('axis-controls-unified');
+    var splitBlock = document.getElementById('axis-controls-split');
+    if (unifiedBlock) wireAxisControls(unifiedBlock);
+    if (splitBlock) wireAxisControls(splitBlock);
+
+    function applySplitVisibility() {
+        if (unifiedBlock) unifiedBlock.style.display = splitMode ? 'none' : '';
+        if (splitBlock)   splitBlock.style.display   = splitMode ? '' : 'none';
+    }
+
+    var splitToggle = document.getElementById('axis-split-toggle');
+    if (splitToggle) {
+        splitToggle.checked = splitMode;
+        applySplitVisibility();
+        splitToggle.addEventListener('change', function() {
+            if (splitToggle.checked) {
+                axisCfg.right = JSON.parse(JSON.stringify(axisCfg.left));
+                splitMode = true;
+            } else {
+                splitMode = false;
+            }
+            applySplitVisibility();
+            refreshControlActiveStates();
             rebuildTraces();
             syncUrl();
             updateStats();
             updateY2();
         });
-    });
-
-    // Bucket slider
-    var bucketSlider = document.getElementById('bucket-slider');
-    var bucketLabelEl = document.getElementById('bucket-label');
-    if (bucketSlider) {
-        // Set slider position from bucketMinutes value
-        var initIdx = BUCKET_STEPS.indexOf(bucketMinutes);
-        if (initIdx < 0) initIdx = 3;
-        bucketSlider.value = initIdx;
-        bucketLabelEl.textContent = formatBucket(bucketMinutes);
-        bucketSlider.addEventListener('input', function() {
-            bucketLabelEl.textContent = formatBucket(BUCKET_STEPS[parseInt(bucketSlider.value)]);
-        });
-        bucketSlider.addEventListener('change', function() {
-            bucketMinutes = BUCKET_STEPS[parseInt(bucketSlider.value)];
-            if (aggregateEnabled) {
-                rebuildTraces();
-                syncUrl();
-            }
-        });
     }
-    syncAggControls();
+
+    refreshControlActiveStates();
 
     function buildTree(sensors, groupBy) {
         // Group sensors into {groupKey: [{device, sensor, ...}, ...]}
@@ -1220,7 +1298,7 @@ UNIFIED_CHART_JS = """
         });
     }
 
-    function sensorLabel(key) {
+    function sensorLabel(key, axis) {
         var s = allSensors.find(function(s) {
             return s.device + ':' + s.sensor === key;
         });
@@ -1228,12 +1306,13 @@ UNIFIED_CHART_JS = """
         var sm = s.sensor_meta || {};
         var dm = s.device_meta || {};
         var alias = sm.alias || s.sensor;
+        var fmt = cfgFor(axis).labelFormat;
 
-        if (currentLabelFormat === 'raw') {
+        if (fmt === 'raw') {
             return s.device + ' | ' + s.sensor;
         }
         var pos = dm.position || s.device;
-        if (currentLabelFormat === 'short') {
+        if (fmt === 'short') {
             return pos + ' \u2014 ' + alias;
         }
         // 'smart': position + alias + intention snippet
@@ -1246,13 +1325,18 @@ UNIFIED_CHART_JS = """
         return label;
     }
 
+    function anyAggregateEnabled() {
+        return cfgFor('left').aggregateEnabled || cfgFor('right').aggregateEnabled;
+    }
+
     function relabelAllTraces() {
-        if (aggregateEnabled) { rebuildTraces(); return; }
+        if (anyAggregateEnabled()) { rebuildTraces(); return; }
         var keys = Object.keys(activeSeries);
         if (keys.length === 0) return;
         keys.forEach(function(k) {
             var idx = activeSeries[k].traceIdx;
-            Plotly.restyle(chartDiv, { name: sensorLabel(k) }, [idx]);
+            var axis = activeSeries[k].axis;
+            Plotly.restyle(chartDiv, { name: sensorLabel(k, axis) }, [idx]);
         });
     }
 
@@ -1300,12 +1384,12 @@ UNIFIED_CHART_JS = """
         return (mins / 1440) + ' days';
     }
 
-    function applyAgg(values) {
+    function applyAgg(values, func) {
         var nums = values.filter(function(v) { return v !== null; });
         if (nums.length === 0) return null;
-        if (aggregateFunc === 'max') return Math.max.apply(null, nums);
-        if (aggregateFunc === 'min') return Math.min.apply(null, nums);
-        if (aggregateFunc === 'sum') {
+        if (func === 'max') return Math.max.apply(null, nums);
+        if (func === 'min') return Math.min.apply(null, nums);
+        if (func === 'sum') {
             var s = 0; nums.forEach(function(v) { s += v; }); return s;
         }
         // avg
@@ -1324,88 +1408,96 @@ UNIFIED_CHART_JS = """
         var keys = Object.keys(activeSeries);
         if (keys.length === 0) return;
 
-        if (!aggregateEnabled) {
-            // Individual traces
-            var traces = [];
-            keys.forEach(function(k) {
-                var sd = seriesData[k];
-                if (!sd) return;
-                var axis = activeSeries[k].axis;
-                var color = keyColor(k);
-                var trace = {
-                    x: sd.times, y: sd.values,
-                    name: sensorLabel(k),
-                    mode: 'lines',
-                    yaxis: axis === 'right' ? 'y2' : 'y',
-                    line: {color: color}
-                };
-                if (axis === 'right') { trace.line.dash = 'dash'; }
-                traces.push(trace);
-            });
-            if (traces.length > 0) Plotly.addTraces(chartDiv, traces);
-            // Update traceIdx
-            var ti = 0;
-            keys.forEach(function(k) {
-                if (seriesData[k]) { activeSeries[k].traceIdx = ti; ti++; }
-            });
-        } else {
-            // Group by smart label + axis
-            var groups = {};
-            keys.forEach(function(k) {
-                var sd = seriesData[k];
-                if (!sd) return;
-                var label = sensorLabel(k);
-                var axis = activeSeries[k].axis;
-                var groupKey = label + '||' + axis;
-                if (!groups[groupKey]) {
-                    groups[groupKey] = { label: label, axis: axis, series: [] };
-                }
-                groups[groupKey].series.push(sd);
-            });
+        // Partition keys by axis so each side can use its own config
+        var keysByAxis = { left: [], right: [] };
+        keys.forEach(function(k) {
+            var axis = activeSeries[k].axis;
+            keysByAxis[axis].push(k);
+        });
 
-            var traces = [];
-            var groupKeys = Object.keys(groups);
-            groupKeys.forEach(function(gk) {
-                var g = groups[gk];
-                var merged;
-                if (g.series.length === 1 && bucketMinutes <= 0) {
-                    merged = { times: g.series[0].times, values: g.series[0].values };
-                } else {
-                    // Collect all timestamps into a sorted set
-                    var timeSet = {};
-                    g.series.forEach(function(sd) {
-                        sd.times.forEach(function(t, i) {
-                            var bt = bucketTime(t, bucketMinutes);
-                            if (!timeSet[bt]) timeSet[bt] = [];
-                            if (sd.values[i] !== null) timeSet[bt].push(sd.values[i]);
+        var traces = [];
+        var traceIdxMap = {};
+
+        ['left', 'right'].forEach(function(axis) {
+            var axisKeys = keysByAxis[axis];
+            if (axisKeys.length === 0) return;
+            var cfg = cfgFor(axis);
+
+            if (!cfg.aggregateEnabled) {
+                axisKeys.forEach(function(k) {
+                    var sd = seriesData[k];
+                    if (!sd) return;
+                    var color = keyColor(k);
+                    var trace = {
+                        x: sd.times, y: sd.values,
+                        name: sensorLabel(k, axis),
+                        mode: 'lines',
+                        yaxis: axis === 'right' ? 'y2' : 'y',
+                        line: {color: color}
+                    };
+                    if (axis === 'right') { trace.line.dash = 'dash'; }
+                    traceIdxMap[k] = traces.length;
+                    traces.push(trace);
+                });
+            } else {
+                var groups = {};
+                axisKeys.forEach(function(k) {
+                    var sd = seriesData[k];
+                    if (!sd) return;
+                    var label = sensorLabel(k, axis);
+                    if (!groups[label]) {
+                        groups[label] = { label: label, series: [] };
+                    }
+                    groups[label].series.push(sd);
+                });
+                Object.keys(groups).forEach(function(label) {
+                    var g = groups[label];
+                    var merged;
+                    if (g.series.length === 1 && cfg.bucketMinutes <= 0) {
+                        merged = { times: g.series[0].times, values: g.series[0].values };
+                    } else {
+                        var timeSet = {};
+                        g.series.forEach(function(sd) {
+                            sd.times.forEach(function(t, i) {
+                                var bt = bucketTime(t, cfg.bucketMinutes);
+                                if (!timeSet[bt]) timeSet[bt] = [];
+                                if (sd.values[i] !== null) timeSet[bt].push(sd.values[i]);
+                            });
                         });
-                    });
-                    var sortedTimes = Object.keys(timeSet).sort();
-                    var aggValues = sortedTimes.map(function(t) {
-                        return applyAgg(timeSet[t]);
-                    });
-                    merged = { times: sortedTimes, values: aggValues };
-                }
+                        var sortedTimes = Object.keys(timeSet).sort();
+                        var aggValues = sortedTimes.map(function(t) {
+                            return applyAgg(timeSet[t], cfg.aggregateFunc);
+                        });
+                        merged = { times: sortedTimes, values: aggValues };
+                    }
 
-                var suffix = g.series.length > 1
-                    ? ' [' + aggregateFunc.toUpperCase() + '\u00d7' + g.series.length + ']'
+                    var suffix = g.series.length > 1
+                    ? ' [' + cfg.aggregateFunc.toUpperCase() + '\u00d7' + g.series.length + ']'
                     : '';
                 var color = keyColor(g.label);
                 var trace = {
                     x: merged.times, y: merged.values,
                     name: g.label + suffix,
                     mode: 'lines',
-                    yaxis: g.axis === 'right' ? 'y2' : 'y',
+                    yaxis: axis === 'right' ? 'y2' : 'y',
                     line: {color: color}
                 };
-                if (g.axis === 'right') { trace.line.dash = 'dash'; }
+                if (axis === 'right') { trace.line.dash = 'dash'; }
                 traces.push(trace);
-            });
+                });
+            }
+        });
 
-            if (traces.length > 0) Plotly.addTraces(chartDiv, traces);
-            // In aggregate mode, traceIdx doesn't map 1:1 — set to -1
-            keys.forEach(function(k) { activeSeries[k].traceIdx = -1; });
-        }
+        if (traces.length > 0) Plotly.addTraces(chartDiv, traces);
+
+        keys.forEach(function(k) {
+            var axis = activeSeries[k].axis;
+            if (cfgFor(axis).aggregateEnabled) {
+                activeSeries[k].traceIdx = -1;
+            } else {
+                activeSeries[k].traceIdx = traceIdxMap[k] != null ? traceIdxMap[k] : -1;
+            }
+        });
     }
 
     function fetchAndAdd(key, axis, cb) {
@@ -1435,13 +1527,13 @@ UNIFIED_CHART_JS = """
                 };
                 totalPoints += data.length;
 
-                if (aggregateEnabled) {
+                if (anyAggregateEnabled()) {
                     rebuildTraces();
                 } else {
                     var color = keyColor(key);
                     var trace = {
                         x: times, y: values,
-                        name: sensorLabel(key),
+                        name: sensorLabel(key, axis),
                         mode: 'lines',
                         yaxis: axis === 'right' ? 'y2' : 'y',
                         line: {color: color}
@@ -1459,7 +1551,7 @@ UNIFIED_CHART_JS = """
         if (activeSeries[key]) {
             // Already loaded — just switch axis
             activeSeries[key].axis = axis;
-            if (aggregateEnabled) {
+            if (anyAggregateEnabled()) {
                 rebuildTraces();
             } else {
                 var idx = activeSeries[key].traceIdx;
@@ -1489,7 +1581,7 @@ UNIFIED_CHART_JS = """
         totalPoints -= activeSeries[key].points || 0;
         delete activeSeries[key];
         delete seriesData[key];
-        if (aggregateEnabled) {
+        if (anyAggregateEnabled()) {
             rebuildTraces();
         } else {
             Plotly.deleteTraces(chartDiv, [idx]);
@@ -1580,12 +1672,35 @@ UNIFIED_CHART_JS = """
         else p.delete('s');
         if (right.length) p.set('r', right.join(','));
         else p.delete('r');
-        if (currentLabelFormat !== 'smart') p.set('lbl', currentLabelFormat);
+        var L = axisCfg.left;
+        if (L.labelFormat !== 'smart') p.set('lbl', L.labelFormat);
         else p.delete('lbl');
-        if (aggregateEnabled) p.set('agg', aggregateFunc);
+        if (L.aggregateEnabled) p.set('agg', L.aggregateFunc);
         else p.delete('agg');
-        if (aggregateEnabled && bucketMinutes !== 10) p.set('bkt', bucketMinutes);
+        if (L.aggregateEnabled && L.bucketMinutes !== 10) p.set('bkt', L.bucketMinutes);
         else p.delete('bkt');
+        if (splitMode) {
+            p.set('split', '1');
+            var R = axisCfg.right;
+            if (R.labelFormat !== L.labelFormat) p.set('lbl_r', R.labelFormat);
+            else p.delete('lbl_r');
+            if (R.aggregateEnabled !== L.aggregateEnabled
+                || (R.aggregateEnabled && R.aggregateFunc !== L.aggregateFunc)) {
+                p.set('agg_r', R.aggregateEnabled ? R.aggregateFunc : 'off');
+            } else {
+                p.delete('agg_r');
+            }
+            if (R.aggregateEnabled && R.bucketMinutes !== L.bucketMinutes) {
+                p.set('bkt_r', R.bucketMinutes);
+            } else {
+                p.delete('bkt_r');
+            }
+        } else {
+            p.delete('split');
+            p.delete('lbl_r');
+            p.delete('agg_r');
+            p.delete('bkt_r');
+        }
         var newUrl = window.location.pathname;
         var qs = p.toString();
         if (qs) newUrl += '?' + qs;
@@ -1600,7 +1715,7 @@ UNIFIED_CHART_JS = """
     var dateForm = document.getElementById('dateFilter');
     if (dateForm) {
         var params = new URLSearchParams(window.location.search);
-        ['s', 'r', 'lbl', 'agg', 'bkt'].forEach(function(name) {
+        ['s', 'r', 'lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r'].forEach(function(name) {
             var val = params.get(name);
             if (val) {
                 var input = document.createElement('input');
@@ -1615,7 +1730,7 @@ UNIFIED_CHART_JS = """
     // Also keep hidden fields in sync when series change
     function syncDateFormParams() {
         if (!dateForm) return;
-        ['s', 'r', 'lbl', 'agg', 'bkt'].forEach(function(name) {
+        ['s', 'r', 'lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r'].forEach(function(name) {
             var existing = dateForm.querySelector(
                 'input[name="' + name + '"]');
             var p = new URLSearchParams(window.location.search);
@@ -1726,6 +1841,9 @@ DASHBOARD_JS = """
         if (chart.r) params.set('r', chart.r);
         params.set('start', dates.start);
         params.set('end', dates.end);
+        ['lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r'].forEach(function(k) {
+            if (chart[k]) params.set(k, chart[k]);
+        });
         return '/chart?' + params.toString();
     }
 
@@ -1933,6 +2051,10 @@ SAVE_TO_DASHBOARD_JS = """
             lbl: params.get('lbl') || '',
             agg: params.get('agg') || '',
             bkt: params.get('bkt') || '',
+            split: params.get('split') || '',
+            lbl_r: params.get('lbl_r') || '',
+            agg_r: params.get('agg_r') || '',
+            bkt_r: params.get('bkt_r') || '',
             createdAt: new Date().toISOString()
         };
 
@@ -2157,27 +2279,83 @@ to {end.isoformat()}</summary>
                     >By position</button>
             </div>
             <div id="sensor-panel">Loading sensors...</div>
-            <h4>Labels</h4>
-            <div class="group-toggle">
-                <button class="label-btn active" data-label="smart"
-                    >Smart</button>
-                <button class="label-btn" data-label="short"
-                    >Short</button>
-                <button class="label-btn" data-label="raw"
-                    >Raw ID</button>
+            <label class="axis-split-toggle">
+                <input type="checkbox" id="axis-split-toggle">
+                Configure axes separately
+            </label>
+            <div id="axis-controls-unified">
+                <h4>Labels</h4>
+                <div class="group-toggle">
+                    <button class="label-btn" data-label="smart" data-axis="left"
+                        >Smart</button>
+                    <button class="label-btn" data-label="short" data-axis="left"
+                        >Short</button>
+                    <button class="label-btn" data-label="raw" data-axis="left"
+                        >Raw ID</button>
+                </div>
+                <small>Aggregate matching labels</small>
+                <div class="group-toggle">
+                    <button class="agg-btn" data-agg="off" data-axis="left">OFF</button>
+                    <button class="agg-btn" data-agg="avg" data-axis="left">AVG</button>
+                    <button class="agg-btn" data-agg="max" data-axis="left">MAX</button>
+                    <button class="agg-btn" data-agg="min" data-axis="left">MIN</button>
+                    <button class="agg-btn" data-agg="sum" data-axis="left">SUM</button>
+                </div>
+                <div class="bucket-slider">
+                    <label>Bucket: <span class="bucket-label" data-axis="left">10 min</span></label>
+                    <input type="range" class="bucket-slider-input" data-axis="left"
+                        min="0" max="13" value="3" step="1">
+                </div>
             </div>
-            <small>Aggregate matching labels</small>
-            <div class="group-toggle">
-                <button class="agg-btn active" data-agg="off">OFF</button>
-                <button class="agg-btn" data-agg="avg">AVG</button>
-                <button class="agg-btn" data-agg="max">MAX</button>
-                <button class="agg-btn" data-agg="min">MIN</button>
-                <button class="agg-btn" data-agg="sum">SUM</button>
-            </div>
-            <div class="bucket-slider">
-                <label>Bucket: <span id="bucket-label">10 min</span></label>
-                <input type="range" id="bucket-slider"
-                    min="0" max="13" value="3" step="1">
+            <div id="axis-controls-split" style="display:none;">
+                <h4>Y-Left</h4>
+                <small>Labels</small>
+                <div class="group-toggle">
+                    <button class="label-btn" data-label="smart" data-axis="left"
+                        >Smart</button>
+                    <button class="label-btn" data-label="short" data-axis="left"
+                        >Short</button>
+                    <button class="label-btn" data-label="raw" data-axis="left"
+                        >Raw ID</button>
+                </div>
+                <small>Aggregate matching labels</small>
+                <div class="group-toggle">
+                    <button class="agg-btn" data-agg="off" data-axis="left">OFF</button>
+                    <button class="agg-btn" data-agg="avg" data-axis="left">AVG</button>
+                    <button class="agg-btn" data-agg="max" data-axis="left">MAX</button>
+                    <button class="agg-btn" data-agg="min" data-axis="left">MIN</button>
+                    <button class="agg-btn" data-agg="sum" data-axis="left">SUM</button>
+                </div>
+                <div class="bucket-slider">
+                    <label>Bucket: <span class="bucket-label" data-axis="left">10 min</span></label>
+                    <input type="range" class="bucket-slider-input" data-axis="left"
+                        min="0" max="13" value="3" step="1">
+                </div>
+                <h4>Y-Right</h4>
+                <small>Labels</small>
+                <div class="group-toggle">
+                    <button class="label-btn" data-label="smart" data-axis="right"
+                        >Smart</button>
+                    <button class="label-btn" data-label="short" data-axis="right"
+                        >Short</button>
+                    <button class="label-btn" data-label="raw" data-axis="right"
+                        >Raw ID</button>
+                </div>
+                <small>Aggregate matching labels</small>
+                <div class="group-toggle">
+                    <button class="agg-btn" data-agg="off" data-axis="right">OFF</button>
+                    <button class="agg-btn" data-agg="avg" data-axis="right">AVG</button>
+                    <button class="agg-btn" data-agg="max" data-axis="right">MAX</button>
+                    <button class="agg-btn" data-agg="min" data-axis="right">MIN</button>
+                    <button class="agg-btn" data-agg="sum" data-axis="right">SUM</button>
+                </div>
+                <div class="bucket-slider">
+                    <label>Bucket:
+                        <span class="bucket-label" data-axis="right">10 min</span>
+                    </label>
+                    <input type="range" class="bucket-slider-input" data-axis="right"
+                        min="0" max="13" value="3" step="1">
+                </div>
             </div>
         </div>
         <div class="chart-main">
