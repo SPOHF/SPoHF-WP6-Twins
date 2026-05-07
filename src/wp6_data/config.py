@@ -89,4 +89,7 @@ class RedSettings(BaseSettings):
     db_user: str = "root"
     db_password: str = ""
 
+    # TimescaleDB connection for manually-uploaded measurements (Sijia, etc.)
+    tsdb_url: str
+
     export_dir: str = "/data/exports"

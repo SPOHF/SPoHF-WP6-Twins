@@ -1,0 +1,14 @@
+{{- if .Values.red.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Chart.Name }}-red-manual-uploads
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-red-manual-uploads
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.red.manualUploads.size | default "5Gi" }}
+{{- end }}

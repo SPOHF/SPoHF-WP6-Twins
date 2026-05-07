@@ -33,3 +33,6 @@ api:
 # Secrets (referenced from ExternalSecret or direct)
 secrets:
   existingSecret: ""  # Name of existing secret (default: wp6-data-secrets)
+  # Blue-twin-specific secret holding tsdb-url for the wp6_blue database.
+  # Separate from the shared secret so red can have a symmetric red-secrets.
+  blueSecret: ""  # Name of blue secret (default: wp6-data-blue-secrets)

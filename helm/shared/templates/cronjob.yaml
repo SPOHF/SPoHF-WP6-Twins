@@ -46,11 +46,11 @@ spec:
                     secretKeyRef:
                       name: {{ .Values.secrets.existingSecret | default "wp6-data-secrets" }}
                       key: yookr-password
-                # Shared
+                # Blue TSDB connection (sync writes to wp6_blue)
                 - name: WP6_TSDB_URL
                   valueFrom:
                     secretKeyRef:
-                      name: {{ .Values.secrets.existingSecret | default "wp6-data-secrets" }}
+                      name: {{ .Values.secrets.blueSecret | default "wp6-data-blue-secrets" }}
                       key: tsdb-url
                 - name: WP6_SYNC_PAGE_SIZE
                   value: {{ .Values.sync.pageSize | quote }}
