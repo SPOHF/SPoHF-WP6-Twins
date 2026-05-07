@@ -66,6 +66,16 @@ def mock_tsdb_coverage(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     return fn
 
 
+@pytest.fixture()
+def mock_tsdb_device_counts(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Replace the TSDB per-device count helper with an AsyncMock."""
+    from wp6_data.red import tsdb
+
+    fn = AsyncMock(return_value={})
+    monkeypatch.setattr(tsdb, "fetch_device_counts_tsdb", fn)
+    return fn
+
+
 def test_init_builds_tsdb_routing_set_from_sensor_defaults_source_field(
     red_metadata: MetadataRegistry,
 ) -> None:
@@ -209,6 +219,7 @@ async def test_fetch_available_sensors_includes_tsdb_sensors_from_metadata(
 async def test_fetch_device_data_includes_tsdb_devices_from_metadata(
     red_metadata: MetadataRegistry,
     mock_mysql: AsyncMock,
+    mock_tsdb_device_counts: AsyncMock,
 ) -> None:
     """fetch_device_data merges MySQL devices with TSDB-declared devices."""
     mock_mysql.get_all_devices.return_value = {
@@ -229,6 +240,42 @@ async def test_fetch_device_data_includes_tsdb_devices_from_metadata(
     }
     assert "neurath-B-2034-strabelina" in devices
     assert set(devices["neurath-B-2034-strabelina"]["sensors"]) == sijia_sensors
+
+
+async def test_fetch_device_data_populates_tsdb_reading_counts(
+    red_metadata: MetadataRegistry,
+    mock_mysql: AsyncMock,
+    mock_tsdb_device_counts: AsyncMock,
+) -> None:
+    """TSDB-backed devices show actual row counts from the readings table."""
+    mock_mysql.get_all_devices.return_value = {}
+    mock_tsdb_device_counts.return_value = {
+        "neurath-B-2034-strabelina": 42,
+        "neurath-B-2012-shivious": 17,
+    }
+    provider = RedSensorProvider(metadata=red_metadata)
+
+    devices = await provider.fetch_device_data()
+
+    assert devices["neurath-B-2034-strabelina"]["readings"] == 42
+    assert devices["neurath-B-2012-shivious"]["readings"] == 17
+
+
+async def test_fetch_device_data_zero_count_for_tsdb_device_with_no_rows(
+    red_metadata: MetadataRegistry,
+    mock_mysql: AsyncMock,
+    mock_tsdb_device_counts: AsyncMock,
+) -> None:
+    """A TSDB device with no readings yet still appears, with count 0."""
+    mock_mysql.get_all_devices.return_value = {}
+    mock_tsdb_device_counts.return_value = {}  # no rows in DB at all
+    provider = RedSensorProvider(metadata=red_metadata)
+
+    devices = await provider.fetch_device_data()
+
+    # Devices declared in metadata still appear (structural enumeration)
+    assert "neurath-B-2034-strabelina" in devices
+    assert devices["neurath-B-2034-strabelina"]["readings"] == 0
 
 
 async def test_fetch_daily_coverage_merges_mysql_and_tsdb(

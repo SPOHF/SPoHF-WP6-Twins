@@ -116,6 +116,27 @@ async def fetch_data_tsdb(
     return df.sort_values("time")
 
 
+async def fetch_device_counts_tsdb() -> dict[str, int]:
+    """Total row count per device_name in the red `readings` table.
+
+    Used by RedSensorProvider to populate the home page's reading-count
+    column for TSDB-backed devices (matches the MySQL side, which sums
+    COUNT(*) per device across legacy sensor tables).
+    """
+    from wp6_data.db.pool import get_pool
+
+    query = """
+        SELECT device_name, count(*) AS n
+        FROM readings
+        GROUP BY device_name
+    """
+    pool = get_pool()
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(query)
+        rows = await cur.fetchall()
+    return {r["device_name"]: r["n"] for r in rows}
+
+
 async def fetch_daily_coverage_tsdb() -> list[dict[str, Any]]:
     """Distinct (device, sensor, day) triples from the red `readings` table."""
     from wp6_data.db.pool import get_pool

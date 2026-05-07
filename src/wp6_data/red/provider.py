@@ -204,7 +204,10 @@ class RedSensorProvider:
 
     async def fetch_device_data(self) -> dict[str, dict]:
         """Device overview for the home page (MySQL + TSDB merged)."""
+        from wp6_data.red.tsdb import fetch_device_counts_tsdb
+
         all_devices = await self.db.get_all_devices()
+        tsdb_counts = await fetch_device_counts_tsdb()
 
         device_data: dict[str, dict] = {}
         for device_id, info in all_devices.items():
@@ -215,7 +218,7 @@ class RedSensorProvider:
 
         for device, sensor in self._enumerate_tsdb_sensors():
             entry = device_data.setdefault(
-                device, {"sensors": [], "readings": 0},
+                device, {"sensors": [], "readings": tsdb_counts.get(device, 0)},
             )
             if sensor not in entry["sensors"]:
                 entry["sensors"].append(sensor)
