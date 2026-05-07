@@ -4,12 +4,14 @@ from pathlib import Path
 
 import structlog
 
+from wp6_data.db.pool import close_pool, init_pool
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.provider import RedSensorProvider
 from wp6_data.red.routes import browse, dli, dli_model
 from wp6_data.red.routes import charts as red_charts
 from wp6_data.red.routes.dli_model.train import train_model_from_db
+from wp6_data.red.tsdb import ensure_schema_red
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
 from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
@@ -18,7 +20,7 @@ log = structlog.get_logger()
 
 
 async def _startup() -> None:
-    """Connect to MySQL and train DLI model if needed."""
+    """Connect to MySQL, bootstrap red TSDB schema, and train DLI model if needed."""
     deps.db = MySQLConnection(
         host=deps.DB_HOST,
         port=deps.DB_PORT,
@@ -27,6 +29,9 @@ async def _startup() -> None:
         database=deps.DB_NAME,
     )
     await deps.db.connect()
+
+    pool = await init_pool(deps.settings.tsdb_url)
+    await ensure_schema_red(pool)
 
     from wp6_data.red.dli import get_model
 
@@ -50,6 +55,7 @@ async def _startup() -> None:
 async def _shutdown() -> None:
     if deps.db:
         await deps.db.close()
+    await close_pool()
 
 
 def _dli_card() -> str:

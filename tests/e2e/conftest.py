@@ -4,7 +4,12 @@ import psycopg
 import pytest_asyncio
 
 TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
+RED_TSDB_DSN = "postgresql://wp6_red:wp6dev@localhost:5433/wp6_red"
 E2E_PREFIX = "e2e-"
+_TSDB_HINT = (
+    "Start it with: docker compose -f docker-compose.tsdb.yml up -d "
+    "(use `down -v` once if you have an old volume without the wp6_red database)"
+)
 
 
 @pytest_asyncio.fixture()
@@ -14,8 +19,20 @@ async def tsdb_conn():
         conn = await psycopg.AsyncConnection.connect(TSDB_DSN)
     except Exception as exc:
         raise RuntimeError(
-            f"TimescaleDB is not reachable at {TSDB_DSN}. "
-            "Start it with: docker compose -f docker-compose.blue.yml up -d"
+            f"TimescaleDB is not reachable at {TSDB_DSN}. {_TSDB_HINT}"
+        ) from exc
+    yield conn
+    await conn.close()
+
+
+@pytest_asyncio.fixture()
+async def red_tsdb_conn():
+    """Async psycopg connection to the red wp6_red database."""
+    try:
+        conn = await psycopg.AsyncConnection.connect(RED_TSDB_DSN)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Red TimescaleDB is not reachable at {RED_TSDB_DSN}. {_TSDB_HINT}"
         ) from exc
     yield conn
     await conn.close()
