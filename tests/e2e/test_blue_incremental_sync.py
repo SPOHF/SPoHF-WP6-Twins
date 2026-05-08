@@ -189,7 +189,11 @@ async def test_incremental_sync_and_dashboard_display(tsdb_conn):
     # ASGITransport does not drive FastAPI lifespan, so init_pool() never runs
     # unless we enter the lifespan context manually.
     async with app.router.lifespan_context(app):
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            follow_redirects=True,
+        ) as client:
             # /health
             resp = await client.get("/health")
             assert resp.status_code == 200
