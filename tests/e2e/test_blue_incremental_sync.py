@@ -186,28 +186,35 @@ async def test_incremental_sync_and_dashboard_display(tsdb_conn):
     from wp6_data.blue.dashboard import app
 
     transport = ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        # /health
-        resp = await client.get("/health")
-        assert resp.status_code == 200
+    # ASGITransport does not drive FastAPI lifespan, so init_pool() never runs
+    # unless we enter the lifespan context manually.
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            follow_redirects=True,
+        ) as client:
+            # /health
+            resp = await client.get("/health")
+            assert resp.status_code == 200
 
-        # / (home) — should list our e2e devices and sensors
-        resp = await client.get("/")
-        assert resp.status_code == 200
-        body = resp.text
-        assert "e2e-device-alpha" in body
-        assert "e2e-temperature" in body
+            # / (home) — should list our e2e devices and sensors
+            resp = await client.get("/")
+            assert resp.status_code == 200
+            body = resp.text
+            assert "e2e-device-alpha" in body
+            assert "e2e-temperature" in body
 
-        # /chart/e2e-temperature — should render a plotly chart
-        resp = await client.get("/chart/e2e-temperature")
-        assert resp.status_code == 200
-        assert "plotly" in resp.text.lower()
+            # /chart/e2e-temperature — should render a plotly chart
+            resp = await client.get("/chart/e2e-temperature")
+            assert resp.status_code == 200
+            assert "plotly" in resp.text.lower()
 
-        # /device/e2e-device-alpha — should render without error
-        resp = await client.get("/device/e2e-device-alpha")
-        assert resp.status_code == 200
+            # /device/e2e-device-alpha — should render without error
+            resp = await client.get("/device/e2e-device-alpha")
+            assert resp.status_code == 200
 
-        # /status — should contain coverage data for our e2e devices
-        resp = await client.get("/status")
-        assert resp.status_code == 200
-        assert "e2e-device-alpha" in resp.text
+            # /status — should contain coverage data for our e2e devices
+            resp = await client.get("/status")
+            assert resp.status_code == 200
+            assert "e2e-device-alpha" in resp.text
