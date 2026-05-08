@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time
 
-import pandas as pd
+import openpyxl
 
 SOURCE = "sijia"
 SHEET_NAME = "2025-26_Measurement"
@@ -72,10 +72,16 @@ class ValidationReport:
     file_size: int  # bytes
     total_rows: int  # populated source rows (NaN-Date filler dropped)
     valid_rows: int  # source rows that survived dtype validation
-    skipped_rows: tuple[SkippedRow, ...]
-    devices: tuple[str, ...]  # sorted, distinct
-    sensors: tuple[str, ...]  # sorted, distinct
-    date_range: tuple[date, date] | None  # None when no valid rows
+    # Number of rows that will be INSERTed into `readings` if Apply is clicked.
+    # Differs from valid_rows: each Excel row produces up to 14 readings (one
+    # per non-NaN sensor cell), and rows sharing (device, time, sensor) are
+    # aggregated to a single mean-valued reading. This is the field to compare
+    # against `existing_row_count` for regression detection.
+    emitted_row_count: int = 0
+    skipped_rows: tuple[SkippedRow, ...] = ()
+    devices: tuple[str, ...] = ()  # sorted, distinct
+    sensors: tuple[str, ...] = ()  # sorted, distinct
+    date_range: tuple[date, date] | None = None  # None when no valid rows
     # Comparison facts vs. existing data for the same source. Populated by
     # ManualIngestService.validate(); the parser leaves them at defaults.
     existing_row_count: int = 0
@@ -88,54 +94,97 @@ def _device_name(variety: str, block: str, row: float) -> str:
     return f"neurath-{block}-{int(row)}-{variety.strip().lower()}"
 
 
+_DATE_COL_IDX = EXPECTED_HEADERS.index("Date")
+_VARIETY_COL_IDX = EXPECTED_HEADERS.index("Variety")
+_BLOCK_COL_IDX = EXPECTED_HEADERS.index("Block")
+_ROW_COL_IDX = EXPECTED_HEADERS.index("Row")
+_SENSOR_COL_INDICES: tuple[tuple[int, str], ...] = tuple(
+    (EXPECTED_HEADERS.index(col), sensor)
+    for col, sensor in COLUMN_TO_SENSOR.items()
+)
+
+
 def _extract(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
     """Shared pipeline. Validates structure, then returns (readings, skipped, total_rows).
 
     Raises SijiaParseError if the sheet or column headers don't match expectations.
     Per-row dtype failures are collected into `skipped`, not raised.
+
+    Implementation note: openpyxl in read_only mode is used directly rather
+    than pandas read_excel because the Sijia file routinely carries 6+
+    extra sheets (Klima, Pivot, Diagram) that bloat the workbook to 15 MB+.
+    pandas would parse all of them and iterate the worksheet's full padded
+    1,048,576-row dimension; openpyxl's streaming reader plus an early
+    break on a NULL Date column reads only the actual ~120 measurement rows.
     """
-    xl = pd.ExcelFile(io.BytesIO(file_bytes))
-    if SHEET_NAME not in xl.sheet_names:
-        raise SijiaParseError(
-            f"Required sheet {SHEET_NAME!r} not found; file contains {xl.sheet_names!r}"
-        )
-    df = pd.read_excel(xl, sheet_name=SHEET_NAME)
-    if tuple(df.columns) != EXPECTED_HEADERS:
-        raise SijiaParseError(
-            f"Column headers mismatch. Expected {EXPECTED_HEADERS!r}, got {tuple(df.columns)!r}"
-        )
+    wb = openpyxl.load_workbook(
+        io.BytesIO(file_bytes), read_only=True, data_only=True,
+    )
+    try:
+        if SHEET_NAME not in wb.sheetnames:
+            raise SijiaParseError(
+                f"Required sheet {SHEET_NAME!r} not found; "
+                f"file contains {wb.sheetnames!r}"
+            )
+        ws = wb[SHEET_NAME]
+        rows_iter = ws.iter_rows(values_only=True)
+        try:
+            header_row = next(rows_iter)
+        except StopIteration:
+            raise SijiaParseError(f"Sheet {SHEET_NAME!r} is empty") from None
 
-    df = df.dropna(subset=["Date"])
-    total_rows = len(df)
+        actual_headers = tuple(header_row[: len(EXPECTED_HEADERS)])
+        if actual_headers != EXPECTED_HEADERS:
+            raise SijiaParseError(
+                f"Column headers mismatch. Expected {EXPECTED_HEADERS!r}, "
+                f"got {actual_headers!r}"
+            )
 
-    buckets: dict[tuple[str, datetime, str], list[float]] = defaultdict(list)
-    skipped: list[SkippedRow] = []
+        buckets: dict[tuple[str, datetime, str], list[float]] = defaultdict(list)
+        skipped: list[SkippedRow] = []
+        total_rows = 0
 
-    for idx, r in df.iterrows():
-        excel_row = int(idx) + 2  # +1 for 1-based, +1 for the header row
-        device = _device_name(r["Variety"], r["Block"], r["Row"])
-        ts = r["Date"].to_pydatetime()
-        if ts.time() == time(0, 0):
-            ts = ts.replace(hour=DEFAULT_MEASUREMENT_HOUR)
-
-        row_cells: list[tuple[str, float]] = []
-        error: str | None = None
-        for column, sensor in COLUMN_TO_SENSOR.items():
-            value = r[column]
-            if pd.isna(value):
-                continue
-            try:
-                scaled = float(value) * 100 if sensor in PERCENTAGE_SENSORS else float(value)
-            except (TypeError, ValueError):
-                error = f"{column}: {value!r} is not a number"
+        for excel_idx, raw_row in enumerate(rows_iter, start=2):
+            # First all-empty / NULL-Date row marks end of measurements;
+            # Excel pads worksheets to 1,048,576 rows that we must NOT iterate.
+            if raw_row[_DATE_COL_IDX] is None:
                 break
-            row_cells.append((sensor, scaled))
+            total_rows += 1
 
-        if error is not None:
-            skipped.append(SkippedRow(row_index=excel_row, reason=error))
-            continue
-        for sensor, scaled in row_cells:
-            buckets[(device, ts, sensor)].append(scaled)
+            variety = raw_row[_VARIETY_COL_IDX]
+            block = raw_row[_BLOCK_COL_IDX]
+            row_num = raw_row[_ROW_COL_IDX]
+            device = _device_name(variety, block, row_num)
+
+            ts = raw_row[_DATE_COL_IDX]
+            if not isinstance(ts, datetime):
+                ts = datetime.combine(ts, time(0, 0))
+            if ts.time() == time(0, 0):
+                ts = ts.replace(hour=DEFAULT_MEASUREMENT_HOUR)
+
+            row_cells: list[tuple[str, float]] = []
+            error: str | None = None
+            for col_idx, sensor in _SENSOR_COL_INDICES:
+                value = raw_row[col_idx]
+                if value is None:
+                    continue
+                try:
+                    scaled = (
+                        float(value) * 100 if sensor in PERCENTAGE_SENSORS
+                        else float(value)
+                    )
+                except (TypeError, ValueError):
+                    error = f"{EXPECTED_HEADERS[col_idx]}: {value!r} is not a number"
+                    break
+                row_cells.append((sensor, scaled))
+
+            if error is not None:
+                skipped.append(SkippedRow(row_index=excel_idx, reason=error))
+                continue
+            for sensor, scaled in row_cells:
+                buckets[(device, ts, sensor)].append(scaled)
+    finally:
+        wb.close()
 
     readings = [
         Reading(
@@ -171,6 +220,7 @@ def validate(file_bytes: bytes) -> ValidationReport:
         file_size=len(file_bytes),
         total_rows=total_rows,
         valid_rows=total_rows - len(skipped),
+        emitted_row_count=len(readings),
         skipped_rows=tuple(skipped),
         devices=devices,
         sensors=sensors,

@@ -115,23 +115,25 @@ class ManualIngestService:
                 )
                 upload_id = (await cur.fetchone())["id"]
 
-                await cur.executemany(
-                    "INSERT INTO readings "
-                    "(time, device_name, sensor_tag, value, source, upload_id) "
-                    "VALUES (%(time)s, %(device_name)s, %(sensor_tag)s, "
-                    "        %(value)s, %(source)s, %(upload_id)s)",
-                    [
-                        {
-                            "time": r.time,
-                            "device_name": r.device_name,
-                            "sensor_tag": r.sensor_tag,
-                            "value": r.value,
-                            "source": r.source,
-                            "upload_id": upload_id,
-                        }
-                        for r in readings
-                    ],
-                )
+                # Single multi-VALUES INSERT instead of executemany: psycopg3
+                # would otherwise issue one round-trip per row (368+ round-trips
+                # to TSDB exceeds the ingress timeout in prod).
+                if readings:
+                    placeholders = ", ".join(
+                        ["(%s, %s, %s, %s, %s, %s)"] * len(readings),
+                    )
+                    flat_params: list = []
+                    for r in readings:
+                        flat_params.extend([
+                            r.time, r.device_name, r.sensor_tag,
+                            r.value, r.source, upload_id,
+                        ])
+                    await cur.execute(
+                        "INSERT INTO readings "
+                        "(time, device_name, sensor_tag, value, source, upload_id) "
+                        f"VALUES {placeholders}",
+                        flat_params,
+                    )
             await conn.commit()
 
         await self.storage.prune(self.SOURCE)
