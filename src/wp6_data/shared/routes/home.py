@@ -6,7 +6,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
-from wp6_data.shared import build_home_tables, render_card, render_page
+from wp6_data.shared import (
+    build_explore_tabs,
+    render_card,
+    render_explore_tabs,
+    render_page,
+)
 from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.export import get_export_metadata
 from wp6_data.shared.routes.deps import get_provider, get_twin_config
@@ -19,9 +24,11 @@ router = APIRouter(dependencies=[Depends(verify_session_user)])
 async def home(
     config: Annotated[TwinConfig, Depends(get_twin_config)],
     provider: Annotated[SensorDataProvider, Depends(get_provider)],
+    tab: str = "devices",
 ) -> str:
     """Dashboard home page — sensor explorer with pluggable hero cards."""
     device_data = await provider.fetch_device_data()
+    manual_metadata = await provider.fetch_manual_metadata()
 
     # Exports are only generated for the default (first) data source
     default_key = config.data_sources[0].key if config.data_sources else None
@@ -29,8 +36,9 @@ async def home(
     export_meta = get_export_metadata(config.export_dir) if is_default_source else None
     available_exports = export_meta.get("devices", {}) if export_meta else {}
 
-    sensor_table, device_table = build_home_tables(
+    explore_tabs = build_explore_tabs(
         config.metadata, device_data, available_exports,
+        manual_metadata=manual_metadata,
     )
 
     # Render hero cards (can be sync or async callables)
@@ -60,9 +68,7 @@ async def home(
 
         {hero_html}
 
-        {render_card("Explore by Sensor Type", sensor_table)}
-
-        {render_card("Explore by Device", device_table)}
+        {render_card("Explore", render_explore_tabs(explore_tabs, active=tab))}
 
         {config.home_extra_html}
 

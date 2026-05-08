@@ -250,8 +250,8 @@ async def test_fetch_device_data_populates_tsdb_reading_counts(
     """TSDB-backed devices show actual row counts from the readings table."""
     mock_mysql.get_all_devices.return_value = {}
     mock_tsdb_device_counts.return_value = {
-        "neurath-B-2034-strabelina": 42,
-        "neurath-B-2012-shivious": 17,
+        "neurath-B-2034-strabelina": {"readings": 42, "last_seen": None},
+        "neurath-B-2012-shivious": {"readings": 17, "last_seen": None},
     }
     provider = RedSensorProvider(metadata=red_metadata)
 

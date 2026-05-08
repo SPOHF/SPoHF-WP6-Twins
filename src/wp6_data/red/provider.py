@@ -214,12 +214,22 @@ class RedSensorProvider:
             device_data[device_id] = {
                 "sensors": info["measurements"],
                 "readings": info["readings"],
+                "last_seen": info.get("last_seen"),
             }
 
         for device, sensor in self._enumerate_tsdb_sensors():
-            entry = device_data.setdefault(
-                device, {"sensors": [], "readings": tsdb_counts.get(device, 0)},
-            )
+            tsdb_info = tsdb_counts.get(device, {})
+            entry = device_data.setdefault(device, {
+                "sensors": [],
+                "readings": tsdb_info.get("readings", 0),
+                "last_seen": tsdb_info.get("last_seen"),
+            })
             if sensor not in entry["sensors"]:
                 entry["sensors"].append(sensor)
         return device_data
+
+    async def fetch_manual_metadata(self) -> dict[str, Any]:
+        """Last-upload per source and last-measure per manual sensor key."""
+        from wp6_data.red.tsdb import fetch_manual_summary_tsdb
+
+        return await fetch_manual_summary_tsdb()

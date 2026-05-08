@@ -55,7 +55,17 @@ class SensorDataProvider(Protocol):
     async def fetch_device_data(self) -> dict[str, dict]:
         """Device overview for the home page.
 
-        Returns {device_id: {sensors: [str, ...], readings: int}}.
+        Returns ``{device_id: {sensors: [str, ...], readings: int,
+                              last_seen: datetime | None}}``.
+        """
+        ...
+
+    async def fetch_manual_metadata(self) -> dict[str, Any]:
+        """Aggregate metadata for manually-uploaded measurements.
+
+        Returns ``{"uploads": {source: datetime},
+                  "measurements": {sensor_key: datetime}}``.
+        Empty dicts when the twin has no manual data.
         """
         ...
 

@@ -11,12 +11,14 @@ from wp6_data.shared.charts import (
     render_coverage_grid,
 )
 from wp6_data.shared.templates import (
-    build_home_tables,
+    build_explore_tabs,
     default_date_range,
     render_card,
     render_dashboard_page,
     render_date_filter,
     render_device_table,
+    render_explore_tabs,
+    render_manual_measurement_table,
     render_page,
     render_sensor_type_table,
     render_table,
@@ -26,7 +28,7 @@ from wp6_data.shared.templates import (
 )
 
 __all__ = [
-    "build_home_tables",
+    "build_explore_tabs",
     "build_weekly_coverage",
     "default_date_range",
     "make_bar_chart",
@@ -40,6 +42,8 @@ __all__ = [
     "render_dashboard_page",
     "render_date_filter",
     "render_device_table",
+    "render_explore_tabs",
+    "render_manual_measurement_table",
     "render_page",
     "render_sensor_type_table",
     "render_table",

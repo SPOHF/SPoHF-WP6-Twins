@@ -155,6 +155,7 @@ devices:
   "s2100-01-par":
     description: "PAR above lamp level"
     position: "B"
+    type: "s2100"
     sensors:
       par:
         intention: "Measures PAR above grow lamp"
@@ -162,45 +163,83 @@ devices:
   "s2100-02-par":
     description: "PAR at canopy level"
     position: "B"
+    type: "s2100"
     sensors:
       par:
         intention: "Measures PAR at plant height"
 
+  # ── Multi-height PAR sensors on a vertical wire (s2100-10..15) ──
+  "s2100-10-par":
+    position: "B"
+    type: "multi-height"
+
+  "s2100-11-par":
+    position: "B"
+    type: "multi-height"
+
+  "s2100-12-par":
+    position: "B"
+    type: "multi-height"
+
+  "s2100-13-par":
+    position: "B"
+    type: "multi-height"
+
+  "s2100-14-par":
+    position: "B"
+    type: "multi-height"
+
+  "s2100-15-par":
+    position: "B"
+    type: "multi-height"
+
   "s2101-01-temp-hum":
     position: "B"
+    type: "s2101"
 
   "s2103-01-temp-hum-co2":
     position: "B"
+    type: "s2103"
 
   "s2107-01-temp":
     position: "B"
+    type: "s2107"
 
   "s31-lb-01":
     position: "B"
+    type: "s31"
 
   "s1000-wetherstation":
     position: "B"
+    type: "s1000"
 
   "dendro-01":
     position: "B"
+    type: "dendro"
 
   "dendro-02":
     position: "B"
+    type: "dendro"
 
   "lht65n-e5":
     position: "B"
+    type: "lht65n"
 
   "lht65s-e5-02":
     position: "B"
+    type: "lht65s"
 
   "lht65s-ne117":
     position: "B"
+    type: "lht65s"
 
   "lht65s-ne117-02":
     position: "B"
+    type: "lht65s"
 
   "lht65s-ne117-03":
     position: "B"
+    type: "lht65s"
 
   # ── Sijia / Neurath manual measurement plants (one device per cultivar+row) ──
   "neurath-B-2034-strabelina":

@@ -61,10 +61,15 @@ class BlueSensorProvider:
         device_data: dict[str, dict] = {}
         for s in sensors:
             info = device_data.setdefault(
-                s["device"], {"sensors": set(), "readings": 0},
+                s["device"],
+                {"sensors": set(), "readings": 0, "last_seen": None},
             )
             info["sensors"].add(s["sensor"])
             info["readings"] += s["readings"]
         for info in device_data.values():
             info["sensors"] = list(info["sensors"])
         return device_data
+
+    async def fetch_manual_metadata(self) -> dict[str, Any]:
+        """Blue has no manual upload pipeline yet."""
+        return {"uploads": {}, "measurements": {}}

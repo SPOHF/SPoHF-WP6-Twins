@@ -116,17 +116,17 @@ async def fetch_data_tsdb(
     return df.sort_values("time")
 
 
-async def fetch_device_counts_tsdb() -> dict[str, int]:
-    """Total row count per device_name in the red `readings` table.
+async def fetch_device_counts_tsdb() -> dict[str, dict[str, Any]]:
+    """Per-device summary from the red `readings` table.
 
+    Returns ``{device_name: {"readings": int, "last_seen": datetime}}``.
     Used by RedSensorProvider to populate the home page's reading-count
-    column for TSDB-backed devices (matches the MySQL side, which sums
-    COUNT(*) per device across legacy sensor tables).
+    and last-seen columns for TSDB-backed devices (matches the MySQL side).
     """
     from wp6_data.db.pool import get_pool
 
     query = """
-        SELECT device_name, count(*) AS n
+        SELECT device_name, count(*) AS n, MAX(time) AS last_seen
         FROM readings
         GROUP BY device_name
     """
@@ -134,7 +134,42 @@ async def fetch_device_counts_tsdb() -> dict[str, int]:
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(query)
         rows = await cur.fetchall()
-    return {r["device_name"]: r["n"] for r in rows}
+    return {
+        r["device_name"]: {"readings": r["n"], "last_seen": r["last_seen"]}
+        for r in rows
+    }
+
+
+async def fetch_manual_summary_tsdb() -> dict[str, Any]:
+    """Aggregate metadata for manually-uploaded measurements.
+
+    Returns ``{"uploads": {source: last_uploaded_at},
+              "measurements": {sensor_tag: last_measure_time}}``.
+    Drives the Manual tab's *Last upload* (per-source) and
+    *Last measure* (per measurement type) columns.
+    """
+    from wp6_data.db.pool import get_pool
+
+    pool = get_pool()
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT source, MAX(uploaded_at) AS last_upload "
+            "FROM manual_uploads GROUP BY source",
+        )
+        upload_rows = await cur.fetchall()
+        await cur.execute(
+            "SELECT r.sensor_tag, MAX(r.time) AS last_measure "
+            "FROM readings r WHERE r.upload_id IS NOT NULL "
+            "GROUP BY r.sensor_tag",
+        )
+        measure_rows = await cur.fetchall()
+
+    return {
+        "uploads": {r["source"]: r["last_upload"] for r in upload_rows},
+        "measurements": {
+            r["sensor_tag"]: r["last_measure"] for r in measure_rows
+        },
+    }
 
 
 async def fetch_daily_coverage_tsdb() -> list[dict[str, Any]]:
