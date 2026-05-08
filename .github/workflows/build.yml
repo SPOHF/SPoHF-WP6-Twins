@@ -15,7 +15,7 @@ env:
   IMAGE_NAME: spohf/wp6-data
 
 jobs:
-  lint:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -26,17 +26,45 @@ jobs:
       - name: Set up Python
         run: uv python install
 
+      - name: Start TimescaleDB
+        run: docker compose -f docker-compose.tsdb.yml up -d
+
       - name: Install dependencies
         run: uv sync --extra dev
 
       - name: Lint with ruff
         run: uv run ruff check src/
 
-      - name: Run tests
+      - name: Run unit tests
         run: uv run pytest tests/
 
+      - name: Wait for TimescaleDB ready
+        run: |
+          for i in {1..30}; do
+            if docker compose -f docker-compose.tsdb.yml exec -T timescaledb \
+                 psql -U wp6_red -d wp6_red -c 'SELECT 1' >/dev/null 2>&1; then
+              echo "TimescaleDB ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "TimescaleDB did not become ready in time"
+          docker compose -f docker-compose.tsdb.yml logs
+          exit 1
+
+      - name: Run e2e tests
+        run: uv run pytest tests/e2e/ -v --tb=short
+
+      - name: Dump TimescaleDB logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.tsdb.yml logs
+
+      - name: Stop TimescaleDB
+        if: always()
+        run: docker compose -f docker-compose.tsdb.yml down -v
+
   build:
-    needs: lint
+    needs: check
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
