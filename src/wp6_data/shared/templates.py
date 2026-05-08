@@ -251,8 +251,15 @@ def build_home_tables(
             if dm.type
             else ""
         )
+        # Manual sources (devices whose readings come from a manually-uploaded
+        # file rather than an automated sensor) get a small badge so users can
+        # tell measurement plants apart from sensor stations at a glance.
+        source_badge = (
+            f' <small><mark>manual: {dm.source}</mark></small>'
+            if dm.source else ""
+        )
         device_entries.append({
-            "name": f'<a href="{chart_url(dev_series)}">{device_id}</a>',
+            "name": f'<a href="{chart_url(dev_series)}">{device_id}</a>{source_badge}',
             "position": pos_html,
             "type": type_html,
             "sensors": sensor_links,

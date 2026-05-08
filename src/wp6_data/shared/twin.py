@@ -128,6 +128,9 @@ class TwinConfig:
     hero_cards: list[Callable[..., Awaitable[str] | str]] = field(
         default_factory=list,
     )
+    status_extras: list[Callable[..., Awaitable[str] | str]] = field(
+        default_factory=list,
+    )
     home_extra_html: str = ""
     require_auth: bool = True
     export_sanitise_names: bool = False

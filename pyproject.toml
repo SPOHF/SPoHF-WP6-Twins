@@ -26,6 +26,7 @@ dependencies = [
     "tenacity>=9.0",
     "uvicorn>=0.40.0",
     "pyyaml>=6.0",
+    "python-multipart>=0.0.27",
 ]
 
 [project.optional-dependencies]

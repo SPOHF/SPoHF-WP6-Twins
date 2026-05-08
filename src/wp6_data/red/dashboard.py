@@ -8,9 +8,10 @@ from wp6_data.db.pool import close_pool, init_pool
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.provider import RedSensorProvider
-from wp6_data.red.routes import browse, dli, dli_model
+from wp6_data.red.routes import browse, dli, dli_model, sijia
 from wp6_data.red.routes import charts as red_charts
 from wp6_data.red.routes.dli_model.train import train_model_from_db
+from wp6_data.red.routes.sijia.card import render_sijia_card
 from wp6_data.red.tsdb import ensure_schema_red
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
@@ -82,8 +83,12 @@ config = TwinConfig(
         primary="#dc2626", primary_light="#ef4444", primary_dark="#b91c1c",
         accent="#f97316", surface_rgb="220, 38, 38",
     ),
-    extra_routers=[browse.router, dli.router, dli_model.router, red_charts.router],
+    extra_routers=[
+        browse.router, dli.router, dli_model.router,
+        red_charts.router, sijia.router,
+    ],
     hero_cards=[_dli_card],
+    status_extras=[render_sijia_card],
     home_extra_html=(
         '<a href="/static/red/sensor_locations.docx" download role="button"'
         ' class="outline" style="width:100%">'
