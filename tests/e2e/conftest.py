@@ -2,6 +2,9 @@
 
 import psycopg
 import pytest_asyncio
+from psycopg_pool import AsyncConnectionPool
+
+from wp6_data.db.schema import ensure_schema
 
 TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
 RED_TSDB_DSN = "postgresql://wp6_red:wp6dev@localhost:5433/wp6_red"
@@ -10,6 +13,18 @@ _TSDB_HINT = (
     "Start it with: docker compose -f docker-compose.tsdb.yml up -d "
     "(use `down -v` once if you have an old volume without the wp6_red database)"
 )
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session", autouse=True)
+async def _bootstrap_blue_schema():
+    """Create blue tables once per session so cleanup_e2e_data has something to delete from."""
+    pool = AsyncConnectionPool(TSDB_DSN, min_size=1, max_size=1, open=False)
+    await pool.open()
+    try:
+        await ensure_schema(pool)
+        yield
+    finally:
+        await pool.close()
 
 
 @pytest_asyncio.fixture()
