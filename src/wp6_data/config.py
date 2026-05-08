@@ -93,3 +93,7 @@ class RedSettings(BaseSettings):
     tsdb_url: str
 
     export_dir: str = "/data/exports"
+
+    # PVC mount for manual uploads (issue 008). Files land at
+    # {upload_dir}/{source}/{sha256}.xlsx; only the latest 2 per source kept.
+    upload_dir: str = "/data/manual-uploads"

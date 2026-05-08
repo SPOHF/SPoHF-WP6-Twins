@@ -76,6 +76,12 @@ class ValidationReport:
     devices: tuple[str, ...]  # sorted, distinct
     sensors: tuple[str, ...]  # sorted, distinct
     date_range: tuple[date, date] | None  # None when no valid rows
+    # Comparison facts vs. existing data for the same source. Populated by
+    # ManualIngestService.validate(); the parser leaves them at defaults.
+    existing_row_count: int = 0
+    existing_date_range: tuple[date, date] | None = None
+    devices_removed: tuple[str, ...] = ()  # in existing, missing from new
+    sensors_removed: tuple[str, ...] = ()  # in existing, missing from new
 
 
 def _device_name(variety: str, block: str, row: float) -> str:

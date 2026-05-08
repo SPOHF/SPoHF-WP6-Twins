@@ -15,7 +15,9 @@ from psycopg_pool import AsyncConnectionPool
 
 from tests.e2e.conftest import RED_TSDB_DSN
 from wp6_data.red.sijia.ingest import ingest_sijia_file
+from wp6_data.red.sijia.service import ManualIngestService
 from wp6_data.red.tsdb import ensure_schema_red
+from wp6_data.shared.upload_storage import UploadStorage
 
 pytestmark = pytest.mark.e2e
 
@@ -43,8 +45,14 @@ async def red_pool(red_tsdb_conn):
         await _purge_sijia(red_tsdb_conn)
 
 
-async def test_ingest_writes_audit_row_and_readings(red_pool, red_tsdb_conn):
-    result = await ingest_sijia_file(red_pool, SEED_PATH)
+@pytest.fixture()
+def service(red_pool, tmp_path):
+    storage = UploadStorage(base_dir=tmp_path, pool=red_pool)
+    return ManualIngestService(pool=red_pool, storage=storage)
+
+
+async def test_ingest_writes_audit_row_and_readings(service, red_tsdb_conn):
+    result = await ingest_sijia_file(service, SEED_PATH)
 
     async with red_tsdb_conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
@@ -68,10 +76,10 @@ async def test_ingest_writes_audit_row_and_readings(red_pool, red_tsdb_conn):
 
 
 async def test_re_ingest_replaces_sijia_rows_and_writes_new_audit_row(
-    red_pool, red_tsdb_conn,
+    service, red_tsdb_conn,
 ):
-    first = await ingest_sijia_file(red_pool, SEED_PATH)
-    second = await ingest_sijia_file(red_pool, SEED_PATH)
+    first = await ingest_sijia_file(service, SEED_PATH)
+    second = await ingest_sijia_file(service, SEED_PATH)
 
     assert second.upload_id != first.upload_id
 
