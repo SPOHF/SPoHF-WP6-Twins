@@ -19,6 +19,25 @@ spec:
       containers:
         - name: timescaledb
           image: timescale/timescaledb:2.26.4-pg17
+          # Postgres tuning via -c overrides. shared_buffers ≈ 25% of memory
+          # limit; effective_cache_size ≈ 75% (planner hint, not allocation);
+          # work_mem keeps time_bucket aggregations in RAM;
+          # random_page_cost=1.1 matches SSD-backed PVCs.
+          args:
+            - -c
+            - shared_buffers=2GB
+            - -c
+            - effective_cache_size=6GB
+            - -c
+            - work_mem=64MB
+            - -c
+            - maintenance_work_mem=512MB
+            - -c
+            - max_wal_size=2GB
+            - -c
+            - random_page_cost=1.1
+            - -c
+            - timescaledb.max_background_workers=8
           ports:
             - containerPort: 5432
               name: postgres
@@ -35,11 +54,11 @@ spec:
               mountPath: /dev/shm
           resources:
             requests:
-              cpu: 500m
-              memory: 1Gi
-            limits:
-              cpu: "2"
+              cpu: 1
               memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
       volumes:
         - name: dshm
           emptyDir:
