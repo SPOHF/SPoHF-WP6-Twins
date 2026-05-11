@@ -10,6 +10,7 @@ from wp6_data.db.queries import (
     rebuild_daily_coverage,
     record_sync_run,
     refresh_sensor_summary,
+    refresh_sensor_summary_recent,
     upsert_daily_coverage,
     upsert_readings,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "rebuild_daily_coverage",
     "record_sync_run",
     "refresh_sensor_summary",
+    "refresh_sensor_summary_recent",
     "upsert_daily_coverage",
     "upsert_readings",
 ]

@@ -18,6 +18,7 @@ from wp6_data.db import (
     get_pool,
     init_pool,
     refresh_sensor_summary,
+    refresh_sensor_summary_recent,
     upsert_daily_coverage,
     upsert_readings,
 )
@@ -124,12 +125,15 @@ class SyncOrchestrator:
                     logger.exception("endpoint_sync_failed", endpoint=endpoint)
                     stats["errors"].append(f"{endpoint}: {e}")
 
-            # Incremental sync writes only within the cagg refresh policy's
-            # 7-day window, so the policy handles freshness in the background.
-            # Full sync writes historical data outside that window, so we
-            # still need a one-shot whole-history refresh at the tail.
+            # Refresh the cagg so dashboards see freshly-written data
+            # immediately. The background policy runs on its own 15-min
+            # clock (not aligned with sync), so we can't rely on it for
+            # post-sync freshness. Incremental: scope to last 2 days
+            # (bounded, cheap). Full: whole-history refresh once.
             if self.settings.sync_mode.lower() == "full":
                 await refresh_sensor_summary(pool)
+            else:
+                await refresh_sensor_summary_recent(pool)
 
             stats["duration_seconds"] = (
                 datetime.now(UTC) - start_time

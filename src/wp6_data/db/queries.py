@@ -157,13 +157,42 @@ async def record_sync_run(
 
 
 async def refresh_sensor_summary(pool: Any) -> None:
-    """Refresh the sensors_daily_summary continuous aggregate.
-
-    Call this after syncing new data so the cagg is immediately up to date.
+    """Refresh the sensors_daily_summary continuous aggregate over its whole
+    history. Heavy on large datasets — reserve for mode=full sync or manual
+    rebuild. The try/finally resets autocommit before the connection returns
+    to the pool, since psycopg-pool does not reset client-side autocommit
+    state and other callers (e.g. Sijia's transactional apply) rely on the
+    pool default of manual-commit mode.
     """
     async with pool.connection() as conn:
         await conn.set_autocommit(True)
-        await conn.execute(
-            "CALL refresh_continuous_aggregate('sensors_daily_summary', NULL, NULL)"
-        )
-    logger.info("sensors_daily_summary_refreshed")
+        try:
+            await conn.execute(
+                "CALL refresh_continuous_aggregate("
+                "'sensors_daily_summary', NULL, NULL)"
+            )
+        finally:
+            await conn.set_autocommit(False)
+    logger.info("sensors_daily_summary_refreshed", scope="whole_history")
+
+
+async def refresh_sensor_summary_recent(pool: Any) -> None:
+    """Refresh the sensors_daily_summary cagg over the last 2 days of buckets.
+
+    Used at the tail of incremental sync so dashboards see freshly-written
+    data immediately. 2 days covers the sync's 1-day window plus a margin
+    for clock skew / TZ edges, and the work is bounded (~2 daily buckets)
+    regardless of dataset size. The background refresh policy still handles
+    the broader 7-day window on its own schedule.
+    """
+    async with pool.connection() as conn:
+        await conn.set_autocommit(True)
+        try:
+            await conn.execute(
+                "CALL refresh_continuous_aggregate("
+                "'sensors_daily_summary',"
+                " NOW() - INTERVAL '2 days', NULL)"
+            )
+        finally:
+            await conn.set_autocommit(False)
+    logger.info("sensors_daily_summary_refreshed", scope="last_2d")

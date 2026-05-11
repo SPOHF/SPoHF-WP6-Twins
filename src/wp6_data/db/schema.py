@@ -106,16 +106,22 @@ async def ensure_aggregates(
     # in sync. Whole-history refresh is only needed after WP6_SYNC_MODE=full
     # (handled in the orchestrator) or after a manual cagg recreate (runbook
     # step: CALL refresh_continuous_aggregate('sensors_daily_summary',NULL,NULL)).
+    # try/finally resets autocommit before the connection returns to the pool
+    # — psycopg-pool does not reset client-side autocommit, and leaving it on
+    # would break manual-commit callers like Sijia's transactional apply().
     async with pool.connection() as conn:
         await conn.set_autocommit(True)
-        await conn.execute(
-            "SELECT add_continuous_aggregate_policy("
-            "'sensors_daily_summary',"
-            " start_offset => INTERVAL '7 days',"
-            " end_offset   => INTERVAL '1 hour',"
-            " schedule_interval => INTERVAL '15 minutes',"
-            " if_not_exists => TRUE)"
-        )
+        try:
+            await conn.execute(
+                "SELECT add_continuous_aggregate_policy("
+                "'sensors_daily_summary',"
+                " start_offset => INTERVAL '7 days',"
+                " end_offset   => INTERVAL '1 hour',"
+                " schedule_interval => INTERVAL '15 minutes',"
+                " if_not_exists => TRUE)"
+            )
+        finally:
+            await conn.set_autocommit(False)
     logger.info("aggregates_ensured", project_column=project_column)
 
 

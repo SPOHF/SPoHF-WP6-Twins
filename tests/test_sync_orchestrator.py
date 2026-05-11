@@ -327,6 +327,10 @@ class TestRun:
                 new_callable=AsyncMock,
             ),
             patch(
+                "wp6_data.sync.orchestrator.refresh_sensor_summary_recent",
+                new_callable=AsyncMock,
+            ),
+            patch(
                 "wp6_data.sync.orchestrator.close_pool",
                 new_callable=AsyncMock,
             ) as mock_close,
@@ -367,6 +371,10 @@ class TestRun:
                 new_callable=AsyncMock,
             ),
             patch(
+                "wp6_data.sync.orchestrator.refresh_sensor_summary_recent",
+                new_callable=AsyncMock,
+            ),
+            patch(
                 "wp6_data.sync.orchestrator.close_pool",
                 new_callable=AsyncMock,
             ),
@@ -400,6 +408,10 @@ class TestRun:
             ),
             patch(
                 "wp6_data.sync.orchestrator.refresh_sensor_summary",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "wp6_data.sync.orchestrator.refresh_sensor_summary_recent",
                 new_callable=AsyncMock,
             ),
             patch(
