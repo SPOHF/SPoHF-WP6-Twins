@@ -1,7 +1,13 @@
-"""CSV export job for WP6 Red - generates nightly per-device sensor data exports."""
+"""CSV export job for WP6 Red - generates nightly per-device sensor data exports.
+
+Also serves as the daily TSDB maintenance touchpoint: refreshes the
+`sensors_daily_summary` continuous aggregate and writes a `red-export` row
+to `sync_metadata` so the status page reflects nightly job health.
+"""
 
 import asyncio
 import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,7 +16,10 @@ import structlog
 from dotenv import load_dotenv
 
 from wp6_data.config import RedSettings
+from wp6_data.db.pool import close_pool, get_pool, init_pool
+from wp6_data.db.queries import record_sync_run, refresh_sensor_summary
 from wp6_data.red.db import COMMON_MEASUREMENTS, SENSOR_TABLES, MySQLConnection
+from wp6_data.red.tsdb import ensure_schema_red
 from wp6_data.shared.export import clear_export_dir
 
 log = structlog.get_logger()
@@ -58,7 +67,7 @@ async def export_device(
 
 
 async def run_export() -> None:
-    """Run the full CSV export job."""
+    """Run the full CSV export job and refresh TSDB-side daily aggregates."""
     settings = RedSettings()
     export_dir = Path(settings.export_dir)
     log.info("export_started", export_dir=str(export_dir))
@@ -68,6 +77,7 @@ async def run_export() -> None:
     if removed:
         log.info("cleared_stale_exports", files_removed=removed)
 
+    started = time.monotonic()
     db = MySQLConnection(
         host=settings.db_host,
         port=settings.db_port,
@@ -77,11 +87,11 @@ async def run_export() -> None:
     )
     await db.connect()
 
+    exported: dict[str, str] = {}
     try:
         all_devices = await db.get_all_devices()
         log.info("found_devices", count=len(all_devices))
 
-        exported = {}
         for device_id, info in all_devices.items():
             try:
                 path = await export_device(db, device_id, info["tables"], export_dir)
@@ -101,6 +111,53 @@ async def run_export() -> None:
 
     finally:
         await db.close()
+
+    await _refresh_red_tsdb(settings.tsdb_url, len(exported), started)
+
+
+async def _refresh_red_tsdb(tsdb_url: str, records: int, started: float) -> None:
+    """Refresh the cagg and record a `red-export` sync_metadata row.
+
+    Failures here must not crash the export job — the CSV files are already
+    written to the PVC and serve the dashboard's download links regardless.
+    """
+    try:
+        await init_pool(tsdb_url)
+        pool = get_pool()
+        await ensure_schema_red(pool)
+        await refresh_sensor_summary(pool)
+        duration_sec = time.monotonic() - started
+        async with pool.connection() as conn:
+            await record_sync_run(
+                conn,
+                "red-export",
+                success=True,
+                duration_sec=duration_sec,
+                records=records,
+                last_timestamp=datetime.now(UTC),
+            )
+            await conn.commit()
+    except Exception as e:
+        log.exception("red_tsdb_refresh_failed")
+        try:
+            duration_sec = time.monotonic() - started
+            async with get_pool().connection() as conn:
+                await record_sync_run(
+                    conn,
+                    "red-export",
+                    success=False,
+                    duration_sec=duration_sec,
+                    records=records,
+                    error=str(e),
+                )
+                await conn.commit()
+        except Exception:
+            log.exception("red_tsdb_refresh_audit_failed")
+    finally:
+        try:
+            await close_pool()
+        except Exception:
+            log.exception("red_tsdb_pool_close_failed")
 
 
 def main() -> None:

@@ -49,30 +49,38 @@ def mock_tsdb_fetch_data(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 
 
 @pytest.fixture(autouse=True)
-def clear_coverage_cache() -> None:
-    """The provider caches coverage for 1h; clear between tests."""
+def clear_caches() -> None:
+    """Clear the provider's coverage cache and the shared sensor_summary cache.
+
+    Both have multi-minute TTLs that would otherwise carry state across tests.
+    """
     from wp6_data.red.provider import _coverage_cache
+    from wp6_data.shared import sensor_summary
 
     _coverage_cache.clear()
+    sensor_summary.invalidate()
 
 
 @pytest.fixture()
 def mock_tsdb_coverage(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
-    """Replace the TSDB daily-coverage helper with an AsyncMock."""
+    """Replace the TSDB daily-coverage table helper with an AsyncMock."""
     from wp6_data.red import tsdb
 
     fn = AsyncMock(return_value=[])
-    monkeypatch.setattr(tsdb, "fetch_daily_coverage_tsdb", fn)
+    monkeypatch.setattr(tsdb, "fetch_daily_coverage_from_table", fn)
     return fn
 
 
 @pytest.fixture()
-def mock_tsdb_device_counts(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
-    """Replace the TSDB per-device count helper with an AsyncMock."""
+def mock_tsdb_cagg(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Replace the TSDB per-(device,sensor) cagg helper with an AsyncMock.
+
+    Returns cagg-shaped rows: device, sensor, readings, earliest, latest.
+    """
     from wp6_data.red import tsdb
 
-    fn = AsyncMock(return_value={})
-    monkeypatch.setattr(tsdb, "fetch_device_counts_tsdb", fn)
+    fn = AsyncMock(return_value=[])
+    monkeypatch.setattr(tsdb, "fetch_sensors_from_cagg", fn)
     return fn
 
 
@@ -187,8 +195,9 @@ async def test_fetch_data_mixed_sources_returns_merged_dataframe(
 async def test_fetch_available_sensors_includes_tsdb_sensors_from_metadata(
     red_metadata: MetadataRegistry,
     mock_mysql: AsyncMock,
+    mock_tsdb_cagg: AsyncMock,
 ) -> None:
-    """TSDB-side sensors are enumerated from metadata.yaml (no TSDB query).
+    """TSDB-side sensors are enumerated from metadata.yaml.
 
     Each device with source X yields one entry per sensor_default with the
     same source. Existing MySQL devices/sensors continue to come from the
@@ -216,10 +225,31 @@ async def test_fetch_available_sensors_includes_tsdb_sensors_from_metadata(
             assert (device, sensor) in pairs
 
 
+async def test_fetch_available_sensors_uses_cagg_counts_for_tsdb_pairs(
+    red_metadata: MetadataRegistry,
+    mock_mysql: AsyncMock,
+    mock_tsdb_cagg: AsyncMock,
+) -> None:
+    """TSDB pair reading-counts come from the cagg (was hardcoded 0 previously)."""
+    mock_mysql.get_all_devices.return_value = {}
+    mock_tsdb_cagg.return_value = [
+        {"device": "neurath-B-2034-strabelina", "sensor": "chlorophyll",
+         "readings": 42, "earliest": None, "latest": None},
+    ]
+    provider = RedSensorProvider(metadata=red_metadata)
+
+    sensors = await provider.fetch_available_sensors()
+    by_pair = {(s["device"], s["sensor"]): s["readings"] for s in sensors}
+
+    assert by_pair[("neurath-B-2034-strabelina", "chlorophyll")] == 42
+    # An undeclared-in-cagg pair still appears with 0
+    assert by_pair[("neurath-B-2012-shivious", "chlorophyll")] == 0
+
+
 async def test_fetch_device_data_includes_tsdb_devices_from_metadata(
     red_metadata: MetadataRegistry,
     mock_mysql: AsyncMock,
-    mock_tsdb_device_counts: AsyncMock,
+    mock_tsdb_cagg: AsyncMock,
 ) -> None:
     """fetch_device_data merges MySQL devices with TSDB-declared devices."""
     mock_mysql.get_all_devices.return_value = {
@@ -242,17 +272,21 @@ async def test_fetch_device_data_includes_tsdb_devices_from_metadata(
     assert set(devices["neurath-B-2034-strabelina"]["sensors"]) == sijia_sensors
 
 
-async def test_fetch_device_data_populates_tsdb_reading_counts(
+async def test_fetch_device_data_populates_tsdb_reading_counts_from_cagg(
     red_metadata: MetadataRegistry,
     mock_mysql: AsyncMock,
-    mock_tsdb_device_counts: AsyncMock,
+    mock_tsdb_cagg: AsyncMock,
 ) -> None:
-    """TSDB-backed devices show actual row counts from the readings table."""
+    """TSDB-backed devices' totals are summed across cagg per-sensor rows."""
     mock_mysql.get_all_devices.return_value = {}
-    mock_tsdb_device_counts.return_value = {
-        "neurath-B-2034-strabelina": {"readings": 42, "last_seen": None},
-        "neurath-B-2012-shivious": {"readings": 17, "last_seen": None},
-    }
+    mock_tsdb_cagg.return_value = [
+        {"device": "neurath-B-2034-strabelina", "sensor": "chlorophyll",
+         "readings": 30, "earliest": None, "latest": None},
+        {"device": "neurath-B-2034-strabelina", "sensor": "vitamin_c_fresh",
+         "readings": 12, "earliest": None, "latest": None},
+        {"device": "neurath-B-2012-shivious", "sensor": "chlorophyll",
+         "readings": 17, "earliest": None, "latest": None},
+    ]
     provider = RedSensorProvider(metadata=red_metadata)
 
     devices = await provider.fetch_device_data()
@@ -264,11 +298,11 @@ async def test_fetch_device_data_populates_tsdb_reading_counts(
 async def test_fetch_device_data_zero_count_for_tsdb_device_with_no_rows(
     red_metadata: MetadataRegistry,
     mock_mysql: AsyncMock,
-    mock_tsdb_device_counts: AsyncMock,
+    mock_tsdb_cagg: AsyncMock,
 ) -> None:
     """A TSDB device with no readings yet still appears, with count 0."""
     mock_mysql.get_all_devices.return_value = {}
-    mock_tsdb_device_counts.return_value = {}  # no rows in DB at all
+    mock_tsdb_cagg.return_value = []  # no rows in cagg at all
     provider = RedSensorProvider(metadata=red_metadata)
 
     devices = await provider.fetch_device_data()

@@ -14,8 +14,16 @@ pytestmark = pytest.mark.e2e
 
 
 async def _drop_red_schema(conn) -> None:
-    """Tear down red TSDB tables so each test starts on a clean slate."""
+    """Tear down red TSDB tables so each test starts on a clean slate.
+
+    Order matters: the cagg depends on the `readings` hypertable, so drop it
+    first; otherwise `DROP TABLE readings CASCADE` fails because of the
+    continuous aggregate dependency.
+    """
     async with conn.cursor() as cur:
+        await cur.execute("DROP MATERIALIZED VIEW IF EXISTS sensors_daily_summary")
+        await cur.execute("DROP TABLE IF EXISTS daily_coverage CASCADE")
+        await cur.execute("DROP TABLE IF EXISTS sync_metadata CASCADE")
         await cur.execute("DROP TABLE IF EXISTS readings CASCADE")
         await cur.execute("DROP TABLE IF EXISTS manual_uploads CASCADE")
     await conn.commit()
@@ -247,3 +255,99 @@ async def test_readings_is_a_timescaledb_hypertable(clean_red_db, red_pool):
         hypertables = {row["hypertable_name"] for row in await cur.fetchall()}
 
     assert "readings" in hypertables
+
+
+async def test_bootstrap_creates_aggregates_and_audit_tables(clean_red_db, red_pool):
+    """ensure_schema_red also lays down sync_metadata, daily_coverage, and the cagg."""
+    await ensure_schema_red(red_pool)
+
+    assert await _table_exists(clean_red_db, "sync_metadata")
+    assert await _table_exists(clean_red_db, "daily_coverage")
+
+    async with clean_red_db.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT view_name FROM timescaledb_information.continuous_aggregates "
+            "WHERE view_name = 'sensors_daily_summary'"
+        )
+        cagg_row = await cur.fetchone()
+    assert cagg_row is not None
+
+
+async def test_cagg_groups_by_source_column(clean_red_db, red_pool):
+    """Red's cagg must group by `source` (not `project`) — see project_blue_project_vs_red_source."""
+    await ensure_schema_red(red_pool)
+
+    async with clean_red_db.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'sensors_daily_summary' AND table_schema = 'public'"
+        )
+        cols = {row["column_name"] for row in await cur.fetchall()}
+
+    # The template aliases the categorical column to "project" in the view
+    # output for cross-twin uniformity; the underlying grouping is over
+    # red's `source` column.
+    assert "project" in cols
+    assert "device_name" in cols
+    assert "reading_count" in cols
+    assert "first_reading" in cols
+    assert "last_reading" in cols
+
+
+async def test_daily_coverage_is_backfilled_when_readings_already_exist(
+    clean_red_db, red_pool,
+):
+    """First bootstrap on a non-empty `readings` table populates daily_coverage."""
+    # Pre-existing data simulates an upgrade where readings predate this feature.
+    async with clean_red_db.cursor() as cur:
+        await cur.execute(
+            "CREATE TABLE readings ("
+            "  time TIMESTAMPTZ NOT NULL, device_name TEXT NOT NULL,"
+            "  sensor_tag TEXT NOT NULL, value DOUBLE PRECISION,"
+            "  source TEXT NOT NULL DEFAULT 'unknown')"
+        )
+        await cur.execute(
+            "SELECT create_hypertable('readings', 'time', if_not_exists => TRUE)"
+        )
+        await cur.execute(
+            "INSERT INTO readings (time, device_name, sensor_tag, value, source) "
+            "VALUES (%s, %s, %s, %s, %s), (%s, %s, %s, %s, %s)",
+            (
+                datetime(2025, 5, 1, 9, 0, tzinfo=UTC), "d1", "s1", 1.0, "e2e",
+                datetime(2025, 5, 2, 9, 0, tzinfo=UTC), "d1", "s1", 2.0, "e2e",
+            ),
+        )
+    await clean_red_db.commit()
+
+    await ensure_schema_red(red_pool)
+
+    async with clean_red_db.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT count(*) AS n FROM daily_coverage WHERE device_name = 'd1'"
+        )
+        assert (await cur.fetchone())["n"] == 2  # one row per distinct day
+
+
+async def test_daily_coverage_not_rebuilt_on_subsequent_bootstrap(
+    clean_red_db, red_pool,
+):
+    """The backfill guard prevents repeated full rebuilds on every pod start."""
+    await ensure_schema_red(red_pool)
+
+    # Insert one coverage row manually; it must survive a second bootstrap
+    # since `readings` itself is empty (count-check sees coverage already exists).
+    async with clean_red_db.cursor() as cur:
+        await cur.execute(
+            "INSERT INTO daily_coverage (device_name, sensor_tag, day) "
+            "VALUES (%s, %s, %s)",
+            ("d-manual", "s-manual", "2025-05-01"),
+        )
+    await clean_red_db.commit()
+
+    await ensure_schema_red(red_pool)
+
+    async with clean_red_db.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT count(*) AS n FROM daily_coverage WHERE device_name = 'd-manual'"
+        )
+        assert (await cur.fetchone())["n"] == 1  # untouched
