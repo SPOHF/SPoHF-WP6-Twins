@@ -97,12 +97,25 @@ async def ensure_aggregates(
     async with pool.connection() as conn:
         await conn.execute(AUX_SCHEMA_SQL)
         await conn.commit()
-    # Continuous aggregate must be created in its own transaction after the
-    # hypertable exists. No background refresh policy — call sites refresh
-    # explicitly via refresh_sensor_summary() after writing data.
     async with pool.connection() as conn:
         await conn.execute(CAGG_SQL_TEMPLATE.format(project_column=project_column))
         await conn.commit()
+    # Background refresh policy: TimescaleDB's scheduler refreshes the cagg
+    # incrementally over a sliding window, independent of sync. start_offset
+    # matches INCREMENTAL_LOOKBACK_DAYS in sync/orchestrator.py — keep them
+    # in sync. Whole-history refresh is only needed after WP6_SYNC_MODE=full
+    # (handled in the orchestrator) or after a manual cagg recreate (runbook
+    # step: CALL refresh_continuous_aggregate('sensors_daily_summary',NULL,NULL)).
+    async with pool.connection() as conn:
+        await conn.set_autocommit(True)
+        await conn.execute(
+            "SELECT add_continuous_aggregate_policy("
+            "'sensors_daily_summary',"
+            " start_offset => INTERVAL '7 days',"
+            " end_offset   => INTERVAL '1 hour',"
+            " schedule_interval => INTERVAL '15 minutes',"
+            " if_not_exists => TRUE)"
+        )
     logger.info("aggregates_ensured", project_column=project_column)
 
 

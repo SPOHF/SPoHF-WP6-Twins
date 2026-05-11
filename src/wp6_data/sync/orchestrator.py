@@ -124,8 +124,12 @@ class SyncOrchestrator:
                     logger.exception("endpoint_sync_failed", endpoint=endpoint)
                     stats["errors"].append(f"{endpoint}: {e}")
 
-            # Refresh the continuous aggregate so dashboards see new data
-            await refresh_sensor_summary(pool)
+            # Incremental sync writes only within the cagg refresh policy's
+            # 7-day window, so the policy handles freshness in the background.
+            # Full sync writes historical data outside that window, so we
+            # still need a one-shot whole-history refresh at the tail.
+            if self.settings.sync_mode.lower() == "full":
+                await refresh_sensor_summary(pool)
 
             stats["duration_seconds"] = (
                 datetime.now(UTC) - start_time

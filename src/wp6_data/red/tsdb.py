@@ -66,10 +66,16 @@ async def ensure_schema_red(pool: AsyncConnectionPool) -> None:
 
     Order matters: readings hypertable first, then the shared aggregates
     helper which creates `sync_metadata`, `daily_coverage`, and the
-    `sensors_daily_summary` continuous aggregate. On first run after data
-    already exists (e.g. historical Sijia uploads), a one-time
-    `daily_coverage` rebuild + cagg refresh populates the new tables so the
-    home/status pages return data on the first request.
+    `sensors_daily_summary` continuous aggregate (with a background refresh
+    policy installed by `ensure_aggregates`). On first run after data already
+    exists (e.g. historical Sijia uploads), a one-time `daily_coverage`
+    rebuild populates that table so the home/status pages return data.
+
+    Cagg refresh is handled out-of-band: the TSDB background policy refreshes
+    the last 7 days continuously, and the sync orchestrator runs a whole-
+    history refresh after WP6_SYNC_MODE=full. For a manual cagg rebuild,
+    the runbook step is:
+        CALL refresh_continuous_aggregate('sensors_daily_summary',NULL,NULL)
     """
     async with pool.connection() as conn:
         await conn.execute(SCHEMA_SQL)
@@ -89,11 +95,6 @@ async def ensure_schema_red(pool: AsyncConnectionPool) -> None:
             await conn.commit()
             logger.info("daily_coverage_backfilled", rows=backfilled)
 
-    async with pool.connection() as conn:
-        await conn.set_autocommit(True)
-        await conn.execute(
-            "CALL refresh_continuous_aggregate('sensors_daily_summary', NULL, NULL)"
-        )
     logger.info("red_tsdb_schema_ensured")
 
 

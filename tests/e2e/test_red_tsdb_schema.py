@@ -273,8 +273,39 @@ async def test_bootstrap_creates_aggregates_and_audit_tables(clean_red_db, red_p
     assert cagg_row is not None
 
 
+async def test_bootstrap_installs_cagg_refresh_policy(clean_red_db, red_pool):
+    """ensure_schema_red installs a background refresh policy so the cagg
+    stays fresh without an in-band refresh after every sync."""
+    await ensure_schema_red(red_pool)
+
+    async with clean_red_db.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT count(*) AS n FROM timescaledb_information.jobs "
+            "WHERE proc_name = 'policy_refresh_continuous_aggregate' "
+            "AND hypertable_name = 'sensors_daily_summary'"
+        )
+        assert (await cur.fetchone())["n"] == 1
+
+
+async def test_cagg_refresh_policy_is_idempotent(clean_red_db, red_pool):
+    """Second bootstrap must not create a duplicate refresh-policy job."""
+    await ensure_schema_red(red_pool)
+    await ensure_schema_red(red_pool)
+
+    async with clean_red_db.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT count(*) AS n FROM timescaledb_information.jobs "
+            "WHERE proc_name = 'policy_refresh_continuous_aggregate' "
+            "AND hypertable_name = 'sensors_daily_summary'"
+        )
+        assert (await cur.fetchone())["n"] == 1
+
+
 async def test_cagg_groups_by_source_column(clean_red_db, red_pool):
-    """Red's cagg must group by `source` (not `project`) — see project_blue_project_vs_red_source."""
+    """Red's cagg must group by `source` (not `project`).
+
+    See ``project_blue_project_vs_red_source`` memo for the rationale.
+    """
     await ensure_schema_red(red_pool)
 
     async with clean_red_db.cursor(row_factory=dict_row) as cur:
