@@ -58,6 +58,11 @@ spec:
                     secretKeyRef:
                       name: {{ $redSecret }}
                       key: mysql-password
+                - name: WP6_RED_TSDB_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $redSecret }}
+                      key: tsdb-url
                 - name: WP6_RED_EXPORT_DIR
                   value: /data/exports
               volumeMounts:
