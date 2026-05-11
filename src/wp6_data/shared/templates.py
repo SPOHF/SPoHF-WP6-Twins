@@ -1579,6 +1579,7 @@ UNIFIED_CHART_JS = """
             fetchAndAdd(spec.key, spec.axis, function() {
                 loaded++;
                 if (loaded === allSpecs.length) {
+                    rebuildTraces();
                     updateStats();
                     updateY2();
                 }
@@ -1628,19 +1629,21 @@ UNIFIED_CHART_JS = """
         });
     }
 
-    // Deterministic color per series key (avoids color shuffling on reload)
+    // Colors are assigned by sorted-key index: unique within a chart, and
+    // stable per key as long as the active-series set is unchanged.
     var TRACE_COLORS = [
         '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
         '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
         '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
         '#c49c94', '#f7b6d2', '#c7c7c7', '#dbdb8d', '#9edae5'
     ];
-    function keyColor(str) {
-        var h = 0;
-        for (var i = 0; i < str.length; i++) {
-            h = ((h << 5) - h + str.charCodeAt(i)) | 0;
-        }
-        return TRACE_COLORS[Math.abs(h) % TRACE_COLORS.length];
+    function buildColorMap() {
+        var sorted = Object.keys(activeSeries).slice().sort();
+        var m = {};
+        sorted.forEach(function(k, i) {
+            m[k] = TRACE_COLORS[i % TRACE_COLORS.length];
+        });
+        return m;
     }
 
     function bucketTime(isoStr, minutes) {
@@ -1696,6 +1699,8 @@ UNIFIED_CHART_JS = """
         var keys = Object.keys(activeSeries);
         if (keys.length === 0) return;
 
+        var colorMap = buildColorMap();
+
         // Partition keys by axis so each side can use its own config
         var keysByAxis = { left: [], right: [] };
         keys.forEach(function(k) {
@@ -1715,7 +1720,7 @@ UNIFIED_CHART_JS = """
                 axisKeys.forEach(function(k) {
                     var sd = seriesData[k];
                     if (!sd) return;
-                    var color = keyColor(k);
+                    var color = colorMap[k];
                     var trace = {
                         x: sd.times, y: sd.values,
                         name: sensorLabel(k, axis),
@@ -1734,7 +1739,9 @@ UNIFIED_CHART_JS = """
                     if (!sd) return;
                     var label = sensorLabel(k, axis);
                     if (!groups[label]) {
-                        groups[label] = { label: label, series: [] };
+                        groups[label] = { label: label, series: [], firstKey: k };
+                    } else if (k < groups[label].firstKey) {
+                        groups[label].firstKey = k;
                     }
                     groups[label].series.push(sd);
                 });
@@ -1762,7 +1769,7 @@ UNIFIED_CHART_JS = """
                     var suffix = g.series.length > 1
                     ? ' [' + cfg.aggregateFunc.toUpperCase() + '\u00d7' + g.series.length + ']'
                     : '';
-                var color = keyColor(g.label);
+                var color = colorMap[g.firstKey];
                 var trace = {
                     x: merged.times, y: merged.values,
                     name: g.label + suffix,
@@ -1814,22 +1821,6 @@ UNIFIED_CHART_JS = """
                     limit: resp.limit || 0
                 };
                 totalPoints += data.length;
-
-                if (anyAggregateEnabled()) {
-                    rebuildTraces();
-                } else {
-                    var color = keyColor(key);
-                    var trace = {
-                        x: times, y: values,
-                        name: sensorLabel(key, axis),
-                        mode: 'lines',
-                        yaxis: axis === 'right' ? 'y2' : 'y',
-                        line: {color: color}
-                    };
-                    if (axis === 'right') { trace.line.dash = 'dash'; }
-                    Plotly.addTraces(chartDiv, [trace]);
-                    activeSeries[key].traceIdx = chartDiv.data.length - 1;
-                }
                 showEmpty(false);
                 if (cb) cb();
             });
@@ -1856,6 +1847,7 @@ UNIFIED_CHART_JS = """
             // Need to fetch — syncUrl after fetch completes
             showEmpty(false);
             fetchAndAdd(key, axis, function() {
+                rebuildTraces();
                 syncUrl();
                 updateStats();
                 updateY2();
@@ -1865,21 +1857,10 @@ UNIFIED_CHART_JS = """
 
     function removeSeries(key) {
         if (!activeSeries[key]) return;
-        var idx = activeSeries[key].traceIdx;
         totalPoints -= activeSeries[key].points || 0;
         delete activeSeries[key];
         delete seriesData[key];
-        if (anyAggregateEnabled()) {
-            rebuildTraces();
-        } else {
-            Plotly.deleteTraces(chartDiv, [idx]);
-            // Reindex remaining traces
-            Object.keys(activeSeries).forEach(function(k) {
-                if (activeSeries[k].traceIdx > idx) {
-                    activeSeries[k].traceIdx--;
-                }
-            });
-        }
+        rebuildTraces();
         if (Object.keys(activeSeries).length === 0) {
             showEmpty(true);
         }
