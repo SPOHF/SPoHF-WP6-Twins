@@ -189,3 +189,10 @@ class ManualIngestService:
             await refresh_sensor_summary(self.pool)
         except Exception:
             logger.exception("sijia_cagg_refresh_failed")
+
+        # In-process caches in RedSensorProvider point at the cagg + MySQL
+        # coverage; both must be dropped so the next home/status request
+        # sees the just-written rows instead of pre-upload stale data.
+        from wp6_data.red.provider import invalidate_caches
+
+        invalidate_caches()

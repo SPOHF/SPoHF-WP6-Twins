@@ -312,6 +312,44 @@ async def test_fetch_device_data_zero_count_for_tsdb_device_with_no_rows(
     assert devices["neurath-B-2034-strabelina"]["readings"] == 0
 
 
+async def test_invalidate_caches_drops_both_cagg_and_coverage(
+    red_metadata: MetadataRegistry,
+    mock_mysql: AsyncMock,
+    mock_tsdb_cagg: AsyncMock,
+) -> None:
+    """invalidate_caches() forces a re-fetch from both cache layers.
+
+    Regression: the Sijia post-apply bookkeeping must call this so the
+    same-process dashboard request after an upload sees fresh data instead
+    of the empty cagg result cached at startup. Without invalidation, the
+    in-process TTL caches (5 min cagg, 1 hr coverage) hold stale data.
+    """
+    from wp6_data.red.provider import invalidate_caches
+
+    mock_mysql.get_all_devices.return_value = {}
+    mock_tsdb_cagg.return_value = []
+    provider = RedSensorProvider(metadata=red_metadata)
+
+    # Warm the cagg cache with the empty result.
+    await provider.fetch_device_data()
+    assert mock_tsdb_cagg.await_count == 1
+
+    # A second call hits the cache (no new fetch).
+    await provider.fetch_device_data()
+    assert mock_tsdb_cagg.await_count == 1
+
+    # Simulate a write happening in this process; invalidate the caches.
+    mock_tsdb_cagg.return_value = [
+        {"device": "neurath-B-2034-strabelina", "sensor": "chlorophyll",
+         "readings": 42, "earliest": None, "latest": None},
+    ]
+    invalidate_caches()
+
+    devices = await provider.fetch_device_data()
+    assert mock_tsdb_cagg.await_count == 2  # cache was dropped
+    assert devices["neurath-B-2034-strabelina"]["readings"] == 42
+
+
 async def test_fetch_daily_coverage_merges_mysql_and_tsdb(
     red_metadata: MetadataRegistry,
     mock_mysql: AsyncMock,

@@ -43,6 +43,19 @@ async def _fetch_cagg_summary() -> list[dict[str, Any]]:
     return await get_sensor_summary(_CAGG_CACHE_KEY, fetch_sensors_from_cagg)
 
 
+def invalidate_caches() -> None:
+    """Drop in-process caches that point at red TSDB.
+
+    Call this from write paths in the same process (e.g. Sijia ingest) so the
+    next dashboard request reflects the freshly-written rows. Cross-process
+    writers don't need this — their caches are naturally cold on next read.
+    """
+    from wp6_data.shared.sensor_summary import invalidate
+
+    invalidate(_CAGG_CACHE_KEY)
+    _coverage_cache.clear()
+
+
 class RedSensorProvider:
     """Federated SensorDataProvider over MySQL and red TimescaleDB.
 
