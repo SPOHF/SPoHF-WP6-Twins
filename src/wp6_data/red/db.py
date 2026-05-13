@@ -220,35 +220,41 @@ class MySQLConnection:
             df = df.sort_values("time")
         return df
 
-    async def _fetch_all_devices(self) -> dict[str, dict[str, list[str]]]:
-        """Query MySQL for all devices with measurements and reading counts."""
+    async def _fetch_all_devices(self) -> dict[str, dict[str, Any]]:
+        """Query MySQL for all devices with measurements, counts, last-seen."""
         if not self.pool:
             raise RuntimeError("Not connected")
 
-        devices: dict[str, dict[str, list[str]]] = {}
+        devices: dict[str, dict[str, Any]] = {}
         async with self.pool.acquire() as conn, conn.cursor() as cursor:
             for table, cols in SENSOR_TABLES.items():
                 try:
                     await cursor.execute(
-                        f"SELECT device_id, COUNT(*) FROM {table} GROUP BY device_id"
+                        f"SELECT device_id, COUNT(*), MAX(received_at) "
+                        f"FROM {table} GROUP BY device_id",
                     )
                     rows = await cursor.fetchall()
                 except Exception:
                     continue
                 measurements = cols + COMMON_MEASUREMENTS
-                for device_id, count in rows:
-                    if device_id not in devices:
-                        devices[device_id] = {
-                            "tables": [], "measurements": [], "readings": 0,
-                        }
-                    devices[device_id]["tables"].append(table)
-                    devices[device_id]["readings"] += count
+                for device_id, count, last_seen in rows:
+                    entry = devices.setdefault(device_id, {
+                        "tables": [], "measurements": [],
+                        "readings": 0, "last_seen": None,
+                    })
+                    entry["tables"].append(table)
+                    entry["readings"] += count
+                    if last_seen and (
+                        entry["last_seen"] is None
+                        or last_seen > entry["last_seen"]
+                    ):
+                        entry["last_seen"] = last_seen
                     for m in measurements:
-                        if m not in devices[device_id]["measurements"]:
-                            devices[device_id]["measurements"].append(m)
+                        if m not in entry["measurements"]:
+                            entry["measurements"].append(m)
         return devices
 
-    async def get_all_devices(self) -> dict[str, dict[str, list[str]]]:
+    async def get_all_devices(self) -> dict[str, dict[str, Any]]:
         """Get all devices with measurements (cached via shared sensor summary)."""
         from wp6_data.shared.sensor_summary import get_sensor_summary
 

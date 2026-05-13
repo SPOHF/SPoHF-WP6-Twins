@@ -1,7 +1,7 @@
 {{- if .Values.red.enabled }}
 {{- $redSecret := .Values.red.secrets.existingSecret | default (printf "%s-red-secrets" .Chart.Name) }}
 {{- $sharedSecret := .Values.secrets.existingSecret | default (printf "%s-secrets" .Chart.Name) }}
-{{- $bootstrapImage := .Values.red.tsdbBootstrap.image | default "timescale/timescaledb:latest-pg17" }}
+{{- $bootstrapImage := .Values.red.tsdbBootstrap.image | default "timescale/timescaledb:2.26.4-pg17" }}
 apiVersion: batch/v1
 kind: Job
 metadata:

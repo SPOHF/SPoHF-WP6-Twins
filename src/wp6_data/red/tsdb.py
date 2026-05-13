@@ -1,11 +1,15 @@
 """TimescaleDB schema bootstrap and read helpers for the red twin.
 
-Mirrors the column shape of blue's `readings` table, except `project` is
-renamed to `source` and a nullable `upload_id` foreign key links rows that
-came from a manual Excel upload back to their `manual_uploads` audit row.
+Red's `readings` has a different column shape than blue's: a `source` column
+(mutually exclusive data origins — manual / Neurath / legacy — see
+``project_blue_project_vs_red_source`` memo, not a rename of blue's `project`)
+plus a nullable `upload_id` FK to `manual_uploads` for rows that came from a
+manual Excel upload.
 
-Read helpers (`fetch_*_tsdb`) are used by the federated `RedSensorProvider`
-to serve sensor_tags whose `source` is set in metadata.yaml.
+The cagg + `sync_metadata` + `daily_coverage` infrastructure is twin-agnostic
+and lives in `wp6_data.db.schema`/`queries`; `ensure_schema_red` delegates to
+`ensure_aggregates(pool, project_column="source")` after creating red's
+readings hypertable.
 """
 
 from __future__ import annotations
@@ -17,6 +21,9 @@ import pandas as pd
 import structlog
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
+
+from wp6_data.db.queries import rebuild_daily_coverage
+from wp6_data.db.schema import ensure_aggregates
 
 logger = structlog.get_logger()
 
@@ -55,10 +62,39 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_readings_dedup
 
 
 async def ensure_schema_red(pool: AsyncConnectionPool) -> None:
-    """Run red TSDB schema DDL idempotently."""
+    """Bootstrap red's TSDB schema and aggregates idempotently.
+
+    Order matters: readings hypertable first, then the shared aggregates
+    helper which creates `sync_metadata`, `daily_coverage`, and the
+    `sensors_daily_summary` continuous aggregate (with a background refresh
+    policy installed by `ensure_aggregates`). On first run after data already
+    exists (e.g. historical Sijia uploads), a one-time `daily_coverage`
+    rebuild populates that table so the home/status pages return data.
+
+    Cagg refresh is handled out-of-band: the TSDB background policy refreshes
+    the last 7 days continuously, and the sync orchestrator runs a whole-
+    history refresh after WP6_SYNC_MODE=full. For a manual cagg rebuild,
+    the runbook step is:
+        CALL refresh_continuous_aggregate('sensors_daily_summary',NULL,NULL)
+    """
     async with pool.connection() as conn:
         await conn.execute(SCHEMA_SQL)
         await conn.commit()
+
+    await ensure_aggregates(pool, project_column="source")
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT count(*) FROM daily_coverage")
+        coverage_row = await cur.fetchone()
+        coverage_rows = coverage_row[0] if coverage_row else 0
+        await cur.execute("SELECT count(*) FROM readings")
+        readings_row = await cur.fetchone()
+        readings_rows = readings_row[0] if readings_row else 0
+        if coverage_rows == 0 and readings_rows > 0:
+            backfilled = await rebuild_daily_coverage(conn)
+            await conn.commit()
+            logger.info("daily_coverage_backfilled", rows=backfilled)
+
     logger.info("red_tsdb_schema_ensured")
 
 
@@ -116,39 +152,115 @@ async def fetch_data_tsdb(
     return df.sort_values("time")
 
 
-async def fetch_device_counts_tsdb() -> dict[str, int]:
-    """Total row count per device_name in the red `readings` table.
+async def fetch_sensors_from_cagg(
+    source: str | None = None,
+) -> list[dict[str, Any]]:
+    """Per-sensor reading-count + first/last seen from the cagg.
 
-    Used by RedSensorProvider to populate the home page's reading-count
-    column for TSDB-backed devices (matches the MySQL side, which sums
-    COUNT(*) per device across legacy sensor tables).
+    Mirrors `blue.deps._fetch_sensors_from_cagg`. The cagg aliases red's
+    `source` column to ``project`` in its output (uniform shape across twins);
+    we filter on it when `source` is given.
     """
     from wp6_data.db.pool import get_pool
 
-    query = """
-        SELECT device_name, count(*) AS n
-        FROM readings
-        GROUP BY device_name
-    """
-    pool = get_pool()
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(query)
-        rows = await cur.fetchall()
-    return {r["device_name"]: r["n"] for r in rows}
+    if source is not None:
+        where = "WHERE project = %(source)s"
+        params: dict[str, Any] = {"source": source}
+    else:
+        where = ""
+        params = {}
 
-
-async def fetch_daily_coverage_tsdb() -> list[dict[str, Any]]:
-    """Distinct (device, sensor, day) triples from the red `readings` table."""
-    from wp6_data.db.pool import get_pool
-
-    query = """
+    query = f"""
         SELECT device_name AS device, sensor_tag AS sensor,
-               DATE(time) AS day
-        FROM readings
-        GROUP BY device_name, sensor_tag, DATE(time)
-        ORDER BY device, sensor, day
+               sum(reading_count)  AS readings,
+               min(first_reading)  AS earliest,
+               max(last_reading)   AS latest
+        FROM sensors_daily_summary
+        {where}
+        GROUP BY device_name, sensor_tag
+        ORDER BY readings DESC
     """
+
     pool = get_pool()
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(query)
+        await cur.execute(query, params)
+        return list(await cur.fetchall())
+
+
+async def fetch_manual_summary_tsdb() -> dict[str, Any]:
+    """Aggregate metadata for manually-uploaded measurements.
+
+    Returns ``{"uploads": {source: last_uploaded_at},
+              "measurements": {sensor_tag: last_measure_time}}``.
+    Drives the Manual tab's *Last upload* (per-source) and
+    *Last measure* (per measurement type) columns.
+    """
+    from wp6_data.db.pool import get_pool
+
+    pool = get_pool()
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT source, MAX(uploaded_at) AS last_upload "
+            "FROM manual_uploads GROUP BY source",
+        )
+        upload_rows = await cur.fetchall()
+        await cur.execute(
+            "SELECT r.sensor_tag, MAX(r.time) AS last_measure "
+            "FROM readings r WHERE r.upload_id IS NOT NULL "
+            "GROUP BY r.sensor_tag",
+        )
+        measure_rows = await cur.fetchall()
+
+    return {
+        "uploads": {r["source"]: r["last_upload"] for r in upload_rows},
+        "measurements": {
+            r["sensor_tag"]: r["last_measure"] for r in measure_rows
+        },
+    }
+
+
+async def fetch_daily_coverage_from_table() -> list[dict[str, Any]]:
+    """Distinct (device, sensor, day) triples from the `daily_coverage` table.
+
+    Replaces the previous `GROUP BY DATE(time)` scan of `readings`; rows are
+    written incrementally by ingest paths and rebuilt by the bootstrap.
+    """
+    from wp6_data.db.pool import get_pool
+
+    pool = get_pool()
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT device_name AS device, sensor_tag AS sensor, day "
+            "FROM daily_coverage "
+            "ORDER BY device, sensor, day"
+        )
+        return list(await cur.fetchall())
+
+
+async def fetch_sync_metrics_tsdb() -> list[dict[str, Any]]:
+    """Return red's job-run audit rows from `sync_metadata`.
+
+    Shape matches `blue.deps.fetch_sync_metrics` so `shared.routes.status`
+    can render them uniformly.
+    """
+    from wp6_data.db.pool import get_pool
+
+    pool = get_pool()
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            """
+            SELECT endpoint,
+                   last_run_at,
+                   last_run_success,
+                   last_run_duration_sec AS duration_seconds,
+                   last_run_records AS records,
+                   last_error AS error,
+                   last_api_status AS api_status,
+                   last_api_error_detail AS api_error_detail,
+                   total_runs,
+                   total_failures,
+                   last_timestamp AS last_data_timestamp
+            FROM sync_metadata
+            """
+        )
         return list(await cur.fetchall())

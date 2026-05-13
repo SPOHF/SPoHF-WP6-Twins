@@ -16,14 +16,23 @@ Two public methods:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, replace
 from datetime import date
 
+import structlog
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from wp6_data.db.queries import (
+    record_sync_run,
+    refresh_sensor_summary,
+    upsert_daily_coverage,
+)
 from wp6_data.red.sijia.parser import SOURCE, ValidationReport, parse, validate
 from wp6_data.shared.upload_storage import UploadStorage
+
+logger = structlog.get_logger()
 
 
 @dataclass(frozen=True)
@@ -96,6 +105,7 @@ class ManualIngestService:
         file_bytes = self.storage.read(path)
         readings = parse(file_bytes)
 
+        started = time.monotonic()
         async with self.pool.connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cur:
                 await cur.execute(
@@ -115,24 +125,74 @@ class ManualIngestService:
                 )
                 upload_id = (await cur.fetchone())["id"]
 
-                await cur.executemany(
-                    "INSERT INTO readings "
-                    "(time, device_name, sensor_tag, value, source, upload_id) "
-                    "VALUES (%(time)s, %(device_name)s, %(sensor_tag)s, "
-                    "        %(value)s, %(source)s, %(upload_id)s)",
-                    [
-                        {
-                            "time": r.time,
-                            "device_name": r.device_name,
-                            "sensor_tag": r.sensor_tag,
-                            "value": r.value,
-                            "source": r.source,
-                            "upload_id": upload_id,
-                        }
-                        for r in readings
-                    ],
-                )
+                # Single multi-VALUES INSERT instead of executemany: psycopg3
+                # would otherwise issue one round-trip per row (368+ round-trips
+                # to TSDB exceeds the ingress timeout in prod).
+                if readings:
+                    placeholders = ", ".join(
+                        ["(%s, %s, %s, %s, %s, %s)"] * len(readings),
+                    )
+                    flat_params: list = []
+                    for r in readings:
+                        flat_params.extend([
+                            r.time, r.device_name, r.sensor_tag,
+                            r.value, r.source, upload_id,
+                        ])
+                    await cur.execute(
+                        "INSERT INTO readings "
+                        "(time, device_name, sensor_tag, value, source, upload_id) "
+                        f"VALUES {placeholders}",
+                        flat_params,
+                    )
             await conn.commit()
 
+        await self._post_apply_bookkeeping(readings, started)
         await self.storage.prune(self.SOURCE)
         return ApplyResult(upload_id=upload_id, row_count=len(readings))
+
+    async def _post_apply_bookkeeping(self, readings, started: float) -> None:
+        """Refresh the cagg, upsert daily coverage, and audit the run.
+
+        These run after the ingest transaction commits; each is wrapped so a
+        bookkeeping failure cannot fail the upload itself (the data is
+        already durably stored).
+        """
+        coverage_records = [
+            {
+                "device_name": device,
+                "sensor_tag": sensor,
+                "day": day.isoformat(),
+            }
+            for device, sensor, day in {
+                (r.device_name, r.sensor_tag, r.time.date()) for r in readings
+            }
+        ]
+        max_time = max((r.time for r in readings), default=None)
+        duration_sec = time.monotonic() - started
+
+        try:
+            async with self.pool.connection() as conn:
+                await upsert_daily_coverage(conn, coverage_records)
+                await record_sync_run(
+                    conn,
+                    self.SOURCE,
+                    success=True,
+                    duration_sec=duration_sec,
+                    records=len(readings),
+                    last_timestamp=max_time,
+                )
+                await conn.commit()
+        except Exception:
+            logger.exception("sijia_bookkeeping_failed")
+
+        try:
+            await refresh_sensor_summary(self.pool)
+        except Exception:
+            logger.exception("sijia_cagg_refresh_failed")
+
+        # In-process caches in RedSensorProvider point at the cagg + MySQL
+        # coverage; both must be dropped so the next home/status request
+        # sees the just-written rows instead of pre-upload stale data.
+        from wp6_data.red.provider import invalidate_caches
+
+        invalidate_caches()

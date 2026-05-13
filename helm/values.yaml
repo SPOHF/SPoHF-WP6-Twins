@@ -10,14 +10,16 @@ image:
 # Dashboard
 dashboard:
   enabled: true
+  # Intentionally 1 replica so failures (OOM, slow query) stay visible
+  # rather than being masked by the second pod still serving requests.
   replicas: 1
   resources:
     requests:
       cpu: 200m
-      memory: 512Mi
+      memory: 768Mi
     limits:
       cpu: 750m
-      memory: 1Gi
+      memory: 2Gi
   ingress:
     enabled: true
     host: ""  # Required: e.g., wp6.example.com
@@ -70,6 +72,7 @@ grey:
 # Red Dashboard (MySQL backend with auth)
 red:
   enabled: false
+  # Intentionally 1 replica — same reasoning as the blue dashboard above.
   replicas: 1
   image:
     repository: ""  # If empty, uses main image.repository with "-red" suffix
@@ -77,10 +80,10 @@ red:
   resources:
     requests:
       cpu: 200m
-      memory: 512Mi
+      memory: 768Mi
     limits:
       cpu: 750m
-      memory: 1Gi
+      memory: 2Gi
   ingress:
     enabled: true
     host: ""  # Required if enabled: e.g., wp6-red.example.com
@@ -103,7 +106,7 @@ red:
     size: "5Gi"
   # Bootstrap Job (Helm hook) — creates wp6_red role + database in shared TSDB
   tsdbBootstrap:
-    image: ""  # Defaults to timescale/timescaledb:latest-pg17
+    image: ""  # Defaults to timescale/timescaledb:2.26.4-pg17
     tsdbHost: "wp6-data-timescaledb"
     tsdbPort: "5432"
   # CSV export job (runs nightly, generates downloadable CSVs)

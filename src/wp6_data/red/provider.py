@@ -6,6 +6,11 @@ legacy LoRaWAN tables); sensors with a source go to TimescaleDB (manual
 uploads + future letsgrow sync). The routing map is built once at init.
 Federation is transparent — public protocol surface is unchanged.
 
+TSDB-side counts/last-seen come from the `sensors_daily_summary` continuous
+aggregate (see `wp6_data.db.schema`). Status sync rows come from
+`sync_metadata`. Daily coverage rows for TSDB devices come from the
+`daily_coverage` table; the MySQL leg still scans `SENSOR_TABLES` directly.
+
 Red-specific methods (get_par_readings, get_weather_station_readings)
 stay on MySQLConnection and are accessed directly by DLI routes.
 """
@@ -18,12 +23,37 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 from cachetools import TTLCache
 
+from wp6_data.shared.sensor_summary import get_sensor_summary
+
 # Coverage only changes once per day — cache for 1 hour
 _coverage_cache: TTLCache[str, list[dict[str, Any]]] = TTLCache(maxsize=4, ttl=3600)
+
+# Cache key for the per-sensor cagg readout (shared TTLCache, 5min)
+_CAGG_CACHE_KEY = "red:tsdb-cagg"
 
 if TYPE_CHECKING:
     from wp6_data.red.db import MySQLConnection
     from wp6_data.shared.metadata import MetadataRegistry
+
+
+async def _fetch_cagg_summary() -> list[dict[str, Any]]:
+    """Cached read of the cagg, per (device, sensor)."""
+    from wp6_data.red.tsdb import fetch_sensors_from_cagg
+
+    return await get_sensor_summary(_CAGG_CACHE_KEY, fetch_sensors_from_cagg)
+
+
+def invalidate_caches() -> None:
+    """Drop in-process caches that point at red TSDB.
+
+    Call this from write paths in the same process (e.g. Sijia ingest) so the
+    next dashboard request reflects the freshly-written rows. Cross-process
+    writers don't need this — their caches are naturally cold on next read.
+    """
+    from wp6_data.shared.sensor_summary import invalidate
+
+    invalidate(_CAGG_CACHE_KEY)
+    _coverage_cache.clear()
 
 
 class RedSensorProvider:
@@ -53,10 +83,12 @@ class RedSensorProvider:
         return None
 
     async def fetch_sync_metrics(self) -> list[dict[str, Any]]:
-        return []
+        from wp6_data.red.tsdb import fetch_sync_metrics_tsdb
+
+        return await fetch_sync_metrics_tsdb()
 
     async def fetch_daily_coverage(self) -> list[dict[str, Any]]:
-        """Derive daily coverage from MySQL sensor tables (cached 1 hour)."""
+        """Derive daily coverage from MySQL sensor tables + TSDB coverage table."""
         key = "red:coverage"
         if key in _coverage_cache:
             return _coverage_cache[key]
@@ -67,7 +99,7 @@ class RedSensorProvider:
     async def _fetch_daily_coverage(self) -> list[dict[str, Any]]:
         """Distinct (device, sensor, day) triples — MySQL + TSDB merged."""
         from wp6_data.red.db import SENSOR_TABLES
-        from wp6_data.red.tsdb import fetch_daily_coverage_tsdb
+        from wp6_data.red.tsdb import fetch_daily_coverage_from_table
 
         records: list[dict[str, Any]] = []
         async with self.db.pool.acquire() as conn, conn.cursor() as cursor:
@@ -88,7 +120,7 @@ class RedSensorProvider:
                             "day": day,
                         })
 
-        records.extend(await fetch_daily_coverage_tsdb())
+        records.extend(await fetch_daily_coverage_from_table())
         return records
 
     def _split_by_route(
@@ -184,9 +216,9 @@ class RedSensorProvider:
         """Flat [{device, sensor, readings}, ...] across both backends.
 
         - MySQL: derived from get_all_devices() (existing behaviour).
-        - TSDB: derived structurally from metadata.yaml — every device with
-          source X is paired with every sensor_default having source X.
-          Reading counts are 0 because metadata has no time/count info.
+        - TSDB: cagg-backed counts per (device, sensor); rows are emitted
+          for every metadata-declared pair, with a count of 0 when the cagg
+          has no data yet so the sensor still shows up on the home page.
         """
         all_devices = await self.db.get_all_devices()
         result: list[dict[str, Any]] = []
@@ -198,28 +230,59 @@ class RedSensorProvider:
                     "readings": info["readings"],
                 })
 
+        cagg_rows = await _fetch_cagg_summary()
+        cagg_lookup: dict[tuple[str, str], int] = {
+            (r["device"], r["sensor"]): int(r["readings"] or 0)
+            for r in cagg_rows
+        }
         for device, sensor in self._enumerate_tsdb_sensors():
-            result.append({"device": device, "sensor": sensor, "readings": 0})
+            result.append({
+                "device": device,
+                "sensor": sensor,
+                "readings": cagg_lookup.get((device, sensor), 0),
+            })
         return result
 
     async def fetch_device_data(self) -> dict[str, dict]:
-        """Device overview for the home page (MySQL + TSDB merged)."""
-        from wp6_data.red.tsdb import fetch_device_counts_tsdb
+        """Device overview for the home page (MySQL + TSDB merged).
 
+        TSDB devices' reading totals and last-seen come from the
+        sensors_daily_summary cagg via _fetch_cagg_summary (5-min TTL cache).
+        """
         all_devices = await self.db.get_all_devices()
-        tsdb_counts = await fetch_device_counts_tsdb()
+        cagg_rows = await _fetch_cagg_summary()
+
+        tsdb_per_device: dict[str, dict[str, Any]] = {}
+        for row in cagg_rows:
+            entry = tsdb_per_device.setdefault(
+                row["device"], {"readings": 0, "last_seen": None},
+            )
+            entry["readings"] += int(row["readings"] or 0)
+            latest = row.get("latest")
+            if latest and (entry["last_seen"] is None or latest > entry["last_seen"]):
+                entry["last_seen"] = latest
 
         device_data: dict[str, dict] = {}
         for device_id, info in all_devices.items():
             device_data[device_id] = {
                 "sensors": info["measurements"],
                 "readings": info["readings"],
+                "last_seen": info.get("last_seen"),
             }
 
         for device, sensor in self._enumerate_tsdb_sensors():
-            entry = device_data.setdefault(
-                device, {"sensors": [], "readings": tsdb_counts.get(device, 0)},
-            )
+            tsdb_info = tsdb_per_device.get(device, {})
+            entry = device_data.setdefault(device, {
+                "sensors": [],
+                "readings": tsdb_info.get("readings", 0),
+                "last_seen": tsdb_info.get("last_seen"),
+            })
             if sensor not in entry["sensors"]:
                 entry["sensors"].append(sensor)
         return device_data
+
+    async def fetch_manual_metadata(self) -> dict[str, Any]:
+        """Last-upload per source and last-measure per manual sensor key."""
+        from wp6_data.red.tsdb import fetch_manual_summary_tsdb
+
+        return await fetch_manual_summary_tsdb()

@@ -102,3 +102,49 @@ async def test_re_ingest_replaces_sijia_rows_and_writes_new_audit_row(
             "SELECT count(*) AS n FROM manual_uploads WHERE source = 'sijia'",
         )
         assert (await cur.fetchone())["n"] == 2
+
+
+async def test_ingest_populates_daily_coverage(service, red_tsdb_conn):
+    """The post-apply bookkeeping writes per-day coverage so /status renders."""
+    await ingest_sijia_file(service, SEED_PATH)
+
+    async with red_tsdb_conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT count(*) AS n FROM daily_coverage "
+            "WHERE device_name IN (SELECT DISTINCT device_name FROM readings WHERE source = 'sijia')"
+        )
+        coverage_rows = (await cur.fetchone())["n"]
+
+    assert coverage_rows > 0
+
+
+async def test_ingest_refreshes_cagg(service, red_tsdb_conn):
+    """sensors_daily_summary reflects the ingested rows after refresh."""
+    result = await ingest_sijia_file(service, SEED_PATH)
+
+    async with red_tsdb_conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT sum(reading_count) AS total "
+            "FROM sensors_daily_summary WHERE project = 'sijia'"
+        )
+        row = await cur.fetchone()
+
+    assert row["total"] == result.row_count
+
+
+async def test_ingest_writes_sync_metadata_row(service, red_tsdb_conn):
+    """A `sijia` row in sync_metadata is what makes the status page light up."""
+    result = await ingest_sijia_file(service, SEED_PATH)
+
+    async with red_tsdb_conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT last_run_success, last_run_records, last_timestamp, total_runs "
+            "FROM sync_metadata WHERE endpoint = 'sijia'"
+        )
+        row = await cur.fetchone()
+
+    assert row is not None
+    assert row["last_run_success"] is True
+    assert row["last_run_records"] == result.row_count
+    assert row["last_timestamp"] is not None
+    assert row["total_runs"] >= 1

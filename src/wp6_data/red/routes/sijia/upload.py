@@ -37,12 +37,12 @@ def _render_warnings(report: ValidationReport) -> str:
     """Render warning cards for regressions / dropped identifiers."""
     parts: list[str] = []
 
-    if report.valid_rows < report.existing_row_count:
+    if report.emitted_row_count < report.existing_row_count:
         parts.append(
             f'<article class="warning">'
-            f"<strong>Regression warning:</strong> the new upload has "
-            f"{report.valid_rows} valid rows, but the existing dataset "
-            f"contains {report.existing_row_count}. Re-applying will "
+            f"<strong>Regression warning:</strong> applying this file will "
+            f"insert {report.emitted_row_count} rows, replacing the existing "
+            f"{report.existing_row_count} rows. Re-applying will "
             f"<em>shrink</em> the stored data."
             f"</article>"
         )
@@ -104,9 +104,10 @@ def _render_preview(report: ValidationReport, filename: str) -> str:
         <article>
           <h3>Parsed</h3>
           <ul>
-            <li>Total rows: <strong>{report.total_rows}</strong></li>
-            <li>Valid rows: <strong>{report.valid_rows}</strong></li>
-            <li>Skipped rows: <strong>{len(report.skipped_rows)}</strong></li>
+            <li>Excel rows: <strong>{report.total_rows}</strong>
+                ({report.valid_rows} valid · {len(report.skipped_rows)} skipped)</li>
+            <li>Rows to insert (after aggregation):
+                <strong>{report.emitted_row_count}</strong></li>
             <li>Date range: <strong>{_format_date_range(report.date_range)}</strong></li>
             <li>Devices in upload: {devices_html}</li>
             <li>Sensors in upload: {sensors_html}</li>

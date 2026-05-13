@@ -107,6 +107,13 @@ class GreySensorProvider:
     async def fetch_device_data(self) -> dict[str, dict]:
         devices: dict[str, dict] = {}
         for device, sensor, _, _ in _SENSORS:
-            info = devices.setdefault(device, {"sensors": [], "readings": 1008})
+            info = devices.setdefault(
+                device,
+                {"sensors": [], "readings": 1008, "last_seen": None},
+            )
             info["sensors"].append(sensor)
         return devices
+
+    async def fetch_manual_metadata(self) -> dict[str, Any]:
+        """Grey twin has only synthetic data, no manual uploads."""
+        return {"uploads": {}, "measurements": {}}

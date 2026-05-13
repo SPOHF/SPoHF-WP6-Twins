@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from datetime import UTC, date, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from wp6_data.shared.metadata import MetadataRegistry
@@ -155,8 +155,16 @@ def render_card(
     return f"<article{cls}><h2>{title}</h2>{desc}{body}</article>"
 
 
-def render_table(headers: list[str], rows: list[list[str]], *, sortable: bool = True) -> str:
-    """Render an HTML table from headers and row data (cells may contain HTML)."""
+def render_table(
+    headers: list[str], rows: list[list[str]], *,
+    sortable: bool = True, group_col: int | None = None,
+) -> str:
+    """Render an HTML table from headers and row data (cells may contain HTML).
+
+    When *group_col* is set, the table is marked with ``data-group-col`` so that
+    the front-end can visually merge consecutive identical values in that column
+    while it is the active sort.
+    """
     thead = "<tr>" + "".join(
         f'<th style="cursor:pointer" onclick="sortTable(this)">{h}</th>'
         if sortable else f"<th>{h}</th>"
@@ -171,28 +179,88 @@ def render_table(headers: list[str], rows: list[list[str]], *, sortable: bool = 
         ) + "</tr>"
         for row in rows
     )
-    return f"<table><thead>{thead}</thead><tbody>{tbody}</tbody></table>"
+    table_attrs = (
+        f' data-group-col="{group_col}"' if group_col is not None else ""
+    )
+    return (
+        f"<table{table_attrs}><thead>{thead}</thead>"
+        f"<tbody>{tbody}</tbody></table>"
+    )
 
 
-def build_home_tables(
+EXPLORE_TAB_IDS = ("devices", "sensors", "manual")
+EXPLORE_TAB_LABELS = {
+    "devices": "Devices",
+    "sensors": "Sensors",
+    "manual": "Manual measurements",
+}
+
+
+def _format_timestamp_cell(dt: Any) -> tuple[str, str]:
+    """Render a datetime as an HTML cell tuple (display, sort_key).
+
+    Display is a relative phrase ("3 hours ago"); sort_key is the ISO string
+    so client-side sort orders by absolute time. ``None`` renders as a dash.
+    """
+    if dt is None:
+        return ("—", "")
+
+    from datetime import datetime
+
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        now = datetime.now(UTC)
+        delta = now - dt
+        seconds = delta.total_seconds()
+        if seconds < 60:
+            phrase = "just now"
+        elif seconds < 3600:
+            phrase = f"{int(seconds // 60)} min ago"
+        elif seconds < 86400:
+            phrase = f"{int(seconds // 3600)} h ago"
+        elif seconds < 7 * 86400:
+            phrase = f"{int(seconds // 86400)} d ago"
+        else:
+            phrase = dt.strftime("%Y-%m-%d")
+        # Tooltip carries the absolute UTC timestamp for precision.
+        title = dt.strftime("%Y-%m-%d %H:%M UTC")
+        html = f'<span title="{title}">{phrase}</span>'
+        return (html, dt.isoformat())
+    return (str(dt), str(dt))
+
+
+def build_explore_tabs(
     metadata: MetadataRegistry,
     devices: dict[str, dict],
     available_exports: dict[str, str],
-) -> tuple[str, str]:
-    """Build the sensor-type and device tables for a home page.
+    manual_metadata: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """Build the three explore tables (devices, sensors, manual measurements).
+
+    Sensors are split by ``sensor_default(key).source``: empty source = auto-
+    logged, non-empty = manual upload. Devices are similarly filtered by
+    ``device(id).source`` so that manual-measurement plants do not appear in
+    the Devices tab.
 
     Args:
         metadata: The twin's metadata registry.
-        devices: ``{device_id: {"sensors": [str], "readings": int}}``.
+        devices: ``{device_id: {"sensors": [str], "readings": int,
+                              "last_seen": datetime | None}}``.
         available_exports: Export availability dict for download links.
+        manual_metadata: ``{"uploads": {source: datetime},
+                           "measurements": {sensor_key: datetime}}``
+            from the provider's ``fetch_manual_metadata``.
 
     Returns:
-        ``(sensor_table_html, device_table_html)``
+        ``{"devices": html, "sensors": html, "manual": html}``
     """
+    manual_metadata = manual_metadata or {"uploads": {}, "measurements": {}}
+    manual_uploads = manual_metadata.get("uploads", {})
+    manual_measurements = manual_metadata.get("measurements", {})
     from wp6_data.shared.export import render_download_link
 
-    # --- Sensor type table ---
-    # Aggregate per-sensor: total readings + set of devices
+    # --- Aggregate per-sensor: total readings + set of devices ---
     sensor_readings: dict[str, int] = {}
     sensor_devices: dict[str, set[str]] = {}
     for device_id, info in devices.items():
@@ -200,10 +268,11 @@ def build_home_tables(
             sensor_readings[s] = sensor_readings.get(s, 0) + info["readings"]
             sensor_devices.setdefault(s, set()).add(device_id)
 
-    sensor_entries = []
+    auto_entries: list[dict[str, str]] = []
+    manual_entries: list[dict[str, str]] = []
     for key in sorted(sensor_readings, key=lambda k: -sensor_readings[k]):
         sm = metadata.sensor_default(key)
-        sensor_entries.append({
+        entry = {
             "key": key,
             "url": chart_url([
                 f"{d}:{key}" for d in sorted(sensor_devices.get(key, set()))
@@ -213,16 +282,42 @@ def build_home_tables(
             "unit": sm.unit,
             "Devices": ", ".join(sorted(sensor_devices.get(key, set()))),
             "Readings": f"{sensor_readings[key]:,}",
-        })
-    sensor_table = render_sensor_type_table(
-        sensor_entries, extra_headers=["Devices", "Readings"],
-    )
+            "Source": sm.source,
+        }
+        if sm.source:
+            entry["Last upload"] = _format_timestamp_cell(
+                manual_uploads.get(sm.source),
+            )
+            entry["Last measure"] = _format_timestamp_cell(
+                manual_measurements.get(key),
+            )
+            manual_entries.append(entry)
+        else:
+            auto_entries.append(entry)
 
-    # --- Device table ---
-    # Pre-build position and device-type series for group links
+    sensors_tab = render_sensor_type_table(
+        auto_entries, extra_headers=["Devices", "Readings"],
+    )
+    if manual_entries:
+        manual_tab = render_manual_measurement_table(
+            manual_entries,
+            extra_headers=["Readings", "Last upload", "Last measure"],
+        )
+    else:
+        manual_tab = (
+            "<p>No manual measurements have been uploaded yet.</p>"
+        )
+
+    # --- Devices tab: only auto-logged hardware (source == "") ---
+    auto_devices = {
+        device_id: info
+        for device_id, info in devices.items()
+        if not metadata.device(device_id).source
+    }
+
     position_series: dict[str, list[str]] = {}
     dtype_series: dict[str, list[str]] = {}
-    for device_id, info in devices.items():
+    for device_id, info in auto_devices.items():
         dm = metadata.device(device_id)
         series = [f"{device_id}:{s}" for s in sorted(info["sensors"])]
         if dm.position:
@@ -231,7 +326,7 @@ def build_home_tables(
             dtype_series.setdefault(dm.type, []).extend(series)
 
     device_entries = []
-    for device_id, info in sorted(devices.items()):
+    for device_id, info in sorted(auto_devices.items()):
         dm = metadata.device(device_id)
         dev_series = [f"{device_id}:{s}" for s in sorted(info["sensors"])]
         sensor_links = ", ".join(
@@ -246,8 +341,8 @@ def build_home_tables(
             else ""
         )
         type_html = (
-            f'<a href="{chart_url(dtype_series[dm.type])}">'
-            f"{dm.type}</a>"
+            f'<strong><a href="{chart_url(dtype_series[dm.type])}">'
+            f"{dm.type}</a></strong>"
             if dm.type
             else ""
         )
@@ -259,18 +354,58 @@ def build_home_tables(
             if dm.source else ""
         )
         device_entries.append({
-            "name": f'<a href="{chart_url(dev_series)}">{device_id}</a>{source_badge}',
+            "name": (
+                f'<strong><a href="{chart_url(dev_series)}">{device_id}</a>'
+                f"</strong>{source_badge}"
+            ),
             "position": pos_html,
             "type": type_html,
+            "type_sort": dm.type,
             "sensors": sensor_links,
             "readings": f'{info["readings"]:,}' if info["readings"] else "",
+            "Last seen": _format_timestamp_cell(info.get("last_seen")),
             "Download": render_download_link(device_id, available_exports),
         })
-    device_table = render_device_table(
-        device_entries, extra_columns=["Download"],
+    devices_tab = render_device_table(
+        device_entries, extra_columns=["Last seen", "Download"],
     )
 
-    return sensor_table, device_table
+    return {
+        "devices": devices_tab,
+        "sensors": sensors_tab,
+        "manual": manual_tab,
+    }
+
+
+def render_explore_tabs(tabs: dict[str, str], active: str = "devices") -> str:
+    """Wrap the explore tables in a tab switcher.
+
+    Args:
+        tabs: ``{tab_id: html}`` content for each tab.
+        active: Initially-selected tab id; falls back to "devices" if invalid.
+    """
+    if active not in EXPLORE_TAB_IDS:
+        active = "devices"
+
+    buttons = "".join(
+        f'<button type="button" role="tab" data-tab="{tid}"'
+        f' aria-selected="{"true" if tid == active else "false"}">'
+        f"{EXPLORE_TAB_LABELS[tid]}</button>"
+        for tid in EXPLORE_TAB_IDS
+    )
+    panels = "".join(
+        f'<div role="tabpanel" data-tab-panel="{tid}"'
+        f'{"" if tid == active else " hidden"}>'
+        f'{tabs.get(tid, "")}</div>'
+        for tid in EXPLORE_TAB_IDS
+    )
+
+    return (
+        '<div class="explore-tabs">'
+        f'<div class="tab-buttons" role="tablist">{buttons}</div>'
+        f"{panels}"
+        "</div>"
+    )
 
 
 def chart_url(series: list[str]) -> str:
@@ -310,15 +445,11 @@ def render_sensor_type_table(
 
     rows: list[list] = []
     for sensor_type in sorted(type_groups):
-        items = type_groups[sensor_type]
-        for i, s in enumerate(items):
+        for s in type_groups[sensor_type]:
             type_html = (
                 f'<strong><a href="/type/{sensor_type}">'
                 f"{sensor_type}</a></strong>"
-                if i == 0
-                else ""
             )
-            # Tuple (html, sort_value) so empty cells still sort correctly
             type_cell = (type_html, sensor_type)
             row: list = [
                 type_cell,
@@ -330,7 +461,60 @@ def render_sensor_type_table(
                     row.append(s.get(h, ""))
             rows.append(row)
 
-    return render_table(headers, rows)
+    return render_table(headers, rows, group_col=0)
+
+
+def render_manual_measurement_table(
+    measurements: list[dict[str, Any]],
+    *,
+    extra_headers: list[str] | None = None,
+) -> str:
+    """Render a manual-measurement table grouped by source (column 0).
+
+    Each dict in *measurements* should have keys:
+        - ``key``: measurement key
+        - ``url``: link for the measurement name
+        - ``type``: sensor type label (e.g. "fruit chemistry")
+        - ``alias``: display name for the measurement
+        - ``unit``: unit of measurement
+        - ``Source``: source string (e.g. "sijia")
+    Plus any extra keys matching *extra_headers*.
+    """
+    from collections import defaultdict as _defaultdict
+
+    source_groups: dict[str, list[dict[str, Any]]] = _defaultdict(list)
+    for m in measurements:
+        source_groups[m.get("Source", "")].append(m)
+
+    headers = ["Source", "Type", "Measurement", "Unit"]
+    if extra_headers:
+        headers.extend(extra_headers)
+
+    rows: list[list] = []
+    for source in sorted(source_groups):
+        for m in source_groups[source]:
+            source_cell = (f"<strong>{source}</strong>", source)
+            sensor_type = m.get("type", "")
+            type_cell = (
+                (
+                    f'<a href="/type/{sensor_type}">{sensor_type}</a>',
+                    sensor_type,
+                )
+                if sensor_type
+                else ("", "")
+            )
+            row: list = [
+                source_cell,
+                type_cell,
+                f'<a href="{m["url"]}">{m.get("alias") or m["key"]}</a>',
+                m.get("unit", ""),
+            ]
+            if extra_headers:
+                for h in extra_headers:
+                    row.append(m.get(h, ""))
+            rows.append(row)
+
+    return render_table(headers, rows, group_col=0)
 
 
 def render_device_table(
@@ -338,35 +522,48 @@ def render_device_table(
     *,
     extra_columns: list[str] | None = None,
 ) -> str:
-    """Render a uniform device table from metadata-enriched entries.
+    """Render a device table grouped by device type (column 0).
+
+    Devices without a type land in a single un-typed bucket sorted last.
 
     Each dict in *devices* should have keys:
         - ``name``: device name/id (displayed as-is, may contain HTML links)
         - ``position``: from device metadata
-        - ``type``: from device metadata
+        - ``type``: device type label
+        - ``type_sort``: raw type string for sort/grouping (defaults to ``type``)
         - ``sensors``: comma-separated sensor aliases
         - ``readings``: formatted reading count
     Plus any extra keys matching *extra_columns* headers.
     """
-    headers = ["Device", "Position", "Type", "Sensors", "Readings"]
+    headers = ["Type", "Device", "Position", "Sensors", "Readings"]
     if extra_columns:
         headers.extend(extra_columns)
 
-    rows: list[list[str]] = []
+    # Group by type_sort (raw type) so the merge-cell JS can identify groups.
+    grouped: dict[str, list[dict[str, str]]] = {}
     for d in devices:
-        row = [
-            d.get("name", ""),
-            d.get("position", ""),
-            d.get("type", ""),
-            d.get("sensors", ""),
-            d.get("readings", ""),
-        ]
-        if extra_columns:
-            for col in extra_columns:
-                row.append(d.get(col, ""))
-        rows.append(row)
+        grouped.setdefault(d.get("type_sort", ""), []).append(d)
 
-    return render_table(headers, rows)
+    # Empty-type bucket sorts last by using a high-codepoint sentinel.
+    def _sort_key(t: str) -> tuple[int, str]:
+        return (1, "") if t == "" else (0, t)
+
+    rows: list[list] = []
+    for type_key in sorted(grouped, key=_sort_key):
+        for d in grouped[type_key]:
+            row: list = [
+                (d.get("type", ""), type_key),
+                d.get("name", ""),
+                d.get("position", ""),
+                d.get("sensors", ""),
+                d.get("readings", ""),
+            ]
+            if extra_columns:
+                for col in extra_columns:
+                    row.append(d.get(col, ""))
+            rows.append(row)
+
+    return render_table(headers, rows, group_col=0)
 
 
 BASE_CSS = """
@@ -530,7 +727,30 @@ BASE_CSS = """
     .date-inputs label { margin-bottom: 0; }
     .date-inputs button { width: auto; padding: 0.25rem 0.75rem; margin-bottom: 0; }
 
+    /* --- Explore tabs --- */
+    .explore-tabs .tab-buttons {
+        display: flex; gap: 0.25rem;
+        border-bottom: 1px solid var(--pico-muted-border-color);
+        margin-bottom: 1rem;
+    }
+    .explore-tabs .tab-buttons button {
+        background: transparent; border: 0; border-radius: 0;
+        border-bottom: 2px solid transparent;
+        color: var(--pico-muted-color); cursor: pointer;
+        margin: 0 0 -1px 0; padding: 0.5rem 0.9rem;
+        width: auto; font-weight: 600;
+    }
+    .explore-tabs .tab-buttons button:hover { color: var(--pico-color); }
+    .explore-tabs .tab-buttons button[aria-selected="true"] {
+        color: var(--dashboard-primary);
+        border-bottom-color: var(--dashboard-primary);
+    }
+
     /* --- Tables --- */
+    /* Grouped tables: hide content of merged duplicate cells without
+       collapsing the cell itself (keeps row borders & widths consistent). */
+    td.cell-merged > * { display: none; }
+
     :root[data-dashboard] thead {
         background: transparent;
     }
@@ -842,7 +1062,65 @@ TOGGLE_JS = """
     });
 """
 
+EXPLORE_TABS_JS = """
+    (function() {
+        var root = document.querySelector('.explore-tabs');
+        if (!root) return;
+        var buttons = root.querySelectorAll('[data-tab]');
+        var panels = root.querySelectorAll('[data-tab-panel]');
+        buttons.forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var id = btn.dataset.tab;
+                buttons.forEach(function(b) {
+                    b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+                });
+                panels.forEach(function(p) {
+                    p.hidden = p.dataset.tabPanel !== id;
+                });
+                var url = new URL(window.location.href);
+                url.searchParams.set('tab', id);
+                history.replaceState(null, '', url.toString());
+            });
+        });
+    })();
+"""
+
+
 TABLE_SORT_JS = """
+    function refreshGrouping(table) {
+        var raw = table.dataset.groupCol;
+        if (raw === undefined) return;
+        var groupCol = parseInt(raw, 10);
+        if (isNaN(groupCol)) return;
+        // Find which header (if any) currently drives the sort.
+        var ths = table.querySelectorAll('thead th');
+        var sortedIdx = null;
+        ths.forEach(function(th, i) {
+            if (th.dataset.sortDir === 'asc' || th.dataset.sortDir === 'desc') {
+                sortedIdx = i;
+            }
+        });
+        // Merge only when no sort is active (initial render) or the active
+        // sort matches the group column — otherwise rows aren't grouped.
+        var shouldMerge = (sortedIdx === null || sortedIdx === groupCol);
+        var rows = table.querySelectorAll('tbody tr');
+        if (!shouldMerge) {
+            rows.forEach(function(r) {
+                var c = r.children[groupCol];
+                if (c) c.classList.remove('cell-merged');
+            });
+            return;
+        }
+        var prev = null;
+        rows.forEach(function(row) {
+            var cell = row.children[groupCol];
+            if (!cell) return;
+            var key = cell.dataset.sort || cell.textContent.trim();
+            if (key === prev) cell.classList.add('cell-merged');
+            else { cell.classList.remove('cell-merged'); prev = key; }
+        });
+    }
+
     function sortTable(th) {
         var table = th.closest('table');
         var tbody = table.querySelector('tbody');
@@ -867,7 +1145,10 @@ TABLE_SORT_JS = """
             return asc ? at.localeCompare(bt) : bt.localeCompare(at);
         });
         rows.forEach(function(r) { tbody.appendChild(r); });
+        refreshGrouping(table);
     }
+
+    document.querySelectorAll('table[data-group-col]').forEach(refreshGrouping);
 """
 
 CORRELATE_JS = """
@@ -1564,6 +1845,7 @@ UNIFIED_CHART_JS = """
             fetchAndAdd(spec.key, spec.axis, function() {
                 loaded++;
                 if (loaded === allSpecs.length) {
+                    rebuildTraces();
                     updateStats();
                     updateY2();
                 }
@@ -1613,19 +1895,21 @@ UNIFIED_CHART_JS = """
         });
     }
 
-    // Deterministic color per series key (avoids color shuffling on reload)
+    // Colors are assigned by sorted-key index: unique within a chart, and
+    // stable per key as long as the active-series set is unchanged.
     var TRACE_COLORS = [
         '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
         '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
         '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
         '#c49c94', '#f7b6d2', '#c7c7c7', '#dbdb8d', '#9edae5'
     ];
-    function keyColor(str) {
-        var h = 0;
-        for (var i = 0; i < str.length; i++) {
-            h = ((h << 5) - h + str.charCodeAt(i)) | 0;
-        }
-        return TRACE_COLORS[Math.abs(h) % TRACE_COLORS.length];
+    function buildColorMap() {
+        var sorted = Object.keys(activeSeries).slice().sort();
+        var m = {};
+        sorted.forEach(function(k, i) {
+            m[k] = TRACE_COLORS[i % TRACE_COLORS.length];
+        });
+        return m;
     }
 
     function bucketTime(isoStr, minutes) {
@@ -1707,6 +1991,8 @@ UNIFIED_CHART_JS = """
         var keys = Object.keys(activeSeries);
         if (keys.length === 0) return;
 
+        var colorMap = buildColorMap();
+
         // Partition keys by axis so each side can use its own config
         var keysByAxis = { left: [], right: [] };
         keys.forEach(function(k) {
@@ -1726,7 +2012,7 @@ UNIFIED_CHART_JS = """
                 axisKeys.forEach(function(k) {
                     var sd = seriesData[k];
                     if (!sd) return;
-                    var color = keyColor(k);
+                    var color = colorMap[k];
                     var trace;
                     if (chartType === 'line') {
                         trace = {
@@ -1758,7 +2044,9 @@ UNIFIED_CHART_JS = """
                     if (!sd) return;
                     var label = sensorLabel(k, axis);
                     if (!groups[label]) {
-                        groups[label] = { label: label, series: [] };
+                        groups[label] = { label: label, series: [], firstKey: k };
+                    } else if (k < groups[label].firstKey) {
+                        groups[label].firstKey = k;
                     }
                     groups[label].series.push(sd);
                 });
@@ -1786,20 +2074,20 @@ UNIFIED_CHART_JS = """
                     var suffix = g.series.length > 1
                     ? ' [' + cfg.aggregateFunc.toUpperCase() + '\u00d7' + g.series.length + ']'
                     : '';
-                var color = keyColor(g.label);
-                var trace2;
+                var color = colorMap[g.firstKey];
+                var trace;
                 if (chartType === 'line') {
-                    trace2 = {
+                    trace = {
                         x: merged.times, y: merged.values,
                         name: g.label + suffix,
                         mode: 'lines',
                         yaxis: axis === 'right' ? 'y2' : 'y',
                         line: {color: color}
                     };
-                    if (axis === 'right') { trace2.line.dash = 'dash'; }
+                    if (axis === 'right') { trace.line.dash = 'dash'; }
                 } else {
                     var isH2 = chartType === 'bar_h';
-                    trace2 = {
+                    trace = {
                         type: 'bar',
                         x: isH2 ? merged.values : merged.times,
                         y: isH2 ? merged.times : merged.values,
@@ -1809,7 +2097,7 @@ UNIFIED_CHART_JS = """
                         marker: {color: color}
                     };
                 }
-                traces.push(trace2);
+                traces.push(trace);
                 });
             }
         });
@@ -1860,35 +2148,6 @@ UNIFIED_CHART_JS = """
                 };
                 totalPoints += data.length;
 
-                if (anyAggregateEnabled()) {
-                    rebuildTraces();
-                } else {
-                    var color = keyColor(key);
-                    var trace;
-                    if (chartType === 'line') {
-                        trace = {
-                            x: times, y: values,
-                            name: sensorLabel(key, axis),
-                            mode: 'lines',
-                            yaxis: axis === 'right' ? 'y2' : 'y',
-                            line: {color: color}
-                        };
-                        if (axis === 'right') { trace.line.dash = 'dash'; }
-                    } else {
-                        var isHf = chartType === 'bar_h';
-                        trace = {
-                            type: 'bar',
-                            x: isHf ? values : times,
-                            y: isHf ? times : values,
-                            name: sensorLabel(key, axis),
-                            yaxis: axis === 'right' ? 'y2' : 'y',
-                            orientation: isHf ? 'h' : 'v',
-                            marker: {color: color}
-                        };
-                    }
-                    Plotly.addTraces(chartDiv, [trace]);
-                    activeSeries[key].traceIdx = chartDiv.data.length - 1;
-                }
                 showEmpty(false);
                 if (cb) cb();
             });
@@ -1915,6 +2174,7 @@ UNIFIED_CHART_JS = """
             // Need to fetch — syncUrl after fetch completes
             showEmpty(false);
             fetchAndAdd(key, axis, function() {
+                rebuildTraces();
                 syncUrl();
                 updateStats();
                 updateY2();
@@ -1924,21 +2184,10 @@ UNIFIED_CHART_JS = """
 
     function removeSeries(key) {
         if (!activeSeries[key]) return;
-        var idx = activeSeries[key].traceIdx;
         totalPoints -= activeSeries[key].points || 0;
         delete activeSeries[key];
         delete seriesData[key];
-        if (anyAggregateEnabled()) {
-            rebuildTraces();
-        } else {
-            Plotly.deleteTraces(chartDiv, [idx]);
-            // Reindex remaining traces
-            Object.keys(activeSeries).forEach(function(k) {
-                if (activeSeries[k].traceIdx > idx) {
-                    activeSeries[k].traceIdx--;
-                }
-            });
-        }
+        rebuildTraces();
         if (Object.keys(activeSeries).length === 0) {
             showEmpty(true);
         }
@@ -2692,6 +2941,7 @@ def render_page(
         <script>{TOGGLE_JS}</script>
         <script>{_source_toggle_js()}</script>
         <script>{TABLE_SORT_JS}</script>
+        <script>{EXPLORE_TABS_JS}</script>
     </body>
     </html>
     """
