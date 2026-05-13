@@ -1416,6 +1416,9 @@ UNIFIED_CHART_JS = """
     var BUCKET_STEPS = [0, 1, 5, 10, 15, 30, 60, 120, 360, 720, 1440, 10080, 20160, 43200];
 
     var splitMode = false;
+
+    // Parse URL params
+    var params = new URLSearchParams(window.location.search);
     var chartType = params.get('ct') || 'line';
     var idealRange = {
         left:  {lo: null, hi: null, mid: null},
@@ -1440,8 +1443,6 @@ UNIFIED_CHART_JS = """
     var axisCfg = { left: defaultAxisCfg(), right: defaultAxisCfg() };
     function cfgFor(axis) { return splitMode ? axisCfg[axis] : axisCfg.left; }
 
-    // Parse URL params
-    var params = new URLSearchParams(window.location.search);
     var leftSpecs = (params.get('s') || '').split(',').filter(Boolean);
     var rightSpecs = (params.get('r') || '').split(',').filter(Boolean);
     var startDate = params.get('start') || '';
@@ -2037,6 +2038,7 @@ UNIFIED_CHART_JS = """
                     }
                     traceIdxMap[k] = traces.length;
                     traces.push(trace);
+                });
             } else {
                 var groups = {};
                 axisKeys.forEach(function(k) {
