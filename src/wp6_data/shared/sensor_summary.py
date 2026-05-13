@@ -42,3 +42,26 @@ def invalidate(key: str | None = None) -> None:
         _cache.clear()
     else:
         _cache.pop(key, None)
+
+
+# Separate cache for fully enriched (grouped + metadata-annotated) responses.
+# Same TTL as the raw cache so they expire together.
+_enriched_cache: TTLCache[str, list[dict[str, Any]]] = TTLCache(maxsize=32, ttl=300)
+
+
+def get_enriched_cache(key: str) -> list[dict[str, Any]] | None:
+    """Return the cached enriched sensor list, or None on cache miss."""
+    return _enriched_cache.get(key)
+
+
+def set_enriched_cache(key: str, value: list[dict[str, Any]]) -> None:
+    """Store an enriched sensor list in the cache."""
+    _enriched_cache[key] = value
+
+
+def invalidate_enriched(key: str | None = None) -> None:
+    """Drop one or all enriched sensor caches."""
+    if key is None:
+        _enriched_cache.clear()
+    else:
+        _enriched_cache.pop(key, None)

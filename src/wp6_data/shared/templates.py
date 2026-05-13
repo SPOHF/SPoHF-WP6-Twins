@@ -740,7 +740,7 @@ BASE_CSS = """
         overflow: hidden;
         border: 1px solid var(--dashboard-primary);
     }
-    .group-btn, .label-btn, .agg-btn {
+    .group-btn, .label-btn, .agg-btn, .ct-btn {
         flex: 1;
         font-size: 0.72rem;
         padding: 0.25rem 0.3rem;
@@ -752,14 +752,16 @@ BASE_CSS = """
         color: var(--dashboard-primary);
         transition: background 0.15s, color 0.15s;
     }
-    .group-btn:not(:last-child), .label-btn:not(:last-child), .agg-btn:not(:last-child) {
+    .group-btn:not(:last-child), .label-btn:not(:last-child),
+    .agg-btn:not(:last-child), .ct-btn:not(:last-child) {
         border-right: 1px solid var(--dashboard-primary);
     }
-    .group-btn.active, .label-btn.active, .agg-btn.active {
+    .group-btn.active, .label-btn.active, .agg-btn.active, .ct-btn.active {
         background: var(--dashboard-primary);
         color: #fff;
     }
-    .group-btn:not(.active):hover, .label-btn:not(.active):hover, .agg-btn:not(.active):hover {
+    .group-btn:not(.active):hover, .label-btn:not(.active):hover,
+    .agg-btn:not(.active):hover, .ct-btn:not(.active):hover {
         background: color-mix(in srgb, var(--dashboard-primary) 12%, transparent);
     }
     .bucket-slider {
@@ -868,6 +870,256 @@ TABLE_SORT_JS = """
     }
 """
 
+CORRELATE_JS = """
+(function() {
+    var chartDiv = document.getElementById('correlate-area');
+    var panelDiv = document.getElementById('correlate-sensor-panel');
+    var statsDiv = document.getElementById('correlate-stats');
+    if (!chartDiv || !panelDiv) return;
+
+    var selectedSensors = [];
+    var currentMethod = 'pearson';
+
+    // --- URL state ---
+    function readUrl() {
+        var p = new URLSearchParams(location.search);
+        var s = p.get('s');
+        selectedSensors = s ? s.split(',').filter(Boolean) : [];
+        currentMethod = p.get('method') || 'pearson';
+    }
+
+    function syncUrl() {
+        var p = new URLSearchParams();
+        if (selectedSensors.length) p.set('s', selectedSensors.join(','));
+        var startVal = document.getElementById('corr-start').value;
+        var endVal   = document.getElementById('corr-end').value;
+        if (startVal) p.set('start', startVal);
+        if (endVal)   p.set('end', endVal);
+        p.set('method', currentMethod);
+        history.replaceState(null, '', '?' + p.toString());
+    }
+
+    // --- Fetch and render heatmap ---
+    function refresh() {
+        syncUrl();
+        if (selectedSensors.length < 2) {
+            statsDiv.textContent = 'Select at least 2 sensors to compute correlation.';
+            Plotly.purge(chartDiv);
+            return;
+        }
+        var p = new URLSearchParams();
+        p.set('s', selectedSensors.join(','));
+        var startVal = document.getElementById('corr-start').value;
+        var endVal   = document.getElementById('corr-end').value;
+        if (startVal) p.set('start', startVal);
+        if (endVal)   p.set('end', endVal);
+        p.set('method', currentMethod);
+        statsDiv.textContent = 'Loading\u2026';
+        fetch('/api/correlate?' + p.toString())
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) {
+                    statsDiv.textContent = 'Error: ' + data.error;
+                    return;
+                }
+                if (!data.matrix || !data.matrix.length) {
+                    statsDiv.textContent = data.warning || 'No overlapping data found.';
+                    Plotly.purge(chartDiv);
+                    return;
+                }
+                statsDiv.textContent = '';
+                var sensors = data.sensors;
+                var n = sensors.length;
+                var zText = data.matrix.map(function(row) {
+                    return row.map(function(v) {
+                        return v === null ? '' : v.toFixed(2);
+                    });
+                });
+                var trace = {
+                    type: 'heatmap',
+                    x: sensors,
+                    y: sensors,
+                    z: data.matrix,
+                    text: zText,
+                    texttemplate: '%{text}',
+                    zmin: -1, zmax: 1,
+                    colorscale: 'RdBu',
+                    reversescale: true,
+                    colorbar: { title: { text: 'r' }, thickness: 15 },
+                    hoverongaps: false,
+                };
+                var size = Math.max(400, Math.min(900, 80 * n));
+                var layout = {
+                    template: 'plotly_white',
+                    height: size,
+                    xaxis: { side: 'bottom', tickangle: -30 },
+                    yaxis: { autorange: 'reversed' },
+                    margin: { l: 160, r: 60, t: 40, b: 160 },
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                };
+                Plotly.react(chartDiv, [trace], layout, { responsive: true });
+            })
+            .catch(function(err) {
+                statsDiv.textContent = 'Request failed: ' + err.message;
+            });
+    }
+
+    // --- Build sensor tree ---
+    function buildPanel(sensors) {
+        var groups = {};
+        sensors.forEach(function(s) {
+            var type = s.type || s.sensor;
+            if (!groups[type]) groups[type] = [];
+            groups[type].push(s);
+        });
+
+        var html = '';
+        Object.keys(groups).sort().forEach(function(type) {
+            html += '<details class="sensor-group" open><summary>'
+                + type + ' <span class="group-badge" id="badge-' + type + '"></span>'
+                + '</summary>';
+            groups[type].forEach(function(s) {
+                var key = s.device + ':' + s.sensor;
+                var checked = selectedSensors.indexOf(key) !== -1;
+                var label = s.label || (s.device + '\u2014' + s.sensor);
+                html += '<div class="sensor-item' + (checked ? ' active' : '') + '"'
+                    + ' data-key="' + key + '">'
+                    + '<label class="cb-label"><input type="checkbox" data-key="' + key + '"'
+                    + (checked ? ' checked' : '') + '></label>'
+                    + '<span class="device-name" title="' + key + '">' + label + '</span>'
+                    + '</div>';
+            });
+            html += '</details>';
+        });
+        panelDiv.innerHTML = html || '<em>No sensors available.</em>';
+        updateBadges();
+    }
+
+    function updateBadges() {
+        panelDiv.querySelectorAll('.sensor-group').forEach(function(g) {
+            var type = g.querySelector('summary .group-badge');
+            if (!type) return;
+            var n = g.querySelectorAll('input:checked').length;
+            type.textContent = n ? '[' + n + ']' : '';
+        });
+    }
+
+    // --- Panel events (delegated) ---
+    panelDiv.addEventListener('change', function(e) {
+        var cb = e.target;
+        if (cb.type !== 'checkbox') return;
+        var key = cb.dataset.key;
+        var item = panelDiv.querySelector('.sensor-item[data-key="' + key + '"]');
+        if (cb.checked) {
+            if (selectedSensors.indexOf(key) === -1) selectedSensors.push(key);
+            if (item) item.classList.add('active');
+        } else {
+            selectedSensors = selectedSensors.filter(function(k) { return k !== key; });
+            if (item) item.classList.remove('active');
+        }
+        updateBadges();
+        refresh();
+    });
+
+    panelDiv.addEventListener('click', function(e) {
+        var name = e.target.closest('.device-name');
+        if (!name) return;
+        var item = name.closest('.sensor-item');
+        if (!item) return;
+        var cb = item.querySelector('input[type="checkbox"]');
+        if (cb) {
+            cb.checked = !cb.checked;
+            cb.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+    });
+
+    // --- Clear all ---
+    var clearBtn = document.getElementById('corr-clear');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            selectedSensors = [];
+            panelDiv.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+                cb.checked = false;
+            });
+            panelDiv.querySelectorAll('.sensor-item').forEach(function(i) {
+                i.classList.remove('active');
+            });
+            updateBadges();
+            refresh();
+        });
+    }
+
+    // --- Method toggle ---
+    document.querySelectorAll('.corr-method-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.corr-method-btn').forEach(function(b) {
+                b.classList.remove('active');
+            });
+            this.classList.add('active');
+            currentMethod = this.dataset.method;
+            if (selectedSensors.length >= 2) refresh();
+        });
+    });
+
+    // --- Date apply ---
+    var applyBtn = document.getElementById('corr-apply-dates');
+    if (applyBtn) {
+        applyBtn.addEventListener('click', function() {
+            if (selectedSensors.length >= 2) refresh();
+            else syncUrl();
+        });
+    }
+
+    // --- Panel hide/show ---
+    var panelToggle = document.getElementById('corr-panel-toggle');
+    var panelWrapper = document.getElementById('corr-panel-wrapper');
+    if (panelToggle && panelWrapper) {
+        panelToggle.addEventListener('click', function() {
+            panelWrapper.classList.toggle('collapsed');
+            panelToggle.textContent = panelWrapper.classList.contains('collapsed')
+                ? 'Show controls' : 'Hide controls';
+        });
+    }
+
+    // --- Date preset helpers ---
+    window._corrSetRange = function(days) {
+        var end = new Date();
+        var start = days === null
+            ? new Date('2024-01-01')
+            : new Date(end.getTime() - days * 86400000);
+        document.getElementById('corr-start').value = start.toISOString().slice(0, 10);
+        document.getElementById('corr-end').value   = end.toISOString().slice(0, 10);
+    };
+
+    // --- Init ---
+    readUrl();
+    document.querySelectorAll('.corr-method-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.method === currentMethod);
+    });
+    // Populate date inputs from URL
+    var urlParams = new URLSearchParams(location.search);
+    var p0 = urlParams.get('start');
+    var p1 = urlParams.get('end');
+    if (p0) document.getElementById('corr-start').value = p0;
+    if (p1) document.getElementById('corr-end').value   = p1;
+
+    fetch('/api/sensors')
+        .then(function(r) { return r.json(); })
+        .then(function(sensors) {
+            buildPanel(sensors);
+            if (selectedSensors.length >= 2) refresh();
+            else if (selectedSensors.length > 0) {
+                statsDiv.textContent = 'Select at least 2 sensors to compute correlation.';
+            }
+        })
+        .catch(function() {
+            panelDiv.innerHTML = '<em>Could not load sensors.</em>';
+        });
+})();
+"""
+
 UNIFIED_CHART_JS = """
 (function() {
     var chartDiv = document.getElementById('chart-area');
@@ -883,6 +1135,19 @@ UNIFIED_CHART_JS = """
     var BUCKET_STEPS = [0, 1, 5, 10, 15, 30, 60, 120, 360, 720, 1440, 10080, 20160, 43200];
 
     var splitMode = false;
+    var chartType = params.get('ct') || 'line';
+    var idealRange = {
+        left:  {lo: null, hi: null, mid: null},
+        right: {lo: null, hi: null, mid: null}
+    };
+    (function readIdealRange() {
+        ['lo', 'hi', 'mid'].forEach(function(k) {
+            var v = parseFloat(params.get('ir_' + k));
+            idealRange.left[k] = isNaN(v) ? null : v;
+            var vr = parseFloat(params.get('ir_' + k + '_r'));
+            idealRange.right[k] = isNaN(vr) ? null : vr;
+        });
+    }());
     function defaultAxisCfg() {
         return {
             labelFormat: 'smart',
@@ -939,10 +1204,11 @@ UNIFIED_CHART_JS = """
     // Initialize empty Plotly chart
     var layout = {
         template: 'plotly_white',
-        hovermode: 'x unified',
+        hovermode: chartType === 'bar_h' ? 'y unified' : 'x unified',
         height: 600,
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
+        barmode: chartType !== 'line' ? 'group' : undefined,
         yaxis2: {overlaying: 'y', side: 'right', showgrid: false}
     };
     Plotly.newPlot(chartDiv, [], layout, {responsive: true});
@@ -1403,6 +1669,32 @@ UNIFIED_CHART_JS = """
         var s = 0; nums.forEach(function(v) { s += v; }); return s / nums.length;
     }
 
+    function rebuildShapes() {
+        var shapes = [];
+        function addBand(ir, yref) {
+            if (ir.lo !== null && ir.hi !== null) {
+                shapes.push({
+                    type: 'rect', xref: 'paper', yref: yref,
+                    x0: 0, x1: 1, y0: ir.lo, y1: ir.hi,
+                    fillcolor: 'rgba(52,168,83,0.12)',
+                    line: {width: 0}, layer: 'below'
+                });
+            }
+            if (ir.mid !== null) {
+                shapes.push({
+                    type: 'line', xref: 'paper', yref: yref,
+                    x0: 0, x1: 1, y0: ir.mid, y1: ir.mid,
+                    line: {
+                        color: 'rgba(52,168,83,0.8)', width: 1.5, dash: 'dash'
+                    }
+                });
+            }
+        }
+        addBand(idealRange.left, 'y');
+        addBand(idealRange.right, 'y2');
+        Plotly.relayout(chartDiv, {shapes: shapes});
+    }
+
     function rebuildTraces() {
         // Clear all Plotly traces
         var traceCount = chartDiv.data ? chartDiv.data.length : 0;
@@ -1435,17 +1727,30 @@ UNIFIED_CHART_JS = """
                     var sd = seriesData[k];
                     if (!sd) return;
                     var color = keyColor(k);
-                    var trace = {
-                        x: sd.times, y: sd.values,
-                        name: sensorLabel(k, axis),
-                        mode: 'lines',
-                        yaxis: axis === 'right' ? 'y2' : 'y',
-                        line: {color: color}
-                    };
-                    if (axis === 'right') { trace.line.dash = 'dash'; }
+                    var trace;
+                    if (chartType === 'line') {
+                        trace = {
+                            x: sd.times, y: sd.values,
+                            name: sensorLabel(k, axis),
+                            mode: 'lines',
+                            yaxis: axis === 'right' ? 'y2' : 'y',
+                            line: {color: color}
+                        };
+                        if (axis === 'right') { trace.line.dash = 'dash'; }
+                    } else {
+                        var isH = chartType === 'bar_h';
+                        trace = {
+                            type: 'bar',
+                            x: isH ? sd.values : sd.times,
+                            y: isH ? sd.times : sd.values,
+                            name: sensorLabel(k, axis),
+                            yaxis: axis === 'right' ? 'y2' : 'y',
+                            orientation: isH ? 'h' : 'v',
+                            marker: {color: color}
+                        };
+                    }
                     traceIdxMap[k] = traces.length;
                     traces.push(trace);
-                });
             } else {
                 var groups = {};
                 axisKeys.forEach(function(k) {
@@ -1482,20 +1787,41 @@ UNIFIED_CHART_JS = """
                     ? ' [' + cfg.aggregateFunc.toUpperCase() + '\u00d7' + g.series.length + ']'
                     : '';
                 var color = keyColor(g.label);
-                var trace = {
-                    x: merged.times, y: merged.values,
-                    name: g.label + suffix,
-                    mode: 'lines',
-                    yaxis: axis === 'right' ? 'y2' : 'y',
-                    line: {color: color}
-                };
-                if (axis === 'right') { trace.line.dash = 'dash'; }
-                traces.push(trace);
+                var trace2;
+                if (chartType === 'line') {
+                    trace2 = {
+                        x: merged.times, y: merged.values,
+                        name: g.label + suffix,
+                        mode: 'lines',
+                        yaxis: axis === 'right' ? 'y2' : 'y',
+                        line: {color: color}
+                    };
+                    if (axis === 'right') { trace2.line.dash = 'dash'; }
+                } else {
+                    var isH2 = chartType === 'bar_h';
+                    trace2 = {
+                        type: 'bar',
+                        x: isH2 ? merged.values : merged.times,
+                        y: isH2 ? merged.times : merged.values,
+                        name: g.label + suffix,
+                        yaxis: axis === 'right' ? 'y2' : 'y',
+                        orientation: isH2 ? 'h' : 'v',
+                        marker: {color: color}
+                    };
+                }
+                traces.push(trace2);
                 });
             }
         });
 
         if (traces.length > 0) Plotly.addTraces(chartDiv, traces);
+
+        // Keep layout in sync with chart type
+        Plotly.relayout(chartDiv, {
+            hovermode: chartType === 'bar_h' ? 'y unified' : 'x unified',
+            barmode: chartType !== 'line' ? 'group' : null
+        });
+        rebuildShapes();
 
         keys.forEach(function(k) {
             var axis = activeSeries[k].axis;
@@ -1538,14 +1864,28 @@ UNIFIED_CHART_JS = """
                     rebuildTraces();
                 } else {
                     var color = keyColor(key);
-                    var trace = {
-                        x: times, y: values,
-                        name: sensorLabel(key, axis),
-                        mode: 'lines',
-                        yaxis: axis === 'right' ? 'y2' : 'y',
-                        line: {color: color}
-                    };
-                    if (axis === 'right') { trace.line.dash = 'dash'; }
+                    var trace;
+                    if (chartType === 'line') {
+                        trace = {
+                            x: times, y: values,
+                            name: sensorLabel(key, axis),
+                            mode: 'lines',
+                            yaxis: axis === 'right' ? 'y2' : 'y',
+                            line: {color: color}
+                        };
+                        if (axis === 'right') { trace.line.dash = 'dash'; }
+                    } else {
+                        var isHf = chartType === 'bar_h';
+                        trace = {
+                            type: 'bar',
+                            x: isHf ? values : times,
+                            y: isHf ? times : values,
+                            name: sensorLabel(key, axis),
+                            yaxis: axis === 'right' ? 'y2' : 'y',
+                            orientation: isHf ? 'h' : 'v',
+                            marker: {color: color}
+                        };
+                    }
                     Plotly.addTraces(chartDiv, [trace]);
                     activeSeries[key].traceIdx = chartDiv.data.length - 1;
                 }
@@ -1680,12 +2020,22 @@ UNIFIED_CHART_JS = """
         if (right.length) p.set('r', right.join(','));
         else p.delete('r');
         var L = axisCfg.left;
+        if (chartType !== 'line') p.set('ct', chartType);
+        else p.delete('ct');
         if (L.labelFormat !== 'smart') p.set('lbl', L.labelFormat);
         else p.delete('lbl');
         if (L.aggregateEnabled) p.set('agg', L.aggregateFunc);
         else p.delete('agg');
         if (L.aggregateEnabled && L.bucketMinutes !== 10) p.set('bkt', L.bucketMinutes);
         else p.delete('bkt');
+        ['lo', 'hi', 'mid'].forEach(function(k) {
+            var lv = idealRange.left[k];
+            var rv = idealRange.right[k];
+            if (lv !== null) p.set('ir_' + k, lv);
+            else p.delete('ir_' + k);
+            if (rv !== null) p.set('ir_' + k + '_r', rv);
+            else p.delete('ir_' + k + '_r');
+        });
         if (splitMode) {
             p.set('split', '1');
             var R = axisCfg.right;
@@ -1722,7 +2072,9 @@ UNIFIED_CHART_JS = """
     var dateForm = document.getElementById('dateFilter');
     if (dateForm) {
         var params = new URLSearchParams(window.location.search);
-        ['s', 'r', 'lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r'].forEach(function(name) {
+        ['s', 'r', 'ct', 'lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r',
+         'ir_lo', 'ir_hi', 'ir_mid', 'ir_lo_r', 'ir_hi_r', 'ir_mid_r'].forEach(
+            function(name) {
             var val = params.get(name);
             if (val) {
                 var input = document.createElement('input');
@@ -1737,7 +2089,9 @@ UNIFIED_CHART_JS = """
     // Also keep hidden fields in sync when series change
     function syncDateFormParams() {
         if (!dateForm) return;
-        ['s', 'r', 'lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r'].forEach(function(name) {
+        ['s', 'r', 'ct', 'lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r',
+         'ir_lo', 'ir_hi', 'ir_mid', 'ir_lo_r', 'ir_hi_r', 'ir_mid_r'].forEach(
+            function(name) {
             var existing = dateForm.querySelector(
                 'input[name="' + name + '"]');
             var p = new URLSearchParams(window.location.search);
@@ -1757,6 +2111,43 @@ UNIFIED_CHART_JS = """
             }
         });
     }
+
+    // Chart type toggle
+    document.querySelectorAll('.ct-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.ct === chartType);
+        btn.addEventListener('click', function() {
+            var newType = btn.dataset.ct;
+            if (newType === chartType) return;
+            chartType = newType;
+            document.querySelectorAll('.ct-btn').forEach(function(b) {
+                b.classList.toggle('active', b.dataset.ct === chartType);
+            });
+            rebuildTraces();
+            syncUrl();
+        });
+    });
+
+    // Ideal range inputs
+    (function wireIrInputs() {
+        var p = new URLSearchParams(window.location.search);
+        document.querySelectorAll('.ir-input').forEach(function(inp) {
+            var axis = inp.dataset.axis; // 'left' or 'right'
+            var key  = inp.dataset.ir;  // 'lo', 'hi', 'mid'
+            var urlKey = key + (axis === 'right' ? '_r' : '');
+            var saved = p.get('ir_' + urlKey);
+            if (saved !== null && saved !== '') inp.value = saved;
+            inp.addEventListener('change', function() {
+                var raw = inp.value.trim();
+                var val = raw === '' ? null : parseFloat(raw);
+                idealRange[axis][key] = (val === null || isNaN(val)) ? null : val;
+                rebuildShapes();
+                syncUrl();
+            });
+        });
+    }());
+
+    // Apply initial shapes from URL
+    rebuildShapes();
 })();
 """
 
@@ -1848,7 +2239,9 @@ DASHBOARD_JS = """
         if (chart.r) params.set('r', chart.r);
         params.set('start', dates.start);
         params.set('end', dates.end);
-        ['lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r'].forEach(function(k) {
+        ['lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r', 'ct',
+         'ir_lo', 'ir_hi', 'ir_mid', 'ir_lo_r', 'ir_hi_r', 'ir_mid_r'].forEach(
+            function(k) {
             if (chart[k]) params.set(k, chart[k]);
         });
         return '/chart?' + params.toString();
@@ -1938,25 +2331,78 @@ DASHBOARD_JS = """
         });
 
         Promise.all(promises).then(function(results) {
+            var ct = chart.ct || 'line';
+            var isH = ct === 'bar_h';
             var traces = results.map(function(r) {
-                var trace = {
-                    x: r.data.map(function(d) { return d.time; }),
-                    y: r.data.map(function(d) { return d.value; }),
-                    name: r.key,
-                    mode: 'lines',
-                    yaxis: r.axis === 'right' ? 'y2' : 'y'
-                };
-                if (r.axis === 'right') trace.line = { dash: 'dash' };
+                var xs = r.data.map(function(d) { return d.time; });
+                var ys = r.data.map(function(d) { return d.value; });
+                var trace;
+                if (ct === 'line') {
+                    trace = {
+                        x: xs, y: ys,
+                        name: r.key,
+                        mode: 'lines',
+                        yaxis: r.axis === 'right' ? 'y2' : 'y'
+                    };
+                    if (r.axis === 'right') trace.line = { dash: 'dash' };
+                } else {
+                    trace = {
+                        type: 'bar',
+                        x: isH ? ys : xs,
+                        y: isH ? xs : ys,
+                        name: r.key,
+                        orientation: isH ? 'h' : 'v',
+                        yaxis: r.axis === 'right' ? 'y2' : 'y'
+                    };
+                }
                 return trace;
             });
             var hasRight = results.some(function(r) { return r.axis === 'right'; });
+            // Build shapes for ideal range
+            var shapes = [];
+            function addBand(lo, hi, mid, yref) {
+                if (lo !== null && hi !== null) {
+                    shapes.push({
+                        type: 'rect', xref: 'paper', yref: yref,
+                        x0: 0, x1: 1, y0: lo, y1: hi,
+                        fillcolor: 'rgba(52,168,83,0.12)',
+                        line: {width: 0}, layer: 'below'
+                    });
+                }
+                if (mid !== null) {
+                    shapes.push({
+                        type: 'line', xref: 'paper', yref: yref,
+                        x0: 0, x1: 1, y0: mid, y1: mid,
+                        line: {
+                            color: 'rgba(52,168,83,0.8)',
+                            width: 1.5, dash: 'dash'
+                        }
+                    });
+                }
+            }
+            var pf = parseFloat;
+            addBand(
+                isNaN(pf(chart.ir_lo)) ? null : pf(chart.ir_lo),
+                isNaN(pf(chart.ir_hi)) ? null : pf(chart.ir_hi),
+                isNaN(pf(chart.ir_mid)) ? null : pf(chart.ir_mid),
+                'y'
+            );
+            addBand(
+                isNaN(pf(chart.ir_lo_r)) ? null : pf(chart.ir_lo_r),
+                isNaN(pf(chart.ir_hi_r)) ? null : pf(chart.ir_hi_r),
+                isNaN(pf(chart.ir_mid_r)) ? null : pf(chart.ir_mid_r),
+                'y2'
+            );
             var layout = {
                 height: 250,
                 margin: { t: 10, b: 30, l: 40, r: hasRight ? 40 : 10 },
                 showlegend: false,
-                xaxis: { type: 'date' },
+                xaxis: { type: isH ? '-' : 'date' },
                 yaxis: {},
                 yaxis2: { overlaying: 'y', side: 'right', showgrid: false },
+                barmode: ct !== 'line' ? 'group' : undefined,
+                hovermode: isH ? 'y unified' : 'x unified',
+                shapes: shapes,
                 template: 'plotly_white',
                 paper_bgcolor: 'rgba(0,0,0,0)',
                 plot_bgcolor: 'rgba(0,0,0,0)'
@@ -2062,6 +2508,13 @@ SAVE_TO_DASHBOARD_JS = """
             lbl_r: params.get('lbl_r') || '',
             agg_r: params.get('agg_r') || '',
             bkt_r: params.get('bkt_r') || '',
+            ct: params.get('ct') || '',
+            ir_lo: params.get('ir_lo') || '',
+            ir_hi: params.get('ir_hi') || '',
+            ir_mid: params.get('ir_mid') || '',
+            ir_lo_r: params.get('ir_lo_r') || '',
+            ir_hi_r: params.get('ir_hi_r') || '',
+            ir_mid_r: params.get('ir_mid_r') || '',
             createdAt: new Date().toISOString()
         };
 
@@ -2148,6 +2601,7 @@ def render_nav_bar(*, data_source: str | None = None) -> str:
         '<a href="/">Home</a>'
         '<a href="/dashboard">Dashboard</a>'
         '<a href="/chart">Chart</a>'
+        '<a href="/correlate">Correlate</a>'
         "</div>",
     ]
     if source_html:
@@ -2274,6 +2728,14 @@ def render_unified_chart_page(
 to {end.isoformat()}</summary>
                 {filter_html}
             </details>
+            <div style="margin-bottom:0.5rem">
+                <small style="color:var(--pico-muted-color)">Chart type</small>
+                <div class="group-toggle">
+                    <button class="ct-btn active" data-ct="line">Line</button>
+                    <button class="ct-btn" data-ct="bar_v">Bar ↕</button>
+                    <button class="ct-btn" data-ct="bar_h">Bar ↔</button>
+                </div>
+            </div>
             <h4>Sensors <a href="#" id="clear-all"
                 class="clear-btn" title="Clear all selections"
                 >[x]</a></h4>
@@ -2313,6 +2775,20 @@ to {end.isoformat()}</summary>
                     <input type="range" class="bucket-slider-input" data-axis="left"
                         min="0" max="13" value="3" step="1">
                 </div>
+                <details class="ideal-range-collapsible">
+                    <summary><small>Ideal range</small></summary>
+                    <div style="display:flex;gap:0.25rem;margin-top:0.3rem">
+                        <input type="number" class="ir-input" data-ir="lo" data-axis="left"
+                            placeholder="Lo" step="any"
+                            style="flex:1;font-size:0.72rem;padding:0.15rem 0.25rem;width:0">
+                        <input type="number" class="ir-input" data-ir="hi" data-axis="left"
+                            placeholder="Hi" step="any"
+                            style="flex:1;font-size:0.72rem;padding:0.15rem 0.25rem;width:0">
+                        <input type="number" class="ir-input" data-ir="mid" data-axis="left"
+                            placeholder="Mid" step="any"
+                            style="flex:1;font-size:0.72rem;padding:0.15rem 0.25rem;width:0">
+                    </div>
+                </details>
             </div>
             <div id="axis-controls-split" style="display:none;">
                 <h4>Y-Left</h4>
@@ -2338,6 +2814,20 @@ to {end.isoformat()}</summary>
                     <input type="range" class="bucket-slider-input" data-axis="left"
                         min="0" max="13" value="3" step="1">
                 </div>
+                <details class="ideal-range-collapsible">
+                    <summary><small>Ideal range (Y-left)</small></summary>
+                    <div style="display:flex;gap:0.25rem;margin-top:0.3rem">
+                        <input type="number" class="ir-input" data-ir="lo" data-axis="left"
+                            placeholder="Lo" step="any"
+                            style="flex:1;font-size:0.72rem;padding:0.15rem 0.25rem;width:0">
+                        <input type="number" class="ir-input" data-ir="hi" data-axis="left"
+                            placeholder="Hi" step="any"
+                            style="flex:1;font-size:0.72rem;padding:0.15rem 0.25rem;width:0">
+                        <input type="number" class="ir-input" data-ir="mid" data-axis="left"
+                            placeholder="Mid" step="any"
+                            style="flex:1;font-size:0.72rem;padding:0.15rem 0.25rem;width:0">
+                    </div>
+                </details>
                 <h4>Y-Right</h4>
                 <small>Labels</small>
                 <div class="group-toggle">
@@ -2363,6 +2853,20 @@ to {end.isoformat()}</summary>
                     <input type="range" class="bucket-slider-input" data-axis="right"
                         min="0" max="13" value="3" step="1">
                 </div>
+                <details class="ideal-range-collapsible">
+                    <summary><small>Ideal range (Y-right)</small></summary>
+                    <div style="display:flex;gap:0.25rem;margin-top:0.3rem">
+                        <input type="number" class="ir-input" data-ir="lo" data-axis="right"
+                            placeholder="Lo" step="any"
+                            style="flex:1;font-size:0.72rem;padding:0.15rem 0.25rem;width:0">
+                        <input type="number" class="ir-input" data-ir="hi" data-axis="right"
+                            placeholder="Hi" step="any"
+                            style="flex:1;font-size:0.72rem;padding:0.15rem 0.25rem;width:0">
+                        <input type="number" class="ir-input" data-ir="mid" data-axis="right"
+                            placeholder="Mid" step="any"
+                            style="flex:1;font-size:0.72rem;padding:0.15rem 0.25rem;width:0">
+                    </div>
+                </details>
             </div>
         </div>
         <div class="chart-main">
@@ -2437,5 +2941,85 @@ def render_dashboard_page(
         show_logo=False,
         show_footer=True,
         extra_css=DASHBOARD_CSS,
+        data_source=data_source,
+    )
+
+
+def render_correlation_page(
+    title_prefix: str,
+    start: date,
+    end: date,
+    *,
+    data_source: str | None = None,
+) -> str:
+    """Render the correlation matrix page.
+
+    The page starts empty; client-side JS fetches sensors and computes the
+    Pearson / Spearman / Kendall heatmap via ``/api/correlate``.
+    URL params ``s``, ``start``, ``end``, and ``method`` encode full state.
+
+    Args:
+        title_prefix: Page title prefix.
+        start: Default start date.
+        end: Default end date.
+        data_source: Optional data source label (blue twin).
+
+    Returns:
+        Complete HTML page string.
+    """
+    content = f"""
+    <div class="chart-layout">
+        <div class="sensor-panel" id="corr-panel-wrapper">
+            <h4>Method</h4>
+            <div class="group-toggle">
+                <button class="group-btn corr-method-btn active"
+                    data-method="pearson">Pearson</button>
+                <button class="group-btn corr-method-btn"
+                    data-method="spearman">Spearman</button>
+                <button class="group-btn corr-method-btn"
+                    data-method="kendall">Kendall</button>
+            </div>
+            <hr style="margin:0.5rem 0">
+            <h4>Date range</h4>
+            <div class="group-toggle" style="flex-wrap:wrap;gap:2px">
+                <button class="group-btn" onclick="_corrSetRange(1)">1d</button>
+                <button class="group-btn" onclick="_corrSetRange(7)">7d</button>
+                <button class="group-btn" onclick="_corrSetRange(30)">30d</button>
+                <button class="group-btn" onclick="_corrSetRange(90)">90d</button>
+                <button class="group-btn" onclick="_corrSetRange(365)">1y</button>
+                <button class="group-btn" onclick="_corrSetRange(null)">All</button>
+            </div>
+            <div class="date-inputs" style="display:flex;gap:0.3rem;margin-top:0.4rem">
+                <input type="date" id="corr-start" value="{start.isoformat()}"
+                    style="flex:1;font-size:0.78rem">
+                <input type="date" id="corr-end"   value="{end.isoformat()}"
+                    style="flex:1;font-size:0.78rem">
+            </div>
+            <button id="corr-apply-dates" class="outline"
+                style="font-size:0.78rem;margin-top:0.3rem;width:100%">Apply</button>
+            <hr style="margin:0.5rem 0">
+            <h4>Sensors <a href="#" id="corr-clear"
+                class="clear-btn" title="Clear all selections">[x]</a></h4>
+            <div id="correlate-sensor-panel">Loading sensors&hellip;</div>
+        </div>
+        <div class="chart-main">
+            <button class="panel-toggle outline" id="corr-panel-toggle">Hide controls</button>
+            <div id="correlate-stats"
+                style="font-size:0.82rem;color:var(--pico-muted-color);margin-bottom:0.5rem">
+                Select at least 2 sensors to compute correlation.
+            </div>
+            <div id="correlate-area"></div>
+        </div>
+    </div>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script>{{CORRELATE_JS}}</script>
+    """.replace("{{CORRELATE_JS}}", CORRELATE_JS)
+
+    return render_page(
+        f"{title_prefix} \u2014 Correlate",
+        content,
+        show_logo=False,
+        show_footer=False,
+        show_back_link=True,
         data_source=data_source,
     )

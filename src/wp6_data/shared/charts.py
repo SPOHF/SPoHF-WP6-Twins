@@ -2,6 +2,7 @@
 
 from datetime import date
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -92,6 +93,97 @@ def make_dual_axis_chart(
     return fig
 
 
+def add_ideal_range(
+    fig: go.Figure,
+    lo: float | None = None,
+    hi: float | None = None,
+    mid: float | None = None,
+    *,
+    y_ref: str = "y",
+    orientation: str = "h",
+) -> go.Figure:
+    """Overlay an ideal-range band and optional centre line on an existing figure.
+
+    Adds Plotly layout shapes in-place:
+    - A filled rectangle between *lo* and *hi* (when both are provided).
+    - A dashed reference line at *mid* (when provided).
+
+    Args:
+        fig: Existing Plotly Figure to modify.
+        lo: Lower bound of the ideal range.
+        hi: Upper bound of the ideal range.
+        mid: Optional centre / target value line.
+        y_ref: Y-axis reference (``'y'`` for left axis, ``'y2'`` for right).
+        orientation: ``'h'`` for horizontal band (value axis = y) or
+            ``'v'`` for vertical band (value axis = x).  Defaults to ``'h'``.
+
+    Returns:
+        The same figure with shapes appended.
+    """
+    shapes = list(fig.layout.shapes or [])
+
+    if lo is not None and hi is not None:
+        lo_f, hi_f = float(lo), float(hi)
+        if orientation == "h":
+            band = dict(
+                type="rect",
+                xref="paper",
+                yref=y_ref,
+                x0=0,
+                x1=1,
+                y0=lo_f,
+                y1=hi_f,
+                fillcolor="rgba(52, 168, 83, 0.12)",
+                line={"width": 0},
+                layer="below",
+            )
+        else:
+            band = dict(
+                type="rect",
+                xref=y_ref,
+                yref="paper",
+                x0=lo_f,
+                x1=hi_f,
+                y0=0,
+                y1=1,
+                fillcolor="rgba(52, 168, 83, 0.12)",
+                line={"width": 0},
+                layer="below",
+            )
+        shapes.append(band)
+
+    if mid is not None:
+        mid_f = float(mid)
+        if orientation == "h":
+            line = dict(
+                type="line",
+                xref="paper",
+                yref=y_ref,
+                x0=0,
+                x1=1,
+                y0=mid_f,
+                y1=mid_f,
+                line={"color": "rgba(52, 168, 83, 0.8)", "width": 1.5, "dash": "dash"},
+                layer="above",
+            )
+        else:
+            line = dict(
+                type="line",
+                xref=y_ref,
+                yref="paper",
+                x0=mid_f,
+                x1=mid_f,
+                y0=0,
+                y1=1,
+                line={"color": "rgba(52, 168, 83, 0.8)", "width": 1.5, "dash": "dash"},
+                layer="above",
+            )
+        shapes.append(line)
+
+    fig.update_layout(shapes=shapes)
+    return fig
+
+
 def make_bar_chart(
     df: pd.DataFrame,
     x: str,
@@ -101,22 +193,31 @@ def make_bar_chart(
     y_label: str | None = None,
     barmode: str = "group",
     text_auto: bool = True,
+    orientation: str = "v",
+    ideal_lo: float | None = None,
+    ideal_hi: float | None = None,
+    ideal_mid: float | None = None,
 ) -> go.Figure:
-    """Create a bar chart with optional grouping.
+    """Create a bar chart with optional grouping and ideal range overlay.
 
     Args:
         df: DataFrame with data to plot
-        x: Column name for x-axis
-        y: Column name for y-axis values
+        x: Column name for x-axis (or value axis when ``orientation='h'``)
+        y: Column name for y-axis values (or category axis when ``orientation='h'``)
         color: Optional column name for grouping/coloring bars
         title: Chart title
         y_label: Optional y-axis label (defaults to y column name)
         barmode: Bar mode ('group', 'stack', 'relative')
         text_auto: Show values on bars
+        orientation: ``'v'`` for vertical bars (default), ``'h'`` for horizontal bars
+        ideal_lo: Lower bound of ideal range band (optional)
+        ideal_hi: Upper bound of ideal range band (optional)
+        ideal_mid: Centre / target reference line (optional)
 
     Returns:
         Plotly Figure object
     """
+    # px.bar expects orientation kwarg and swaps x/y meaning when 'h'
     fig = px.bar(
         df,
         x=x,
@@ -125,21 +226,146 @@ def make_bar_chart(
         title=title,
         barmode=barmode,
         text_auto=".1f" if text_auto else False,
+        orientation=orientation,
     )
 
+    if orientation == "h":
+        fig.update_layout(
+            template="plotly_white",
+            hovermode="y unified",
+            height=500,
+            xaxis_title=y_label or y,
+            yaxis_title="",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+        if text_auto:
+            fig.update_traces(textposition="outside")
+        if any(v is not None for v in (ideal_lo, ideal_hi, ideal_mid)):
+            add_ideal_range(
+                fig, ideal_lo, ideal_hi, ideal_mid,
+                y_ref="x", orientation="v",
+            )
+    else:
+        fig.update_layout(
+            template="plotly_white",
+            hovermode="x unified",
+            height=500,
+            yaxis_title=y_label or y,
+            xaxis_title="",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+        if text_auto:
+            fig.update_traces(textposition="outside")
+        if any(v is not None for v in (ideal_lo, ideal_hi, ideal_mid)):
+            add_ideal_range(
+                fig, ideal_lo, ideal_hi, ideal_mid,
+                y_ref="y", orientation="h",
+            )
+
+    return fig
+
+
+def make_correlation_matrix(
+    df: pd.DataFrame,
+    sensors: list[str] | None = None,
+    method: str = "pearson",
+    title: str = "Sensor Correlation Matrix",
+) -> go.Figure:
+    """Create a Pearson (or Spearman/Kendall) correlation heatmap.
+
+    Each sensor series is hourly-resampled and then correlated across the
+    overlapping time window.  Sensors with fewer than 2 non-null observations
+    after alignment are dropped.
+
+    Args:
+        df: DataFrame with columns: device, sensor, time, value.
+        sensors: Optional list of ``'device:sensor'`` keys to include.
+            When ``None`` all unique ``device+sensor`` combos are used.
+        method: Correlation method – ``'pearson'`` (default), ``'spearman'``,
+            or ``'kendall'``.
+        title: Chart title.
+
+    Returns:
+        Plotly Figure with a single heatmap trace.  Returns an empty figure
+        with an annotation when fewer than 2 sensors have overlapping data.
+    """
+    df = df.copy()
+    df["key"] = df["device"] + ":" + df["sensor"]
+
+    if sensors is not None:
+        df = df[df["key"].isin(sensors)]
+
+    if df.empty:
+        fig = go.Figure()
+        fig.add_annotation(text="No data available", showarrow=False)
+        return fig
+
+    # Pivot to wide format: index=hourly timestamps, columns=device:sensor keys
+    df["time"] = pd.to_datetime(df["time"], utc=True)
+    df["hour"] = df["time"].dt.floor("1h")
+    pivot = (
+        df.groupby(["hour", "key"])["value"]
+        .mean()
+        .unstack("key")
+        .sort_index()
+    )
+
+    # Drop columns with fewer than 2 valid values
+    pivot = pivot.dropna(axis=1, thresh=2)
+
+    if pivot.shape[1] < 2:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="Need at least 2 sensors with overlapping data",
+            showarrow=False,
+        )
+        return fig
+
+    corr = pivot.corr(method=method)
+    labels = list(corr.columns)
+    matrix = corr.values
+
+    # Mask upper triangle (keep diagonal + lower triangle for readability)
+    mask = np.triu(np.ones_like(matrix, dtype=bool), k=1)
+    display = np.where(mask, np.nan, matrix)
+
+    fig = go.Figure(
+        go.Heatmap(
+            z=display,
+            x=labels,
+            y=labels,
+            zmin=-1,
+            zmax=1,
+            colorscale="RdBu",
+            reversescale=True,
+            colorbar={"title": "r", "thickness": 15},
+            hovertemplate=(
+                "%{y} × %{x}<br>r = %{z:.3f}<extra></extra>"
+            ),
+            text=np.where(
+                mask,
+                "",
+                np.vectorize(lambda v: f"{v:.2f}" if not np.isnan(v) else "")(display),
+            ),
+            texttemplate="%{text}",
+            textfont={"size": 11},
+        )
+    )
+    n = len(labels)
+    size = max(400, min(900, 80 * n))
     fig.update_layout(
+        title=title,
         template="plotly_white",
-        hovermode="x unified",
-        height=500,
-        yaxis_title=y_label or y,
-        xaxis_title="",
+        height=size,
+        width=size,
+        xaxis={"side": "bottom", "tickangle": -45},
+        yaxis={"autorange": "reversed"},
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
+        margin={"l": 120, "b": 120, "t": 60, "r": 20},
     )
-
-    if text_auto:
-        fig.update_traces(textposition="outside")
-
     return fig
 
 

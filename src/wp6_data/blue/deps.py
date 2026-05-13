@@ -118,7 +118,8 @@ async def _fetch_sensors_from_cagg(project: str | None = None) -> list[dict[str,
         ORDER BY readings DESC
     """
 
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+    async with pool.connection(timeout=8) as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute("SET LOCAL statement_timeout = '8s'")
         await cur.execute(query, params)
         return await cur.fetchall()
 
