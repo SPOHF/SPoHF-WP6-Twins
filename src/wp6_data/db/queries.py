@@ -163,11 +163,10 @@ async def fetch_manual_summary(pool: Any) -> dict[str, Any]:
     Returns ``{"uploads": {slug: last_uploaded_at},
               "measurements": {sensor_tag: last_measure_time}}``.
 
-    Column-agnostic by construction: it groups ``manual_uploads`` by its
-    twin-agnostic ``source`` slug and finds the latest reading time for rows
-    that carry an ``upload_id`` (i.e. came from a manual upload). Both twins
-    now have ``manual_uploads`` and a ``readings.upload_id`` FK, so the same
-    query serves red (Sijia) and blue (insects) unchanged.
+    Groups ``manual_uploads`` by its ``source`` slug and finds the latest
+    reading time for rows that carry an ``upload_id`` (i.e. came from a
+    manual upload). Depends only on ``manual_uploads`` + ``readings.upload_id``,
+    so it is the same query for any twin.
     """
     async with pool.connection() as conn, conn.cursor(
         row_factory=dict_row,

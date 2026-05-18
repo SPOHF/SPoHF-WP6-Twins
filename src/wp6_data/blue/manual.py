@@ -2,9 +2,9 @@
 
 Binds any blue :class:`ManualSource` to blue's cache invalidation and blue's
 ``Settings`` (TSDB URL + upload dir). Manual data is keyed by the ``source``
-column on ``readings`` (distinct from the automated ``project`` view) — the
-same as red. None of this is source-specific: adding a new blue manual
-source is "write its decoder + descriptor module, add it to ``SOURCES``".
+column on ``readings``, distinct from the automated ``project`` view. None
+of this is source-specific: adding a new blue manual source is "write its
+decoder + descriptor module, add it to ``SOURCES``".
 """
 
 from __future__ import annotations

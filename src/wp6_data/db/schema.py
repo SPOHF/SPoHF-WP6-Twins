@@ -5,17 +5,13 @@ key, presence of `upload_id`), so each twin owns its own readings DDL. This
 module owns the twin-agnostic parts:
 
 * `MANUAL_UPLOADS_SQL` — the `manual_uploads` audit table, the permanent
-  system of record for every manual upload, identical between twins. It was
-  red-only; promoting it lets blue's insect source share one provenance
-  model. Red composes its bootstrap SQL from this same constant so the
-  emitted DDL is byte-identical to before.
+  system of record for every manual upload, identical between twins.
 * `AUX_SCHEMA_SQL` — `sync_metadata` and `daily_coverage` tables, identical
   between twins.
-* `CAGG_SQL_TEMPLATE` — the `sensors_daily_summary` continuous aggregate. The
-  template is parameterised by the categorical column name on `readings`
-  (blue uses ``project``, red uses ``source`` — see
-  ``project_blue_project_vs_red_source`` memo for why these are different
-  concepts, not aliases).
+* `CAGG_SQL_TEMPLATE` — the `sensors_daily_summary` continuous aggregate,
+  parameterised by the categorical column name on a twin's `readings`
+  table (a twin with multiple parallel automated pipelines uses a different
+  column than one keyed only by provenance).
 
 Twin code calls `ensure_aggregates(pool, project_column=...)` after creating
 its own `readings` hypertable.
@@ -26,9 +22,9 @@ from psycopg_pool import AsyncConnectionPool
 
 logger = structlog.get_logger()
 
-# The manual-upload audit trail. Twin-agnostic: `source` here is the upload
-# slug ("sijia" / "insects"), not the readings categorical column. Pruning
-# nulls `file_path`/sets `file_pruned`; the row itself is never deleted.
+# The manual-upload audit trail. Twin-agnostic: the `source` column here is
+# the upload slug, not the readings categorical column. Pruning nulls
+# `file_path`/sets `file_pruned`; the row itself is never deleted.
 MANUAL_UPLOADS_SQL = """
 CREATE TABLE IF NOT EXISTS manual_uploads (
     id          BIGSERIAL    PRIMARY KEY,

@@ -2,11 +2,10 @@
 
 ``make_source_router`` builds the admin-gated ``/sources/{slug}`` router
 (preview + apply + history); ``make_card`` builds the ``/status`` card. Both
-are produced from a ``ManualSource`` descriptor, so red/Sijia and
-blue/insects share one implementation. The HTML and URLs are a faithful
-generalisation of the original red Sijia routes — slug, display name, row
-noun and accepted suffix are the only things that vary (manual data is
-always keyed by the ``source`` column).
+are produced from a ``ManualSource`` descriptor, so every source shares one
+implementation. Slug, display name, row noun and accepted suffix are the
+only things that vary (manual data is always keyed by the ``source``
+column).
 """
 
 from __future__ import annotations
@@ -166,8 +165,7 @@ def make_source_router(
     """Build the admin-gated ``/sources/{slug}`` router for ``source``.
 
     ``get_service`` is a FastAPI dependency returning the twin's
-    ``ManualIngestService`` (red binds the Sijia source, blue the insect
-    source; both keyed by the ``source`` column).
+    ``ManualIngestService`` bound to ``source``.
     """
     router = APIRouter(
         prefix=f"/sources/{source.slug}",

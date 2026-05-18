@@ -1,9 +1,8 @@
 """Twin-agnostic data types for the manual-ingest capability.
 
-These were originally defined inside the red Sijia parser; they carry no
-red-specific assumptions, so they are promoted here and the Sijia parser now
-re-exports them. Each manual source (Sijia Excel, blue insect CSV, …) parses
-its bytes into ``Reading``/``SkippedRow`` and reports a ``ValidationReport``.
+Each manual source parses its uploaded bytes into
+``Reading``/``SkippedRow`` and reports a ``ValidationReport``. These types
+carry no twin- or source-specific assumptions.
 """
 
 from __future__ import annotations
@@ -16,9 +15,9 @@ class ManualParseError(Exception):
     """File is structurally unparseable (wrong sheet/header/shape).
 
     Per-row dtype failures are reported via ``ValidationReport.skipped_rows``
-    rather than raised — only structural failures fast-fail. Source-specific
-    parsers subclass this (e.g. ``SijiaParseError``) so a route can render a
-    friendly rejection page instead of a 500.
+    rather than raised — only structural failures fast-fail. A source's
+    decoder may subclass this so a route can render a friendly rejection
+    page instead of a 500.
     """
 
 
@@ -26,10 +25,10 @@ class ManualParseError(Exception):
 class Reading:
     """One parsed measurement, ready to INSERT into ``readings``.
 
-    ``source`` is the parser's notion of the categorical value (the audit
-    slug for Sijia). The ingest service writes the descriptor's
-    ``categorical_value`` into the twin's categorical column, so this field
-    is advisory provenance, not the authoritative routing key.
+    ``source`` is the parser's notion of the categorical value. The ingest
+    service writes the descriptor's ``categorical_value`` into the readings
+    ``source`` column, so this field is advisory provenance, not the
+    authoritative routing key.
     """
 
     source: str

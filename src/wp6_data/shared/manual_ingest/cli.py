@@ -1,9 +1,8 @@
 """Generic CLI runner shared by every manual-source ingest command.
 
-A per-twin console script (``wp6-red-ingest-sijia``,
-``wp6-blue-ingest-insects``) is a thin wrapper that builds the twin's
-``ManualIngestService`` and delegates the validate→apply round-trip here, so
-the CLI and the admin web UI exercise exactly one apply path.
+A per-source console script is a thin wrapper that builds a
+``ManualIngestService`` and delegates the validate→apply round-trip here,
+so the CLI and the admin web UI exercise exactly one apply path.
 """
 
 from __future__ import annotations

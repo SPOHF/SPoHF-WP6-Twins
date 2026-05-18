@@ -2,9 +2,8 @@
 
 Files land at ``{base_dir}/{source}/{sha256}{suffix}`` so they're addressable
 by hash (the validation_id used by the upload flow) and grouped per source for
-the 2-file prune policy (issue 008). ``suffix`` comes from the source
-descriptor (``.xlsx`` for Sijia, ``.csv`` for the blue insect source); it
-defaults to ``.xlsx`` so existing red callers are unaffected.
+the 2-file prune policy. ``suffix`` comes from the source descriptor and
+defaults to ``.xlsx`` so callers that omit it are unaffected.
 
 The audit table (``manual_uploads``) is the system of record for upload
 provenance — pruning unlinks files from disk and marks the corresponding

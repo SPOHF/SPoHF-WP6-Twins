@@ -1,11 +1,11 @@
 """Twin-agnostic manual-upload capability.
 
-A manual source is anything that arrives as a file an admin uploads (no
-automated sensor pipeline): the red Sijia Excel, the blue insect CSV, and
-future sources. The per-source seam is a single :class:`ManualSource`
-descriptor; everything else — content-addressed storage, transactional
-all-or-nothing apply, the ``manual_uploads`` audit trail, the 2-file prune,
-the preview/apply/history UI, and the CLI — is shared here.
+A manual source is anything that arrives as a file an admin uploads, with
+no automated sensor pipeline behind it. The per-source seam is a single
+:class:`ManualSource` descriptor; everything else — content-addressed
+storage, transactional all-or-nothing apply, the ``manual_uploads`` audit
+trail, the 2-file prune, the preview/apply/history UI, and the CLI — is
+shared here and unaware of any specific twin or source.
 """
 
 from wp6_data.shared.manual_ingest.cli import run_ingest

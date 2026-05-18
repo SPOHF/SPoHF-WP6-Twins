@@ -1,12 +1,10 @@
 """Generic transactional manual-ingest service.
 
-Parameterised by ``(ManualSource, categorical-column-name, post-apply hook)``
-so both twins share one apply path. Behaviour is identical to the original
-red-only service; the only generalisations are: the categorical column name
-({source} for red, {project} for blue) is injected rather than hardcoded to
-``source``; the file suffix comes from the descriptor rather than ``.xlsx``;
-and the post-apply cache-invalidation is an injected hook rather than a
-hardcoded red import.
+Parameterised by ``(ManualSource, post-apply hook)`` so every twin and
+source shares one apply path. Manual data is always keyed by the readings
+``source`` column; the file suffix comes from the descriptor; and the
+post-apply cache-invalidation is an injected hook. The service knows
+nothing about which twin or source it is serving.
 
 Two public methods:
 
@@ -41,10 +39,8 @@ from wp6_data.shared.upload_storage import UploadStorage
 
 logger = structlog.get_logger()
 
-# Manual data is keyed by the `source` column on `readings` for *both* twins
-# (red has it natively; blue gained it alongside its automated-view `project`
-# column). The manual-ingest seam is therefore always `source` — no per-twin
-# column parameter.
+# Manual data is always keyed by the `source` column on `readings`. The
+# seam is therefore a constant, not a per-twin/per-source parameter.
 _COLUMN = "source"
 
 PostApplyHook = Callable[[], Awaitable[None] | None]
