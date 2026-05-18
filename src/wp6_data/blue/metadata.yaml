@@ -81,10 +81,16 @@ sensor_defaults:
     type: "wind"
     unit: "m/s"
     alias: "Gust"
+  # `source: insects` marks these as manually-uploaded (matches the readings
+  # `project` value): the shared home page uses metadata.source to split
+  # manual vs auto and to key the "Last upload"/"Last measure" freshness.
+  # Parity with red's `source: sijia`; blue routes by `project`, not
+  # sensor.source, so this only affects UI classification.
   total_insects:
     type: "insect monitoring"
     unit: "count"
     alias: "Total Insects"
+    source: "insects"
   # Defined now though every current file leaves it empty: the parser skips
   # empty cells, so a future file populates this with zero schema/metadata
   # changes (D. suzukii — spotted-wing drosophila, a primary blueberry pest).
@@ -92,6 +98,7 @@ sensor_defaults:
     type: "insect monitoring"
     unit: "count"
     alias: "D. suzukii"
+    source: "insects"
 
 devices:
   "PH2 | 4D25":
@@ -238,6 +245,7 @@ devices:
   "insect-trap":
     description: "Periodic insect-trap counts (manual upload)"
     type: "Insect trap"
+    source: "insects"
     sensors:
       total_insects:
         intention: "Total insects caught per trap-check round"
