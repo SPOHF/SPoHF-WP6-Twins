@@ -1,7 +1,9 @@
 """CLI ingest command for the Sijia (Neurath) seed Excel file.
 
-Thin wrapper that delegates to ``ManualIngestService`` so the CLI and the
-admin upload UI share one apply path (issue 009 acceptance criterion 4).
+Thin wrapper that delegates to the shared manual-ingest service + runner so
+the CLI and the admin upload UI share one apply path. ``ingest_sijia_file``
+is the shared :func:`run_ingest` (kept under this name so existing callers
+and tests are unaffected).
 """
 
 from __future__ import annotations
@@ -16,18 +18,12 @@ from psycopg_pool import AsyncConnectionPool
 
 from wp6_data.config import RedSettings
 from wp6_data.red.sijia.service import ApplyResult, ManualIngestService
+from wp6_data.shared.manual_ingest.cli import run_ingest as ingest_sijia_file
 from wp6_data.shared.upload_storage import UploadStorage
 
+__all__ = ["ApplyResult", "ingest_sijia_file", "main"]
+
 log = structlog.get_logger()
-
-
-async def ingest_sijia_file(
-    service: ManualIngestService, path: Path,
-) -> ApplyResult:
-    """Validate and apply the Sijia Excel file at `path` via the service."""
-    file_bytes = path.read_bytes()
-    report = await service.validate(file_bytes)
-    return await service.apply(report.file_hash, filename=path.name)
 
 
 async def _run(path: Path) -> ApplyResult:

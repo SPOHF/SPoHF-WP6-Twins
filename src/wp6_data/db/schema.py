@@ -4,13 +4,14 @@ The `readings` table itself diverges between blue and red (column names, dedup
 key, presence of `upload_id`), so each twin owns its own readings DDL. This
 module owns the twin-agnostic parts:
 
+* `MANUAL_UPLOADS_SQL` — the `manual_uploads` audit table, the permanent
+  system of record for every manual upload, identical between twins.
 * `AUX_SCHEMA_SQL` — `sync_metadata` and `daily_coverage` tables, identical
   between twins.
-* `CAGG_SQL_TEMPLATE` — the `sensors_daily_summary` continuous aggregate. The
-  template is parameterised by the categorical column name on `readings`
-  (blue uses ``project``, red uses ``source`` — see
-  ``project_blue_project_vs_red_source`` memo for why these are different
-  concepts, not aliases).
+* `CAGG_SQL_TEMPLATE` — the `sensors_daily_summary` continuous aggregate,
+  parameterised by the categorical column name on a twin's `readings`
+  table (a twin with multiple parallel automated pipelines uses a different
+  column than one keyed only by provenance).
 
 Twin code calls `ensure_aggregates(pool, project_column=...)` after creating
 its own `readings` hypertable.
@@ -21,6 +22,45 @@ from psycopg_pool import AsyncConnectionPool
 
 logger = structlog.get_logger()
 
+# The manual-upload audit trail. Twin-agnostic: the `source` column here is
+# the upload slug, not the readings categorical column. Pruning nulls
+# `file_path`/sets `file_pruned`; the row itself is never deleted.
+MANUAL_UPLOADS_SQL = """
+CREATE TABLE IF NOT EXISTS manual_uploads (
+    id          BIGSERIAL    PRIMARY KEY,
+    source      TEXT         NOT NULL,
+    filename    TEXT         NOT NULL,
+    file_hash   TEXT         NOT NULL,
+    file_path   TEXT,
+    file_pruned BOOLEAN      NOT NULL DEFAULT FALSE,
+    uploaded_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    row_count   INTEGER      NOT NULL,
+    error       TEXT
+);
+"""
+
+# Blue's readings gains the same nullable FK red's readings has, added
+# idempotently. Adding a nullable column with no default is metadata-only on
+# the hypertable; the FK targets the plain `manual_uploads` table, so it is
+# valid on a hypertable (the referencing side may be a hypertable). IF NOT
+# EXISTS makes the whole clause — column and its inline FK — idempotent.
+BLUE_UPLOAD_ID_SQL = """
+ALTER TABLE readings
+    ADD COLUMN IF NOT EXISTS upload_id BIGINT REFERENCES manual_uploads(id);
+"""
+
+# Blue's manual-ingest categorical, mirroring red's `source` column. Distinct
+# from `project` (the automated yookr-vs-datalake view): automated rows keep
+# the 'unknown' default; a manual upload sets it (e.g. 'insects'). Added
+# idempotently for existing blue databases (metadata-only, like upload_id).
+BLUE_SOURCE_SQL = """
+ALTER TABLE readings
+    ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'unknown';
+
+CREATE INDEX IF NOT EXISTS idx_readings_manual_source
+    ON readings (source) WHERE source <> 'unknown';
+"""
+
 # Blue's readings hypertable. Red has its own DDL in `wp6_data.red.tsdb`.
 READINGS_BLUE_SQL = """
 CREATE TABLE IF NOT EXISTS readings (
@@ -30,6 +70,7 @@ CREATE TABLE IF NOT EXISTS readings (
     value       DOUBLE PRECISION,
     raw_value   TEXT,
     project     TEXT             NOT NULL DEFAULT 'unknown',
+    source      TEXT             NOT NULL DEFAULT 'unknown',
     synced_at   TIMESTAMPTZ      NOT NULL DEFAULT NOW()
 );
 
@@ -126,9 +167,18 @@ async def ensure_aggregates(
 
 
 async def ensure_schema(pool: AsyncConnectionPool) -> None:
-    """Ensure blue's full TSDB schema (readings + aux tables + cagg)."""
+    """Ensure blue's full TSDB schema (manual_uploads + readings + FK + cagg).
+
+    Order matters: ``manual_uploads`` must exist before the ``upload_id`` FK
+    is added to ``readings``. All idempotent — safe to run on every startup,
+    including on a pre-existing blue database (the ALTER is a no-op once the
+    column exists).
+    """
     async with pool.connection() as conn:
+        await conn.execute(MANUAL_UPLOADS_SQL)
         await conn.execute(READINGS_BLUE_SQL)
+        await conn.execute(BLUE_UPLOAD_ID_SQL)
+        await conn.execute(BLUE_SOURCE_SQL)
         await conn.commit()
     await ensure_aggregates(pool, project_column="project")
     logger.info("tsdb_schema_ensured")

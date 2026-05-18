@@ -29,6 +29,11 @@ dashboard:
     existingSecret: ""  # default: <release>-blue-secrets
     # Keys expected in secret:
     # - tsdb-url: Postgres connection string for blue's database (wp6_blue)
+  # Persistent volume for blue manual uploads (insect CSV + future sources).
+  # Files: /data/blue-manual-uploads/{slug}/{sha256}{suffix}; only the latest
+  # 2 per source kept on disk (audit rows in manual_uploads kept forever).
+  manualUploads:
+    size: "5Gi"
   # CSV export job (runs nightly, generates downloadable CSVs per device)
   export:
     enabled: true

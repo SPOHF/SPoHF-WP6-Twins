@@ -71,5 +71,12 @@ class BlueSensorProvider:
         return device_data
 
     async def fetch_manual_metadata(self) -> dict[str, Any]:
-        """Blue has no manual upload pipeline yet."""
-        return {"uploads": {}, "measurements": {}}
+        """Manual-upload freshness for the blue home page.
+
+        Delegates to the shared twin-agnostic manual-upload summary query.
+        Returns empty dicts until the first manual upload is applied.
+        """
+        from wp6_data.db.pool import get_pool
+        from wp6_data.db.queries import fetch_manual_summary
+
+        return await fetch_manual_summary(get_pool())

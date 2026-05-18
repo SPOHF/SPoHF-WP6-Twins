@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from wp6_data.blue import deps
+from wp6_data.blue import manual as blue_manual
 from wp6_data.blue.provider import BlueSensorProvider
 from wp6_data.blue.routes import charts as blue_charts
 from wp6_data.blue.routes import ops
@@ -57,10 +58,18 @@ config = TwinConfig(
         primary="#2563eb", primary_light="#3b82f6", primary_dark="#1d4ed8",
         accent="#0ea5e9", surface_rgb="37, 99, 235",
     ),
-    extra_routers=[ops.router, blue_charts.router, monitor_router],
+    extra_routers=[
+        ops.router, blue_charts.router, monitor_router,
+        *blue_manual.manual_routers(),
+    ],
     hero_cards=[_monitor_card],
+    status_extras=blue_manual.manual_cards(),
     export_sanitise_names=True,
-    require_auth=False,
+    # Authenticated twin (TwinConfig.require_auth defaults to True): the app
+    # factory mounts SessionMiddleware, the /auth/* OIDC router, OIDC startup
+    # and the NotAuthenticated redirect. Required for the admin-gated manual
+    # upload UI; deployment must provide the WP6_OIDC_* secrets +
+    # WP6_OIDC_REDIRECT_BASE for blue (handled in the Helm step).
     lifespan_startup=_startup,
     lifespan_shutdown=_shutdown,
 )
