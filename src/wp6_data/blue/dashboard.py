@@ -5,6 +5,7 @@ from pathlib import Path
 from wp6_data.blue import deps
 from wp6_data.blue.provider import BlueSensorProvider
 from wp6_data.blue.routes import charts as blue_charts
+from wp6_data.blue.routes import insects as blue_insects
 from wp6_data.blue.routes import ops
 from wp6_data.blue.routes.monitor import router as monitor_router
 from wp6_data.config import Settings
@@ -57,8 +58,12 @@ config = TwinConfig(
         primary="#2563eb", primary_light="#3b82f6", primary_dark="#1d4ed8",
         accent="#0ea5e9", surface_rgb="37, 99, 235",
     ),
-    extra_routers=[ops.router, blue_charts.router, monitor_router],
+    extra_routers=[
+        ops.router, blue_charts.router, monitor_router,
+        blue_insects.router,
+    ],
     hero_cards=[_monitor_card],
+    status_extras=[blue_insects.render_insect_card],
     export_sanitise_names=True,
     # OIDC like the red twin (TwinConfig.require_auth defaults to True):
     # app_factory then mounts SessionMiddleware, the /auth/* router, OIDC
