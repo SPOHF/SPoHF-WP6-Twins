@@ -1357,10 +1357,7 @@ UNIFIED_CHART_JS = """
                     axisCfg[axis].aggregateFunc = fn;
                 }
                 refreshControlActiveStates();
-                rebuildTraces();
-                syncUrl();
-                updateStats();
-                updateY2();
+                refetchAll();
             });
         });
         rootEl.querySelectorAll('.bucket-slider-input').forEach(function(slider) {
@@ -1375,8 +1372,7 @@ UNIFIED_CHART_JS = """
                 var axis = slider.dataset.axis;
                 axisCfg[axis].bucketMinutes = BUCKET_STEPS[parseInt(slider.value)];
                 if (axisCfg[axis].aggregateEnabled) {
-                    rebuildTraces();
-                    syncUrl();
+                    refetchAll();
                 }
             });
         });
@@ -1405,10 +1401,7 @@ UNIFIED_CHART_JS = """
             }
             applySplitVisibility();
             refreshControlActiveStates();
-            rebuildTraces();
-            syncUrl();
-            updateStats();
-            updateY2();
+            refetchAll();
         });
     }
 
@@ -1646,18 +1639,24 @@ UNIFIED_CHART_JS = """
         return m;
     }
 
-    function bucketTime(isoStr, minutes) {
-        if (minutes <= 0) return isoStr;
-        var d = new Date(isoStr);
-        var ms = minutes * 60000;
-        var bucketed = new Date(Math.round(d.getTime() / ms) * ms);
-        var pad = function(n) { return n < 10 ? '0' + n : n; };
-        var Y = bucketed.getFullYear();
-        var M = pad(bucketed.getMonth()+1);
-        var D = pad(bucketed.getDate());
-        var h = pad(bucketed.getHours());
-        var m = pad(bucketed.getMinutes());
-        return Y + '-' + M + '-' + D + 'T' + h + ':' + m + ':00.000000';
+    // Combine already-bucketed values from multiple series that share one
+    // axis label. The server aligned every series to identical bucket
+    // boundaries, so values at the same timestamp are directly combinable.
+    // AVG must be count-weighted: a plain mean of per-series means is biased
+    // when buckets hold unequal numbers of raw readings (e.g. a partial day).
+    function combineAgg(values, counts, func) {
+        if (values.length === 0) return null;
+        if (func === 'max') return Math.max.apply(null, values);
+        if (func === 'min') return Math.min.apply(null, values);
+        if (func === 'sum') {
+            var s = 0; values.forEach(function(v) { s += v; }); return s;
+        }
+        var num = 0, den = 0;  // avg, count-weighted
+        for (var i = 0; i < values.length; i++) {
+            num += values[i] * counts[i];
+            den += counts[i];
+        }
+        return den > 0 ? num / den : null;
     }
 
     function formatBucket(mins) {
@@ -1673,18 +1672,6 @@ UNIFIED_CHART_JS = """
         if (mins === 20160) return '2 weeks';
         if (mins === 43200) return '1 month';
         return (mins / 1440) + ' days';
-    }
-
-    function applyAgg(values, func) {
-        var nums = values.filter(function(v) { return v !== null; });
-        if (nums.length === 0) return null;
-        if (func === 'max') return Math.max.apply(null, nums);
-        if (func === 'min') return Math.min.apply(null, nums);
-        if (func === 'sum') {
-            var s = 0; nums.forEach(function(v) { s += v; }); return s;
-        }
-        // avg
-        var s = 0; nums.forEach(function(v) { s += v; }); return s / nums.length;
     }
 
     function rebuildTraces() {
@@ -1748,20 +1735,27 @@ UNIFIED_CHART_JS = """
                 Object.keys(groups).forEach(function(label) {
                     var g = groups[label];
                     var merged;
-                    if (g.series.length === 1 && cfg.bucketMinutes <= 0) {
-                        merged = { times: g.series[0].times, values: g.series[0].values };
+                    if (g.series.length === 1) {
+                        // Server already bucketed+aggregated this series.
+                        var s0 = g.series[0];
+                        merged = { times: s0.times, values: s0.values };
                     } else {
-                        var timeSet = {};
+                        // Series share a label: recombine on the identical
+                        // server-side bucket timestamps, count-weighting AVG.
+                        var bmap = {};
                         g.series.forEach(function(sd) {
                             sd.times.forEach(function(t, i) {
-                                var bt = bucketTime(t, cfg.bucketMinutes);
-                                if (!timeSet[bt]) timeSet[bt] = [];
-                                if (sd.values[i] !== null) timeSet[bt].push(sd.values[i]);
+                                var v = sd.values[i];
+                                if (v === null || v === undefined) return;
+                                if (!bmap[t]) bmap[t] = { vals: [], counts: [] };
+                                bmap[t].vals.push(v);
+                                bmap[t].counts.push(sd.counts ? sd.counts[i] : 1);
                             });
                         });
-                        var sortedTimes = Object.keys(timeSet).sort();
+                        var sortedTimes = Object.keys(bmap).sort();
                         var aggValues = sortedTimes.map(function(t) {
-                            return applyAgg(timeSet[t], cfg.aggregateFunc);
+                            return combineAgg(
+                                bmap[t].vals, bmap[t].counts, cfg.aggregateFunc);
                         });
                         merged = { times: sortedTimes, values: aggValues };
                     }
@@ -1804,6 +1798,11 @@ UNIFIED_CHART_JS = """
             + '&sensor=' + encodeURIComponent(sensor);
         if (startDate) url += '&start=' + startDate;
         if (endDate) url += '&end=' + endDate;
+        var acfg = cfgFor(axis);
+        if (acfg.aggregateEnabled && acfg.bucketMinutes > 0) {
+            url += '&bkt=' + acfg.bucketMinutes
+                 + '&agg=' + encodeURIComponent(acfg.aggregateFunc);
+        }
 
         fetch(url)
             .then(function(r) { return r.json(); })
@@ -1813,8 +1812,10 @@ UNIFIED_CHART_JS = """
 
                 var times = data.map(function(d) { return d.time; });
                 var values = data.map(function(d) { return d.value; });
+                var counts = data.map(function(d) {
+                    return d.count != null ? d.count : 1; });
 
-                seriesData[key] = { times: times, values: values };
+                seriesData[key] = { times: times, values: values, counts: counts };
                 activeSeries[key] = {
                     axis: axis, traceIdx: -1, points: data.length,
                     truncated: !!resp.truncated,
@@ -1826,23 +1827,43 @@ UNIFIED_CHART_JS = """
             });
     }
 
+    // Re-fetch every active series with the current per-axis aggregation
+    // config, then rebuild. Used whenever agg / bucket / split changes: the
+    // client no longer caches raw rows to recompute from (server-side agg),
+    // so a tiny refetch replaces the old free local recompute.
+    function refetchAll() {
+        var keys = Object.keys(activeSeries);
+        if (keys.length === 0) { rebuildTraces(); syncUrl(); return; }
+        var specs = keys.map(function(k) {
+            return { key: k, axis: activeSeries[k].axis }; });
+        totalPoints = 0;
+        var done = 0;
+        specs.forEach(function(s) {
+            fetchAndAdd(s.key, s.axis, function() {
+                done++;
+                if (done === specs.length) {
+                    rebuildTraces();
+                    syncUrl();
+                    updateStats();
+                    updateY2();
+                }
+            });
+        });
+    }
+
     function addOrUpdateSeries(key, axis) {
         if (activeSeries[key]) {
-            // Already loaded — just switch axis
+            // Already loaded. The cached series was fetched for the old
+            // axis; under split mode the new axis may have a different agg
+            // config, so refetch this one key (tiny payload).
+            totalPoints -= activeSeries[key].points || 0;
             activeSeries[key].axis = axis;
-            if (anyAggregateEnabled()) {
+            fetchAndAdd(key, axis, function() {
                 rebuildTraces();
-            } else {
-                var idx = activeSeries[key].traceIdx;
-                var yaxis = axis === 'right' ? 'y2' : 'y';
-                var dash = axis === 'right' ? 'dash' : 'solid';
-                Plotly.restyle(chartDiv, {
-                    yaxis: yaxis, 'line.dash': dash, visible: true
-                }, [idx]);
-            }
-            syncUrl();
-            updateStats();
-            updateY2();
+                syncUrl();
+                updateStats();
+                updateY2();
+            });
         } else {
             // Need to fetch — syncUrl after fetch completes
             showEmpty(false);

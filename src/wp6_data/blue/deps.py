@@ -5,7 +5,7 @@ All query functions accept an optional ``project`` parameter:
 - A string → include only that project (used by the Yookr view)
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ from psycopg.rows import dict_row
 
 from wp6_data.config import Settings
 from wp6_data.db import close_pool, get_pool, init_pool
+from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.export import get_export_metadata as _get_export_metadata
 from wp6_data.shared.metadata import MetadataRegistry
 
@@ -81,8 +82,17 @@ async def fetch_data(
     end: datetime | None = None,
     limit: int = 500000,
     project: str | None = None,
+    *,
+    bucket: timedelta | None = None,
+    agg: str | None = None,
 ) -> pd.DataFrame:
-    """Fetch sensor readings from TimescaleDB."""
+    """Fetch sensor readings from TimescaleDB.
+
+    With ``bucket`` + ``agg`` set, aggregation is pushed into a
+    ``time_bucket`` GROUP BY so the row ``limit`` caps bucketed rows, not raw
+    readings — see :func:`wp6_data.shared.aggregation.bucket_and_aggregate`
+    for the contract the fallback backends mirror.
+    """
     pool = get_pool()
     proj_clause, params = _visible_filter(project)
 
@@ -102,22 +112,47 @@ async def fetch_data(
 
     where = " AND ".join(conditions)
     params["limit"] = limit
+    columns = ["device", "sensor", "time", "value"]
 
-    query = f"""
-        SELECT device_name AS device, sensor_tag AS sensor,
-               time, value
-        FROM readings
-        WHERE {where}
-        ORDER BY time
-        LIMIT %(limit)s
-    """
+    if bucket is not None and agg is not None:
+        if agg not in CHART_AGG_FUNCS:
+            raise ValueError(f"Unknown aggregation {agg!r}")
+        params["bucket"] = bucket
+        params["tz"] = Settings().display_timezone
+        # avg/min/max/sum are valid PG aggregate names — agg is whitelisted.
+        # GROUP BY / ORDER BY the real columns + the time_bucket expression,
+        # NOT the `AS time` alias: it collides with readings.time, and
+        # Postgres resolves that ambiguity differently in GROUP BY (input
+        # column) vs ORDER BY (output alias), which silently defeats the
+        # bucketing and disorders ties.
+        query = f"""
+            SELECT device_name AS device, sensor_tag AS sensor,
+                   time_bucket(%(bucket)s, time, %(tz)s) AS time,
+                   {agg}(value) AS value,
+                   count(value) AS count
+            FROM readings
+            WHERE {where}
+            GROUP BY device_name, sensor_tag, time_bucket(%(bucket)s, time, %(tz)s)
+            ORDER BY time_bucket(%(bucket)s, time, %(tz)s)
+            LIMIT %(limit)s
+        """
+        columns = ["device", "sensor", "time", "value", "count"]
+    else:
+        query = f"""
+            SELECT device_name AS device, sensor_tag AS sensor,
+                   time, value
+            FROM readings
+            WHERE {where}
+            ORDER BY time
+            LIMIT %(limit)s
+        """
 
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(query, params)
         records = await cur.fetchall()
 
     if not records:
-        return pd.DataFrame(columns=["device", "sensor", "time", "value"])
+        return pd.DataFrame(columns=columns)
     df = pd.DataFrame(records)
     if not df.empty:
         df["time"] = pd.to_datetime(df["time"], utc=True)

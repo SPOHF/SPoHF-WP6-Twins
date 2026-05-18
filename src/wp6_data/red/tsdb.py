@@ -14,7 +14,7 @@ readings hypertable.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -22,8 +22,10 @@ import structlog
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from wp6_data.config import Settings
 from wp6_data.db.queries import rebuild_daily_coverage
 from wp6_data.db.schema import MANUAL_UPLOADS_SQL, ensure_aggregates
+from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 
 logger = structlog.get_logger()
 
@@ -102,10 +104,15 @@ async def fetch_data_tsdb(
     start: datetime | None = None,
     end: datetime | None = None,
     limit: int = 500_000,
+    *,
+    bucket: timedelta | None = None,
+    agg: str | None = None,
 ) -> pd.DataFrame:
     """Fetch readings from the red TSDB `readings` table.
 
-    Returns DataFrame with columns: device, sensor, time, value.
+    Returns a DataFrame with columns ``device, sensor, time, value`` (plus
+    ``count`` when ``bucket`` + ``agg`` push aggregation into a ``time_bucket``
+    GROUP BY; see :func:`wp6_data.shared.aggregation.bucket_and_aggregate`).
     """
     from wp6_data.db.pool import get_pool
 
@@ -126,13 +133,38 @@ async def fetch_data_tsdb(
     params["limit"] = limit
 
     where = " AND ".join(conditions)
-    query = f"""
-        SELECT device_name AS device, sensor_tag AS sensor, time, value
-        FROM readings
-        WHERE {where}
-        ORDER BY time
-        LIMIT %(limit)s
-    """
+    columns = ["device", "sensor", "time", "value"]
+
+    if bucket is not None and agg is not None:
+        if agg not in CHART_AGG_FUNCS:
+            raise ValueError(f"Unknown aggregation {agg!r}")
+        params["bucket"] = bucket
+        params["tz"] = Settings().display_timezone
+        # GROUP BY / ORDER BY the real columns + the time_bucket expression,
+        # NOT the `AS time` alias: it collides with readings.time, and
+        # Postgres resolves that ambiguity differently in GROUP BY (input
+        # column) vs ORDER BY (output alias), which silently defeats the
+        # bucketing and disorders ties.
+        query = f"""
+            SELECT device_name AS device, sensor_tag AS sensor,
+                   time_bucket(%(bucket)s, time, %(tz)s) AS time,
+                   {agg}(value) AS value,
+                   count(value) AS count
+            FROM readings
+            WHERE {where}
+            GROUP BY device_name, sensor_tag, time_bucket(%(bucket)s, time, %(tz)s)
+            ORDER BY time_bucket(%(bucket)s, time, %(tz)s)
+            LIMIT %(limit)s
+        """
+        columns = ["device", "sensor", "time", "value", "count"]
+    else:
+        query = f"""
+            SELECT device_name AS device, sensor_tag AS sensor, time, value
+            FROM readings
+            WHERE {where}
+            ORDER BY time
+            LIMIT %(limit)s
+        """
 
     pool = get_pool()
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -140,7 +172,7 @@ async def fetch_data_tsdb(
         records = await cur.fetchall()
 
     if not records:
-        return _EMPTY_READINGS.copy()
+        return pd.DataFrame(columns=columns)
     df = pd.DataFrame(records)
     df["time"] = pd.to_datetime(df["time"], utc=True)
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
