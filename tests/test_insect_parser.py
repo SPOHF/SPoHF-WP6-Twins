@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from wp6_data.blue.insects.parser import (
+from wp6_data.blue.insects import (
     DEVICE_KEY,
     EXPECTED_HEADER,
     LOCAL_TZ,

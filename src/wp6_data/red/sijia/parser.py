@@ -8,13 +8,13 @@ now live in ``wp6_data.shared.manual_ingest`` and are re-exported here so the
 existing Sijia parser test suite and importers are unaffected.
 """
 
-import hashlib
 import io
-from collections import defaultdict
-from datetime import date, datetime, time
+from collections.abc import Iterator
+from datetime import datetime, time
 
 import openpyxl
 
+from wp6_data.shared.manual_ingest.parsing import DecodedRow, bind
 from wp6_data.shared.manual_ingest.types import (
     ManualParseError,
     Reading,
@@ -97,11 +97,12 @@ _SENSOR_COL_INDICES: tuple[tuple[int, str], ...] = tuple(
 )
 
 
-def _extract(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
-    """Shared pipeline. Validates structure, then returns (readings, skipped, total_rows).
+def _decode(file_bytes: bytes) -> Iterator[DecodedRow | SkippedRow]:
+    """Decode the Sijia workbook into one row per measurement.
 
-    Raises SijiaParseError if the sheet or column headers don't match expectations.
-    Per-row dtype failures are collected into `skipped`, not raised.
+    The only Sijia-specific code: structural validation, the Neurath device
+    naming, the date→13:00 anchoring and the percentage scaling. Bucketing,
+    mean-aggregation and the ValidationReport are the shared scaffold.
 
     Implementation note: openpyxl in read_only mode is used directly rather
     than pandas read_excel because the Sijia file routinely carries 6+
@@ -133,16 +134,11 @@ def _extract(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
                 f"got {actual_headers!r}"
             )
 
-        buckets: dict[tuple[str, datetime, str], list[float]] = defaultdict(list)
-        skipped: list[SkippedRow] = []
-        total_rows = 0
-
         for excel_idx, raw_row in enumerate(rows_iter, start=2):
             # First all-empty / NULL-Date row marks end of measurements;
             # Excel pads worksheets to 1,048,576 rows that we must NOT iterate.
             if raw_row[_DATE_COL_IDX] is None:
                 break
-            total_rows += 1
 
             variety = raw_row[_VARIETY_COL_IDX]
             block = raw_row[_BLOCK_COL_IDX]
@@ -172,50 +168,13 @@ def _extract(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
                 row_cells.append((sensor, scaled))
 
             if error is not None:
-                skipped.append(SkippedRow(row_index=excel_idx, reason=error))
-                continue
-            for sensor, scaled in row_cells:
-                buckets[(device, ts, sensor)].append(scaled)
+                yield SkippedRow(row_index=excel_idx, reason=error)
+            else:
+                yield DecodedRow(
+                    device_name=device, time=ts, cells=tuple(row_cells),
+                )
     finally:
         wb.close()
 
-    readings = [
-        Reading(
-            source=SOURCE,
-            device_name=device,
-            sensor_tag=sensor,
-            time=ts,
-            value=sum(values) / len(values),
-        )
-        for (device, ts, sensor), values in buckets.items()
-    ]
-    return readings, skipped, total_rows
 
-
-def parse(file_bytes: bytes) -> list[Reading]:
-    readings, _, _ = _extract(file_bytes)
-    return readings
-
-
-def validate(file_bytes: bytes) -> ValidationReport:
-    readings, skipped, total_rows = _extract(file_bytes)
-
-    devices = tuple(sorted({r.device_name for r in readings}))
-    sensors = tuple(sorted({r.sensor_tag for r in readings}))
-    if readings:
-        dates = sorted({r.time.date() for r in readings})
-        date_range: tuple[date, date] | None = (dates[0], dates[-1])
-    else:
-        date_range = None
-
-    return ValidationReport(
-        file_hash=hashlib.sha256(file_bytes).hexdigest(),
-        file_size=len(file_bytes),
-        total_rows=total_rows,
-        valid_rows=total_rows - len(skipped),
-        emitted_row_count=len(readings),
-        skipped_rows=tuple(skipped),
-        devices=devices,
-        sensors=sensors,
-        date_range=date_range,
-    )
+parse, validate = bind(SOURCE, _decode)

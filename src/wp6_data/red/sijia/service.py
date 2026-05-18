@@ -45,6 +45,5 @@ class ManualIngestService(_SharedManualIngestService):
             pool=pool,
             storage=storage,
             source=SIJIA,
-            column="source",
             post_apply_hook=_invalidate_red_caches,
         )

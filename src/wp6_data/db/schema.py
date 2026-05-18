@@ -53,6 +53,18 @@ ALTER TABLE readings
     ADD COLUMN IF NOT EXISTS upload_id BIGINT REFERENCES manual_uploads(id);
 """
 
+# Blue's manual-ingest categorical, mirroring red's `source` column. Distinct
+# from `project` (the automated yookr-vs-datalake view): automated rows keep
+# the 'unknown' default; a manual upload sets it (e.g. 'insects'). Added
+# idempotently for existing blue databases (metadata-only, like upload_id).
+BLUE_SOURCE_SQL = """
+ALTER TABLE readings
+    ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'unknown';
+
+CREATE INDEX IF NOT EXISTS idx_readings_manual_source
+    ON readings (source) WHERE source <> 'unknown';
+"""
+
 # Blue's readings hypertable. Red has its own DDL in `wp6_data.red.tsdb`.
 READINGS_BLUE_SQL = """
 CREATE TABLE IF NOT EXISTS readings (
@@ -62,6 +74,7 @@ CREATE TABLE IF NOT EXISTS readings (
     value       DOUBLE PRECISION,
     raw_value   TEXT,
     project     TEXT             NOT NULL DEFAULT 'unknown',
+    source      TEXT             NOT NULL DEFAULT 'unknown',
     synced_at   TIMESTAMPTZ      NOT NULL DEFAULT NOW()
 );
 
@@ -169,6 +182,7 @@ async def ensure_schema(pool: AsyncConnectionPool) -> None:
         await conn.execute(MANUAL_UPLOADS_SQL)
         await conn.execute(READINGS_BLUE_SQL)
         await conn.execute(BLUE_UPLOAD_ID_SQL)
+        await conn.execute(BLUE_SOURCE_SQL)
         await conn.commit()
     await ensure_aggregates(pool, project_column="project")
     logger.info("tsdb_schema_ensured")

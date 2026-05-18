@@ -2,11 +2,11 @@
 
 ``make_source_router`` builds the admin-gated ``/sources/{slug}`` router
 (preview + apply + history); ``make_card`` builds the ``/status`` card. Both
-are produced from a ``ManualSource`` descriptor + the twin's categorical
-column, so red/Sijia and blue/insects share one implementation. The HTML and
-URLs are a faithful generalisation of the original red Sijia routes — slug,
-display name, row noun, accepted suffix and the categorical column are the
-only things that vary.
+are produced from a ``ManualSource`` descriptor, so red/Sijia and
+blue/insects share one implementation. The HTML and URLs are a faithful
+generalisation of the original red Sijia routes — slug, display name, row
+noun and accepted suffix are the only things that vary (manual data is
+always keyed by the ``source`` column).
 """
 
 from __future__ import annotations
@@ -85,7 +85,7 @@ def _render_skipped(report: ValidationReport) -> str:
 
 
 def _render_preview(
-    source: ManualSource, column: str, report: ValidationReport, filename: str,
+    source: ManualSource, report: ValidationReport, filename: str,
 ) -> str:
     devices_html = ", ".join(
         f"<code>{escape(d)}</code>" for d in report.devices
@@ -128,7 +128,7 @@ def _render_preview(
         <article>
           <h3>Apply</h3>
           <p>Pressing Apply will atomically replace all existing
-             <code>{escape(column)} = {escape(source.categorical_value)}</code>
+             <code>source = {escape(source.categorical_value)}</code>
              data with the parsed rows above.</p>
           <form method="post" action="/sources/{source.slug}/apply">
             <input type="hidden" name="validation_id" value="{report.file_hash}">
@@ -166,8 +166,8 @@ def make_source_router(
     """Build the admin-gated ``/sources/{slug}`` router for ``source``.
 
     ``get_service`` is a FastAPI dependency returning the twin's
-    ``ManualIngestService`` (red binds Sijia + column ``source``; blue binds
-    insects + column ``project``).
+    ``ManualIngestService`` (red binds the Sijia source, blue the insect
+    source; both keyed by the ``source`` column).
     """
     router = APIRouter(
         prefix=f"/sources/{source.slug}",
@@ -206,7 +206,7 @@ def make_source_router(
             )
         return render_page(
             page_title,
-            _render_preview(source, service.column, report, filename),
+            _render_preview(source, report, filename),
             show_back_link=True, back_url="/status",
         )
 

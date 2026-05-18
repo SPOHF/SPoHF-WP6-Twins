@@ -41,10 +41,11 @@ from wp6_data.shared.upload_storage import UploadStorage
 
 logger = structlog.get_logger()
 
-# The categorical column name is interpolated into SQL. It is a trusted
-# internal constant ("source" / "project"), never user input — the same
-# contract as CAGG_SQL_TEMPLATE in wp6_data.db.schema.
-_ALLOWED_COLUMNS = frozenset({"source", "project"})
+# Manual data is keyed by the `source` column on `readings` for *both* twins
+# (red has it natively; blue gained it alongside its automated-view `project`
+# column). The manual-ingest seam is therefore always `source` — no per-twin
+# column parameter.
+_COLUMN = "source"
 
 PostApplyHook = Callable[[], Awaitable[None] | None]
 
@@ -62,27 +63,12 @@ class ManualIngestService:
         pool: AsyncConnectionPool,
         storage: UploadStorage,
         source: ManualSource,
-        column: str,
         post_apply_hook: PostApplyHook | None = None,
     ) -> None:
-        if column not in _ALLOWED_COLUMNS:
-            raise ValueError(
-                f"column must be one of {sorted(_ALLOWED_COLUMNS)}, got {column!r}"
-            )
         self.pool = pool
         self.storage = storage
         self._source = source
-        self._column = column
         self._post_apply_hook = post_apply_hook
-
-    @property
-    def column(self) -> str:
-        """The twin's categorical column on ``readings`` ('source'/'project').
-
-        Exposed so the preview page can show which data Apply will replace
-        without the route reaching into private state.
-        """
-        return self._column
 
     @property
     def source(self) -> ManualSource:
@@ -106,23 +92,22 @@ class ManualIngestService:
 
     async def _fetch_existing_facts(self) -> dict:
         """Query the TSDB for the comparison facts the preview page surfaces."""
-        col = self._column
         value = self._source.categorical_value
         async with self.pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 f"SELECT COUNT(*) AS n, MIN(time)::date AS min_d, "
                 f"MAX(time)::date AS max_d "
-                f"FROM readings WHERE {col} = %s",
+                f"FROM readings WHERE {_COLUMN} = %s",
                 (value,),
             )
             counts = await cur.fetchone()
             await cur.execute(
-                f"SELECT DISTINCT device_name FROM readings WHERE {col} = %s",
+                f"SELECT DISTINCT device_name FROM readings WHERE {_COLUMN} = %s",
                 (value,),
             )
             devices = {r["device_name"] for r in await cur.fetchall()}
             await cur.execute(
-                f"SELECT DISTINCT sensor_tag FROM readings WHERE {col} = %s",
+                f"SELECT DISTINCT sensor_tag FROM readings WHERE {_COLUMN} = %s",
                 (value,),
             )
             sensors = {r["sensor_tag"] for r in await cur.fetchall()}
@@ -152,13 +137,12 @@ class ManualIngestService:
         file_bytes = self.storage.read(path)
         readings = self._source.parse(file_bytes)
 
-        col = self._column
         value = self._source.categorical_value
         started = time.monotonic()
         async with self.pool.connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cur:
                 await cur.execute(
-                    f"DELETE FROM readings WHERE {col} = %s", (value,),
+                    f"DELETE FROM readings WHERE {_COLUMN} = %s", (value,),
                 )
                 await cur.execute(
                     "INSERT INTO manual_uploads "
@@ -189,8 +173,8 @@ class ManualIngestService:
                         ])
                     await cur.execute(
                         f"INSERT INTO readings "
-                        f"(time, device_name, sensor_tag, value, {col}, upload_id) "
-                        f"VALUES {placeholders}",
+                        f"(time, device_name, sensor_tag, value, {_COLUMN}, "
+                        f"upload_id) VALUES {placeholders}",
                         flat_params,
                     )
             await conn.commit()
