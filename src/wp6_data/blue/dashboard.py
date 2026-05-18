@@ -60,7 +60,11 @@ config = TwinConfig(
     extra_routers=[ops.router, blue_charts.router, monitor_router],
     hero_cards=[_monitor_card],
     export_sanitise_names=True,
-    require_auth=False,
+    # OIDC like the red twin (TwinConfig.require_auth defaults to True):
+    # app_factory then mounts SessionMiddleware, the /auth/* router, OIDC
+    # startup and the NotAuthenticated redirect. Required for the admin-gated
+    # insect upload UI; deployment must provide the WP6_OIDC_* secrets +
+    # WP6_OIDC_REDIRECT_BASE for blue (handled in the Helm step).
     lifespan_startup=_startup,
     lifespan_shutdown=_shutdown,
 )
