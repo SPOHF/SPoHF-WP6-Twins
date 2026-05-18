@@ -5,6 +5,7 @@ from typing import Any
 
 import structlog
 from psycopg import AsyncConnection
+from psycopg.rows import dict_row
 
 logger = structlog.get_logger()
 
@@ -154,6 +155,41 @@ async def record_sync_run(
                 "error": error,
             },
         )
+
+
+async def fetch_manual_summary(pool: Any) -> dict[str, Any]:
+    """Twin-agnostic manual-upload freshness for the home/status pages.
+
+    Returns ``{"uploads": {slug: last_uploaded_at},
+              "measurements": {sensor_tag: last_measure_time}}``.
+
+    Column-agnostic by construction: it groups ``manual_uploads`` by its
+    twin-agnostic ``source`` slug and finds the latest reading time for rows
+    that carry an ``upload_id`` (i.e. came from a manual upload). Both twins
+    now have ``manual_uploads`` and a ``readings.upload_id`` FK, so the same
+    query serves red (Sijia) and blue (insects) unchanged.
+    """
+    async with pool.connection() as conn, conn.cursor(
+        row_factory=dict_row,
+    ) as cur:
+        await cur.execute(
+            "SELECT source, MAX(uploaded_at) AS last_upload "
+            "FROM manual_uploads GROUP BY source",
+        )
+        upload_rows = await cur.fetchall()
+        await cur.execute(
+            "SELECT r.sensor_tag, MAX(r.time) AS last_measure "
+            "FROM readings r WHERE r.upload_id IS NOT NULL "
+            "GROUP BY r.sensor_tag",
+        )
+        measure_rows = await cur.fetchall()
+
+    return {
+        "uploads": {r["source"]: r["last_upload"] for r in upload_rows},
+        "measurements": {
+            r["sensor_tag"]: r["last_measure"] for r in measure_rows
+        },
+    }
 
 
 async def refresh_sensor_summary(pool: Any) -> None:
