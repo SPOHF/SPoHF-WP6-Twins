@@ -1,12 +1,42 @@
-"""Parser for the Sijia (Neurath) seasonal greenhouse Excel dataset."""
+"""Parser for the Sijia (Neurath) seasonal greenhouse Excel dataset.
+
+This is the source-specific half of the manual-ingest capability: the
+Excel/openpyxl reading, the Sijia column→sensor map, the Neurath device
+naming, and the percentage scaling. The twin-agnostic data types
+(``Reading``/``SkippedRow``/``ValidationReport``) and the base parse error
+now live in ``wp6_data.shared.manual_ingest`` and are re-exported here so the
+existing Sijia parser test suite and importers are unaffected.
+"""
 
 import hashlib
 import io
 from collections import defaultdict
-from dataclasses import dataclass
 from datetime import date, datetime, time
 
 import openpyxl
+
+from wp6_data.shared.manual_ingest.types import (
+    ManualParseError,
+    Reading,
+    SkippedRow,
+    ValidationReport,
+)
+
+__all__ = [
+    "COLUMN_TO_SENSOR",
+    "DEFAULT_MEASUREMENT_HOUR",
+    "EXPECTED_HEADERS",
+    "META_COLUMNS",
+    "PERCENTAGE_SENSORS",
+    "SHEET_NAME",
+    "SOURCE",
+    "Reading",
+    "SijiaParseError",
+    "SkippedRow",
+    "ValidationReport",
+    "parse",
+    "validate",
+]
 
 SOURCE = "sijia"
 SHEET_NAME = "2025-26_Measurement"
@@ -43,51 +73,14 @@ EXPECTED_HEADERS: tuple[str, ...] = META_COLUMNS + tuple(COLUMN_TO_SENSOR.keys()
 PERCENTAGE_SENSORS: frozenset[str] = frozenset({"water_content", "minerals"})
 
 
-class SijiaParseError(Exception):
-    """File is structurally unparseable (wrong sheet, wrong headers).
+class SijiaParseError(ManualParseError):
+    """Sijia file is structurally unparseable (wrong sheet, wrong headers).
 
     Per-row dtype failures are reported via ValidationReport.skipped_rows
-    rather than raised — only structural failures fast-fail.
+    rather than raised — only structural failures fast-fail. Subclasses the
+    shared ManualParseError so the shared route factory can render a friendly
+    rejection page for it.
     """
-
-
-@dataclass(frozen=True)
-class Reading:
-    source: str
-    device_name: str
-    sensor_tag: str
-    time: datetime
-    value: float
-
-
-@dataclass(frozen=True)
-class SkippedRow:
-    row_index: int  # 1-based, matching Excel row numbering
-    reason: str
-
-
-@dataclass(frozen=True)
-class ValidationReport:
-    file_hash: str  # sha256 hex
-    file_size: int  # bytes
-    total_rows: int  # populated source rows (NaN-Date filler dropped)
-    valid_rows: int  # source rows that survived dtype validation
-    # Number of rows that will be INSERTed into `readings` if Apply is clicked.
-    # Differs from valid_rows: each Excel row produces up to 14 readings (one
-    # per non-NaN sensor cell), and rows sharing (device, time, sensor) are
-    # aggregated to a single mean-valued reading. This is the field to compare
-    # against `existing_row_count` for regression detection.
-    emitted_row_count: int = 0
-    skipped_rows: tuple[SkippedRow, ...] = ()
-    devices: tuple[str, ...] = ()  # sorted, distinct
-    sensors: tuple[str, ...] = ()  # sorted, distinct
-    date_range: tuple[date, date] | None = None  # None when no valid rows
-    # Comparison facts vs. existing data for the same source. Populated by
-    # ManualIngestService.validate(); the parser leaves them at defaults.
-    existing_row_count: int = 0
-    existing_date_range: tuple[date, date] | None = None
-    devices_removed: tuple[str, ...] = ()  # in existing, missing from new
-    sensors_removed: tuple[str, ...] = ()  # in existing, missing from new
 
 
 def _device_name(variety: str, block: str, row: float) -> str:

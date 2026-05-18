@@ -186,7 +186,7 @@ async def test_apply_failure_rollback_leaves_db_and_disk_untouched(
     """
     from dataclasses import replace
 
-    from wp6_data.red.sijia import service as service_module
+    from wp6_data.red.sijia.parser import parse as real_parse
 
     # Bedrock: one successful apply so there's prior state to "leave alone".
     good_payload = _tiny_sijia_xlsx(10.0)
@@ -197,14 +197,17 @@ async def test_apply_failure_rollback_leaves_db_and_disk_untouched(
 
     # Now arrange the next apply to fail at INSERT (readings) by giving one
     # Reading a NULL device_name — violates the TEXT NOT NULL constraint.
-    real_parse = service_module.parse
-
     def bad_parse(file_bytes):
         readings = list(real_parse(file_bytes))
         readings[-1] = replace(readings[-1], device_name=None)
         return readings
 
-    monkeypatch.setattr(service_module, "parse", bad_parse)
+    # Inject the bad parser through the ManualSource descriptor — the only
+    # per-source seam the shared engine resolves parse() from. (Retargeted
+    # from monkeypatching the old red-only service module's `parse`.)
+    monkeypatch.setattr(
+        service, "_source", replace(service._source, parse=bad_parse),
+    )
 
     bad_payload = _tiny_sijia_xlsx(99.0)
     bad_report = await service.validate(bad_payload)

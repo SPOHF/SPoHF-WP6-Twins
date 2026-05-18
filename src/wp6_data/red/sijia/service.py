@@ -1,198 +1,50 @@
-"""ManualIngestService: parser + UploadStorage + TSDB transactional apply.
+"""Red-bound facade over the shared :class:`ManualIngestService`.
 
-Two public methods:
-
-- ``validate(file_bytes) -> ValidationReport``
-    Persists the file via UploadStorage (idempotent on hash), runs
-    SijiaParser.validate, and (eventually — task 009-5) enriches the
-    report with comparison facts against existing data.
-
-- ``apply(validation_id) -> ApplyResult``
-    Reads the file back by hash, parses, and executes the single
-    transaction that swaps the source's data atomically: DELETE prior
-    rows, INSERT manual_uploads audit row, INSERT parsed readings,
-    then prune older files post-commit (issue 008).
+The transactional apply, audit, prune and bookkeeping now live in
+``wp6_data.shared.manual_ingest``. Red keeps this ``ManualIngestService``
+name/shape so existing callers and tests are unchanged — it just binds the
+Sijia descriptor, red's categorical column (``source``) and red's in-process
+cache invalidation as the post-apply hook.
 """
 
 from __future__ import annotations
 
-import time
-from dataclasses import dataclass, replace
-from datetime import date
-
-import structlog
-from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from wp6_data.db.queries import (
-    record_sync_run,
-    refresh_sensor_summary,
-    upsert_daily_coverage,
+from wp6_data.red.sijia.source import SIJIA
+from wp6_data.shared.manual_ingest.service import ApplyResult
+from wp6_data.shared.manual_ingest.service import (
+    ManualIngestService as _SharedManualIngestService,
 )
-from wp6_data.red.sijia.parser import SOURCE, ValidationReport, parse, validate
 from wp6_data.shared.upload_storage import UploadStorage
 
-logger = structlog.get_logger()
+__all__ = ["ApplyResult", "ManualIngestService"]
 
 
-@dataclass(frozen=True)
-class ApplyResult:
-    upload_id: int
-    row_count: int
+def _invalidate_red_caches() -> None:
+    """Drop RedSensorProvider's in-process caches after a Sijia apply.
+
+    Imported lazily to avoid a provider↔service import cycle.
+    """
+    from wp6_data.red.provider import invalidate_caches
+
+    invalidate_caches()
 
 
-class ManualIngestService:
-    SOURCE = SOURCE  # "sijia"
+class ManualIngestService(_SharedManualIngestService):
+    """The Sijia manual-ingest service (red twin).
 
-    def __init__(self, pool: AsyncConnectionPool, storage: UploadStorage) -> None:
-        self.pool = pool
-        self.storage = storage
+    Behaviour is identical to the pre-extraction service; only the plumbing
+    is shared. ``readings`` is keyed by red's ``source`` column.
+    """
 
-    async def validate(self, file_bytes: bytes) -> ValidationReport:
-        self.storage.write(self.SOURCE, file_bytes)
-        report = validate(file_bytes)
-        existing = await self._fetch_existing_facts()
-        new_devices = set(report.devices)
-        new_sensors = set(report.sensors)
-        return replace(
-            report,
-            existing_row_count=existing["row_count"],
-            existing_date_range=existing["date_range"],
-            devices_removed=tuple(sorted(existing["devices"] - new_devices)),
-            sensors_removed=tuple(sorted(existing["sensors"] - new_sensors)),
+    def __init__(
+        self, pool: AsyncConnectionPool, storage: UploadStorage,
+    ) -> None:
+        super().__init__(
+            pool=pool,
+            storage=storage,
+            source=SIJIA,
+            column="source",
+            post_apply_hook=_invalidate_red_caches,
         )
-
-    async def _fetch_existing_facts(self) -> dict:
-        """Query the TSDB for the comparison facts the preview page surfaces."""
-        async with self.pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-            await cur.execute(
-                "SELECT COUNT(*) AS n, MIN(time)::date AS min_d, MAX(time)::date AS max_d "
-                "FROM readings WHERE source = %s",
-                (self.SOURCE,),
-            )
-            counts = await cur.fetchone()
-            await cur.execute(
-                "SELECT DISTINCT device_name FROM readings WHERE source = %s",
-                (self.SOURCE,),
-            )
-            devices = {r["device_name"] for r in await cur.fetchall()}
-            await cur.execute(
-                "SELECT DISTINCT sensor_tag FROM readings WHERE source = %s",
-                (self.SOURCE,),
-            )
-            sensors = {r["sensor_tag"] for r in await cur.fetchall()}
-
-        date_range: tuple[date, date] | None = (
-            (counts["min_d"], counts["max_d"])
-            if counts["min_d"] is not None
-            else None
-        )
-        return {
-            "row_count": counts["n"],
-            "date_range": date_range,
-            "devices": devices,
-            "sensors": sensors,
-        }
-
-    async def apply(self, validation_id: str, filename: str) -> ApplyResult:
-        """Apply the file at validation_id, recording `filename` for provenance.
-
-        Pass the human-meaningful original filename (e.g. ``sijia_seed.xlsx``
-        from the CLI's path, or the ``UploadFile.filename`` from the web
-        form) — what's stored on disk is content-addressed by hash.
-        """
-        path = self.storage.base_dir / self.SOURCE / f"{validation_id}.xlsx"
-        file_bytes = self.storage.read(path)
-        readings = parse(file_bytes)
-
-        started = time.monotonic()
-        async with self.pool.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                await cur.execute(
-                    "DELETE FROM readings WHERE source = %s", (self.SOURCE,),
-                )
-                await cur.execute(
-                    "INSERT INTO manual_uploads "
-                    "(source, filename, file_hash, file_path, row_count) "
-                    "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                    (
-                        self.SOURCE,
-                        filename,
-                        validation_id,
-                        str(path),
-                        len(readings),
-                    ),
-                )
-                upload_id = (await cur.fetchone())["id"]
-
-                # Single multi-VALUES INSERT instead of executemany: psycopg3
-                # would otherwise issue one round-trip per row (368+ round-trips
-                # to TSDB exceeds the ingress timeout in prod).
-                if readings:
-                    placeholders = ", ".join(
-                        ["(%s, %s, %s, %s, %s, %s)"] * len(readings),
-                    )
-                    flat_params: list = []
-                    for r in readings:
-                        flat_params.extend([
-                            r.time, r.device_name, r.sensor_tag,
-                            r.value, r.source, upload_id,
-                        ])
-                    await cur.execute(
-                        "INSERT INTO readings "
-                        "(time, device_name, sensor_tag, value, source, upload_id) "
-                        f"VALUES {placeholders}",
-                        flat_params,
-                    )
-            await conn.commit()
-
-        await self._post_apply_bookkeeping(readings, started)
-        await self.storage.prune(self.SOURCE)
-        return ApplyResult(upload_id=upload_id, row_count=len(readings))
-
-    async def _post_apply_bookkeeping(self, readings, started: float) -> None:
-        """Refresh the cagg, upsert daily coverage, and audit the run.
-
-        These run after the ingest transaction commits; each is wrapped so a
-        bookkeeping failure cannot fail the upload itself (the data is
-        already durably stored).
-        """
-        coverage_records = [
-            {
-                "device_name": device,
-                "sensor_tag": sensor,
-                "day": day.isoformat(),
-            }
-            for device, sensor, day in {
-                (r.device_name, r.sensor_tag, r.time.date()) for r in readings
-            }
-        ]
-        max_time = max((r.time for r in readings), default=None)
-        duration_sec = time.monotonic() - started
-
-        try:
-            async with self.pool.connection() as conn:
-                await upsert_daily_coverage(conn, coverage_records)
-                await record_sync_run(
-                    conn,
-                    self.SOURCE,
-                    success=True,
-                    duration_sec=duration_sec,
-                    records=len(readings),
-                    last_timestamp=max_time,
-                )
-                await conn.commit()
-        except Exception:
-            logger.exception("sijia_bookkeeping_failed")
-
-        try:
-            await refresh_sensor_summary(self.pool)
-        except Exception:
-            logger.exception("sijia_cagg_refresh_failed")
-
-        # In-process caches in RedSensorProvider point at the cagg + MySQL
-        # coverage; both must be dropped so the next home/status request
-        # sees the just-written rows instead of pre-upload stale data.
-        from wp6_data.red.provider import invalidate_caches
-
-        invalidate_caches()
