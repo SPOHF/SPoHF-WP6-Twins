@@ -37,3 +37,9 @@ exports-blue/
 # Pesky temp microsoft files
 ~$*.docx
 uploads-red/
+uploads-blue/
+
+# Temporary manual-upload source files. Real data is passed to the ingest
+# CLI at runtime and never committed; only the small synthetic fixture in
+# tests/fixtures/ is tracked.
+/insect_data.csv
