@@ -1,36 +1,46 @@
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Annotated
 
-import pandas as pd
-import plotly.graph_objects as go
-from fastapi import APIRouter
+import pandas as pd  # type: ignore[import-untyped]
+import plotly.graph_objects as go  # type: ignore[import-untyped]
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
+
+from wp6_data.shared import render_card, render_page
+from wp6_data.shared.routes.deps import get_provider, get_twin_config
+from wp6_data.shared.twin import SensorDataProvider, TwinConfig
 
 from .. import deps
 from ..utils import (
     GREENHOUSE_TZ,
+    PAR_COLORSCALE,
     SENSOR_TO_DEVICE,
     svg_rect_to_plotly_rect,
     svg_to_data_uri,
     value_to_color,
 )
 
-SVG_PATH = Path(__file__).parent.parent / "static/par_profile.svg"
+SVG_BACKGROUND_PATH = Path(__file__).parent.parent / "static/greenhouse.svg"
+SVG_LAYOUT_PATH = Path(__file__).parent.parent / "static/multi_height.svg"
 USE_LATEST_DATE_IN_DATA = False
 
 router = APIRouter()
 
-@router.get("/par-profile", response_class=HTMLResponse)
-async def par_profile_page():
+@router.get("/multi_height", response_class=HTMLResponse)
+async def multi_height_page(
+    config: Annotated[TwinConfig, Depends(get_twin_config)],
+    provider: Annotated[SensorDataProvider, Depends(get_provider)]
+    ):
     df = await load_par_data()
 
     df_today, target_day = filter_today(df)
     metrics = compute_sensor_metrics(df_today)
 
-    canvas_w, canvas_h, sensor_boxes, sensor_bands = parse_svg(SVG_PATH)
+    canvas_w, canvas_h, sensor_boxes, sensor_bands = parse_svg(SVG_LAYOUT_PATH)
 
-    fig = make_par_greenhouse_plot(
+    fig = make_mh_greenhouse_plot(
         metrics,
         canvas_w,
         canvas_h,
@@ -39,7 +49,50 @@ async def par_profile_page():
         target_day,
     )
 
-    return HTMLResponse(fig.to_html(include_plotlyjs="cdn"))
+    plot_html = fig.to_html(
+        include_plotlyjs="cdn",
+        full_html=False,
+        config={
+            "responsive": True,
+            "displaylogo": False,
+            "modeBarButtonsToRemove": [
+                "select2d",
+                "lasso2d",
+            ],
+        },
+    )
+
+    plot_container = f"""
+    <div style=
+        "background: #ffffff; 
+        color: #111111; 
+        padding: 16px; 
+        border-radius: 12px;
+    ">
+        {plot_html}
+    </div>
+    """
+
+    content = f"""
+    <a href="/" class="back-link">← Home</a>
+    <h1>Multi Height Profile</h1>
+
+    {render_card(
+        " ",
+        plot_container,
+        description=(
+            "Latest PAR values are shown inside the sensor boxes. "
+            "Daily Light Integral (DLI) is shown as horizontal bands."
+        ),
+        card_class="card",
+    )}
+    """
+
+    return render_page(
+        config.title,
+        content,
+        data_source=provider.data_source_label,
+    )
 
 ### Parse SVG ###
 def parse_viewbox(svg_path: Path):
@@ -169,7 +222,7 @@ def compute_sensor_metrics(df_day):
 
 
 ### Plot ###
-def make_par_greenhouse_plot(
+def make_mh_greenhouse_plot(
     metrics,
     canvas_w,
     canvas_h,
@@ -191,7 +244,7 @@ def make_par_greenhouse_plot(
     # background
     fig.add_layout_image(
         dict(
-            source=svg_to_data_uri(SVG_PATH),
+            source=svg_to_data_uri(SVG_BACKGROUND_PATH),
             xref="x",
             yref="y",
             x=0,
@@ -241,12 +294,59 @@ def make_par_greenhouse_plot(
                 y=(y0 + y1) / 2,
                 text=label,
                 showarrow=False,
+                font=dict(size=11, color="#111111"),
+                xanchor="center",
+                yanchor="middle",
             )
 
+    fig.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="markers",
+            marker=dict(
+                color=[latest_min, latest_max],
+                colorscale=PAR_COLORSCALE,
+                cmin=latest_min,
+                cmax=latest_max,
+                showscale=True,
+                colorbar=dict(
+                    title=dict(
+                        text="PAR",
+                        font=dict(color="#111111"),
+                    ),
+                    tickfont=dict(color="#111111"),
+                    bgcolor="white",
+                )
+            ),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    
     fig.update_layout(
-        title=f"PAR profile — {target_day.date()}",
+        template="plotly_white",
+        title=dict(
+            text=f"{target_day.date()}",
+            font=dict(color="#111111"),
+        ),
+
         width=850,
         height=760,
+
+        margin=dict(l=20, r=20, t=60, b=20),
+
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+
+        font=dict(
+            color="#111111",
+        ),
+
+        hoverlabel=dict(
+            bgcolor="white",
+            font_color="#111111",
+        )
     )
 
     fig.update_xaxes(range=[0, canvas_w], visible=False)

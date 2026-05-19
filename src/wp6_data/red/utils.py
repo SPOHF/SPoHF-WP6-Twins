@@ -1,9 +1,9 @@
 import base64
+import pathlib
 import re
-from pathlib import Path
 
-import pandas as pd
-from plotly.colors import sample_colorscale
+import pandas as pd  # type: ignore[import-untyped]
+from plotly.colors import sample_colorscale  # type: ignore[import-untyped]
 
 GREENHOUSE_TZ = "Europe/Berlin"
 
@@ -26,7 +26,7 @@ SENSOR_TO_DEVICE = {
 }
 
 
-def svg_to_data_uri(path: Path) -> str:
+def svg_to_data_uri(path: pathlib.Path) -> str:
     encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
     return f"data:image/svg+xml;base64,{encoded}"
 
@@ -46,10 +46,7 @@ def value_to_color(value, vmin, vmax, colorscale=PAR_COLORSCALE, alpha=None):
     if value is None or pd.isna(value):
         return "rgba(180,180,180,0.45)"
 
-    if vmax <= vmin:
-        t = 0.5
-    else:
-        t = max(0, min(1, (value - vmin) / (vmax - vmin)))
+    t = 0.5 if vmax <= vmin else max(0, min(1, (value - vmin) / (vmax - vmin)))
 
     color = sample_colorscale(colorscale, [t])[0]
 

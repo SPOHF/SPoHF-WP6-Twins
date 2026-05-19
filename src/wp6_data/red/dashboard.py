@@ -7,14 +7,12 @@ import structlog
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.provider import RedSensorProvider
-from wp6_data.red.routes import browse, dli, dli_model
+from wp6_data.red.routes import browse, dli, dli_model, multi_height
 from wp6_data.red.routes import charts as red_charts
 from wp6_data.red.routes.dli_model.train import train_model_from_db
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
 from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
-
-from wp6_data.red.routes import par_profile as par_profile_routes
 
 log = structlog.get_logger()
 
@@ -79,7 +77,7 @@ config = TwinConfig(
         accent="#f97316", surface_rgb="220, 38, 38",
     ),
     extra_routers=[browse.router, dli.router, dli_model.router, red_charts.router, \
-                   par_profile_routes.router],
+                   multi_height.router],
     hero_cards=[_dli_card],
     home_extra_html=(
         '<a href="/static/red/sensor_locations.docx" download role="button"'
