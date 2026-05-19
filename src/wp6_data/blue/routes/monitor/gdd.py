@@ -14,10 +14,10 @@ from wp6_data.blue.gdd import (
     cumulative_gdd_from_biofix,
     gdd_from_forecasts,
 )
-from wp6_data.red.dli.weather import OpenMeteoClient
 from wp6_data.shared import render_card, render_page
 from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.twin import SensorDataProvider
+from wp6_data.shared.weather import OpenMeteoClient
 
 log = structlog.get_logger()
 

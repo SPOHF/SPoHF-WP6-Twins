@@ -1,4 +1,9 @@
-"""OpenMeteo API client for solar radiation forecasts and historical data."""
+"""OpenMeteo API client for solar radiation forecasts and historical data.
+
+Twin-agnostic: the client takes latitude/longitude per instance, so both
+red (DLI / solar radiation) and blue (GDD / temperature) use it. It lives in
+``shared`` rather than ``red`` so blue does not functionally depend on red.
+"""
 
 import os
 from dataclasses import dataclass
@@ -7,7 +12,10 @@ from datetime import UTC, date, datetime
 import httpx
 import pandas as pd
 
-# Default location (greenhouse coordinates)
+# Default location: the red greenhouse coordinates. Callers needing a
+# different site (e.g. blue's farm) pass latitude/longitude to OpenMeteoClient.
+# Env var names keep the WP6_RED_ prefix for deployment compatibility — they
+# are the default override knob, not a red-only coupling.
 DEFAULT_LAT = float(os.getenv("WP6_RED_WEATHER_LAT", "51.033056"))
 DEFAULT_LON = float(os.getenv("WP6_RED_WEATHER_LON", "6.613721"))
 

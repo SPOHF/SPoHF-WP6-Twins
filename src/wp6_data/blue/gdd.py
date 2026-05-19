@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 if TYPE_CHECKING:
-    from wp6_data.red.dli.weather import DailyForecast
+    from wp6_data.shared.weather import DailyForecast
 
 DEFAULT_BASE_TEMP = 5.0  # °C, European convention; biofix = Jan 1
 DEFAULT_CHILL_THRESHOLD = 7.2  # °C — hours below this count as chill hours
