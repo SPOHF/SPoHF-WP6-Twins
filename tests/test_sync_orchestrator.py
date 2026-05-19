@@ -319,7 +319,7 @@ class TestRun:
                 return_value=mock_pool,
             ) as mock_init,
             patch(
-                "wp6_data.sync.orchestrator.ensure_schema",
+                "wp6_data.sync.orchestrator.ensure_schema_blue",
                 new_callable=AsyncMock,
             ),
             patch(
@@ -363,7 +363,7 @@ class TestRun:
                 return_value=AsyncMock(),
             ),
             patch(
-                "wp6_data.sync.orchestrator.ensure_schema",
+                "wp6_data.sync.orchestrator.ensure_schema_blue",
                 new_callable=AsyncMock,
             ),
             patch(
@@ -403,7 +403,7 @@ class TestRun:
                 return_value=AsyncMock(),
             ),
             patch(
-                "wp6_data.sync.orchestrator.ensure_schema",
+                "wp6_data.sync.orchestrator.ensure_schema_blue",
                 new_callable=AsyncMock,
             ),
             patch(

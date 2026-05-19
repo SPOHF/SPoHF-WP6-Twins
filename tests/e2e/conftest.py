@@ -13,7 +13,7 @@ import psycopg  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from psycopg_pool import AsyncConnectionPool  # noqa: E402
 
-from wp6_data.db.schema import ensure_schema  # noqa: E402
+from wp6_data.blue.tsdb import ensure_schema_blue  # noqa: E402
 
 TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
 RED_TSDB_DSN = "postgresql://wp6_red:wp6dev@localhost:5433/wp6_red"
@@ -30,7 +30,7 @@ async def _bootstrap_blue_schema():
     pool = AsyncConnectionPool(TSDB_DSN, min_size=1, max_size=1, open=False)
     await pool.open()
     try:
-        await ensure_schema(pool)
+        await ensure_schema_blue(pool)
         yield
     finally:
         await pool.close()

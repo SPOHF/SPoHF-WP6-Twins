@@ -54,7 +54,7 @@ from wp6_data.red.dli.schedule import (
     prepare_daily_dli_summary,
     try_infer_lamp_from_day,
 )
-from wp6_data.red.dli.weather import OpenMeteoClient
+from wp6_data.shared.weather import OpenMeteoClient
 
 __all__ = [
     # Constants
