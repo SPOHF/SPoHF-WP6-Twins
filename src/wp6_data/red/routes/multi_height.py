@@ -1,3 +1,4 @@
+import html
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -63,14 +64,16 @@ async def multi_height_page(
     )
 
     plot_container = f"""
-    <div style=
-        "background: #ffffff; 
-        color: #111111; 
-        padding: 16px; 
-        border-radius: 12px;
-    ">
-        {plot_html}
-    </div>
+    <iframe
+        srcdoc="{html.escape(plot_html, quote=True)}"
+        style="
+            width: 100%;
+            height: 820px;
+            border: 0;
+            background: white;
+            border-radius: 12px;
+        "
+    ></iframe>
     """
 
     content = f"""
@@ -232,6 +235,18 @@ def make_mh_greenhouse_plot(
 ):
     fig = go.Figure()
 
+    # fix background
+    fig.add_shape(
+        type="rect",
+        x0=0,
+        x1=canvas_w,
+        y0=0,
+        y1=canvas_h,
+        fillcolor="#ffffff",
+        line=dict(width=0),
+        layer="below",
+    )
+
     latest_vals = metrics["latest_par"].dropna()
     dli_vals = metrics["dli_today"].dropna()
 
@@ -251,6 +266,7 @@ def make_mh_greenhouse_plot(
             y=canvas_h,
             sizex=canvas_w,
             sizey=canvas_h,
+            sizing="stretch", #bg fix
             layer="below",
         )
     )
@@ -284,7 +300,7 @@ def make_mh_greenhouse_plot(
                 y0=y0,
                 y1=y1,
                 fillcolor=value_to_color(row["latest_par"], latest_min, latest_max, alpha=0.9),
-                line=dict(color="black"),
+                line=dict(color="#111111", width=1.5),
             )
 
             label = "—" if pd.isna(row["latest_par"]) else f"{row['latest_par']:.0f}"
