@@ -11,10 +11,10 @@ import structlog
 from tenacity import RetryError
 
 from wp6_data.api import SensorReading, SpoHFClient
+from wp6_data.blue.tsdb import ensure_schema_blue
 from wp6_data.config import Settings
 from wp6_data.db import (
     close_pool,
-    ensure_schema,
     get_pool,
     init_pool,
     refresh_sensor_summary,
@@ -113,7 +113,7 @@ class SyncOrchestrator:
 
         pool = await init_pool(self._dsn)
         try:
-            await ensure_schema(pool)
+            await ensure_schema_blue(pool)
 
             # Sync each configured endpoint
             for endpoint in self.settings.endpoint_list:

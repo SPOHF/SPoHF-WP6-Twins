@@ -9,9 +9,9 @@ import pandas as pd
 import structlog
 from dotenv import load_dotenv
 
+from wp6_data.blue.tsdb import ensure_schema_blue
 from wp6_data.config import Settings
 from wp6_data.db import close_pool, get_pool, init_pool
-from wp6_data.db.schema import ensure_schema
 from wp6_data.shared.export import clear_export_dir
 
 log = structlog.get_logger()
@@ -95,7 +95,7 @@ async def run_export() -> None:
     # Initialise DB pool
     await init_pool(settings.tsdb_url)
     pool = get_pool()
-    await ensure_schema(pool)
+    await ensure_schema_blue(pool)
 
     try:
         devices = await get_device_names()

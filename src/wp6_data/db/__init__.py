@@ -14,12 +14,11 @@ from wp6_data.db.queries import (
     upsert_daily_coverage,
     upsert_readings,
 )
-from wp6_data.db.schema import ensure_aggregates, ensure_schema
+from wp6_data.db.schema import ensure_aggregates
 
 __all__ = [
     "close_pool",
     "ensure_aggregates",
-    "ensure_schema",
     "get_pool",
     "init_pool",
     "rebuild_daily_coverage",

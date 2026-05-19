@@ -10,10 +10,10 @@ from typing import Any
 
 import structlog
 
+from wp6_data.blue.tsdb import ensure_schema_blue
 from wp6_data.config import Settings
 from wp6_data.db import (
     close_pool,
-    ensure_schema,
     get_pool,
     init_pool,
     refresh_sensor_summary,
@@ -74,7 +74,7 @@ class YookrSyncOrchestrator:
 
         pool = await init_pool(self._dsn)
         try:
-            await ensure_schema(pool)
+            await ensure_schema_blue(pool)
 
             async with pool.connection() as conn:
                 state = SyncStateManager(conn, ENDPOINT_NAME)

@@ -36,10 +36,10 @@ EXPORT_DIR = Path(Settings().blue_export_dir)
 
 async def init_db(dsn: str) -> None:
     """Initialise the connection pool (call on app startup)."""
-    from wp6_data.db.schema import ensure_schema
+    from wp6_data.blue.tsdb import ensure_schema_blue
 
     pool = await init_pool(dsn)
-    await ensure_schema(pool)
+    await ensure_schema_blue(pool)
 
 
 async def close_db() -> None:
