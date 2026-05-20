@@ -1582,7 +1582,7 @@ UNIFIED_CHART_JS = """
     // Initialize empty Plotly chart
     var layout = {
         template: 'plotly_white',
-        hovermode: chartType === 'bar_h' ? 'y unified' : 'x unified',
+        hovermode: 'x unified',
         height: 600,
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
@@ -1595,13 +1595,7 @@ UNIFIED_CHART_JS = """
     // line mode → hide the whole section; bar mode → hide the Line button only
     (function restrictChartTypeUI() {
         var section = document.getElementById('chart-type-section');
-        if (!section) return;
-        if (chartType === 'line') {
-            section.style.display = 'none';
-        } else {
-            var lineBtn = section.querySelector('.ct-btn[data-ct="line"]');
-            if (lineBtn) lineBtn.style.display = 'none';
-        }
+        if (section) section.style.display = 'none';
     }());
 
     // Toggle panel
@@ -2133,14 +2127,13 @@ UNIFIED_CHART_JS = """
                         };
                         if (axis === 'right') { trace.line.dash = 'dash'; }
                     } else {
-                        var isH = chartType === 'bar_h';
                         trace = {
                             type: 'bar',
-                            x: isH ? sd.values : sd.times,
-                            y: isH ? sd.times : sd.values,
+                            x: sd.times,
+                            y: sd.values,
                             name: sensorLabel(k, axis),
                             yaxis: axis === 'right' ? 'y2' : 'y',
-                            orientation: isH ? 'h' : 'v',
+                            orientation: 'v',
                             marker: {color: color}
                         };
                     }
@@ -2203,14 +2196,13 @@ UNIFIED_CHART_JS = """
                     };
                     if (axis === 'right') { trace.line.dash = 'dash'; }
                 } else {
-                    var isH2 = chartType === 'bar_h';
                     trace = {
                         type: 'bar',
-                        x: isH2 ? merged.values : merged.times,
-                        y: isH2 ? merged.times : merged.values,
+                        x: merged.times,
+                        y: merged.values,
                         name: g.label + suffix,
                         yaxis: axis === 'right' ? 'y2' : 'y',
-                        orientation: isH2 ? 'h' : 'v',
+                        orientation: 'v',
                         marker: {color: color}
                     };
                 }
@@ -2225,7 +2217,7 @@ UNIFIED_CHART_JS = """
         // re-infers them from the new trace data (prevents date-type axis
         // being reused when switching between vertical and horizontal bars).
         Plotly.relayout(chartDiv, {
-            hovermode: chartType === 'bar_h' ? 'y unified' : 'x unified',
+            hovermode: 'x unified',
             barmode: chartType !== 'line' ? 'group' : null,
             'xaxis.type': '-',
             'yaxis.type': '-',
@@ -2731,7 +2723,6 @@ DASHBOARD_JS = """
 
         Promise.all(promises).then(function(results) {
             var ct = chart.ct || 'line';
-            var isH = ct === 'bar_h';
             var traces = results.map(function(r) {
                 var xs = r.data.map(function(d) { return d.time; });
                 var ys = r.data.map(function(d) { return d.value; });
@@ -2747,10 +2738,10 @@ DASHBOARD_JS = """
                 } else {
                     trace = {
                         type: 'bar',
-                        x: isH ? ys : xs,
-                        y: isH ? xs : ys,
+                        x: xs,
+                        y: ys,
                         name: r.key,
-                        orientation: isH ? 'h' : 'v',
+                        orientation: 'v',
                         yaxis: r.axis === 'right' ? 'y2' : 'y'
                     };
                 }
@@ -3000,7 +2991,6 @@ def render_nav_bar(*, data_source: str | None = None) -> str:
         '<a href="/">Home</a>'
         '<a href="/dashboard">Dashboard</a>'
         '<a href="/chart">Chart</a>'
-        '<a href="/correlate">Correlate</a>'
         "</div>",
     ]
     if source_html:
@@ -3133,7 +3123,6 @@ to {end.isoformat()}</summary>
                 <div class="group-toggle">
                     <button class="ct-btn active" data-ct="line">Line</button>
                     <button class="ct-btn" data-ct="bar_v">Bar ↕</button>
-                    <button class="ct-btn" data-ct="bar_h">Bar ↔</button>
                 </div>
             </div>
             <h4>Sensors <a href="#" id="clear-all"
