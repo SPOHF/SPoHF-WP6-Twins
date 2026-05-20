@@ -38,5 +38,5 @@ exports-blue/
 ~$*.docx
 
 # Experiments with dashboards
-dev/data/
+dev/
 .ipynb_checkpoints/
