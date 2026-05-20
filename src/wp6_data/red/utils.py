@@ -5,8 +5,6 @@ import re
 import pandas as pd  # type: ignore[import-untyped]
 from plotly.colors import sample_colorscale  # type: ignore[import-untyped]
 
-GREENHOUSE_TZ = "Europe/Berlin"
-
 PAR_COLORSCALE = [
     [0.00, "#fff7bc"],
     [0.25, "#fee391"],
@@ -16,8 +14,6 @@ PAR_COLORSCALE = [
 ]
 
 SENSOR_TO_DEVICE = {
-    "s_01": "s2100:s2100-01-par",
-    "s_02": "s2100:s2100-02-par",
     "s_10": "s2100:s2100-10-par",
     "s_11": "s2100:s2100-11-par",
     "s_12": "s2100:s2100-12-par",

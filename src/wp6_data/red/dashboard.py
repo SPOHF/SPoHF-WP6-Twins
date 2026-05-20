@@ -73,7 +73,6 @@ def _multi_height_card() -> str:
         '<a href="/multi_height" role="button">Multi Height Dashboard</a>',
         description="Visual overview of sensor data at multiple heights.",
         card_class="card-bg card-bg-green",
-
     )
 
 
@@ -93,8 +92,12 @@ config = TwinConfig(
         accent="#f97316", surface_rgb="220, 38, 38",
     ),
 
-    extra_routers=[browse.router, dli.router, dli_model.router, red_charts.router, \
-                   multi_height.router, sijia.router],
+    extra_routers=[browse.router, 
+                   dli.router, 
+                   dli_model.router, 
+                   red_charts.router,
+                   multi_height.router, 
+                   sijia.router],
     hero_cards=[_dli_card, _multi_height_card],
     status_extras=[render_sijia_card],
 

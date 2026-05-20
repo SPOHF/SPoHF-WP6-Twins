@@ -10,12 +10,12 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
 from wp6_data.shared import render_card, render_page
+from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.routes.deps import get_provider, get_twin_config
 from wp6_data.shared.twin import SensorDataProvider, TwinConfig
 
 from .. import deps
 from ..utils import (
-    GREENHOUSE_TZ,
     PAR_COLORSCALE,
     SENSOR_TO_DEVICE,
     svg_rect_to_plotly_rect,
@@ -27,7 +27,7 @@ SVG_BACKGROUND_PATH = Path(__file__).parent.parent / "static/greenhouse.svg"
 SVG_LAYOUT_PATH = Path(__file__).parent.parent / "static/multi_height.svg"
 USE_LATEST_DATE_IN_DATA = False
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 @router.get("/multi_height", response_class=HTMLResponse)
 async def multi_height_page(
@@ -36,7 +36,7 @@ async def multi_height_page(
     ):
     df = await load_par_data()
 
-    df_today, target_day = filter_today(df)
+    df_today, target_day = filter_today(df, deps.base_settings.display_timezone)
     metrics = compute_sensor_metrics(df_today)
 
     canvas_w, canvas_h, sensor_boxes, sensor_bands = parse_svg(SVG_LAYOUT_PATH)
@@ -160,14 +160,14 @@ async def load_par_data():
 
 
 ### Filter today data ###
-def filter_today(df, use_latest_date_in_data=USE_LATEST_DATE_IN_DATA):
+def filter_today(df, timezone, use_latest_date_in_data=USE_LATEST_DATE_IN_DATA):
     df_local = df.copy()
-    df_local["time_local"] = df_local["time"].dt.tz_convert(GREENHOUSE_TZ)
+    df_local["time_local"] = df_local["time"].dt.tz_convert(timezone)
 
     if use_latest_date_in_data:
         target_day = df_local["time_local"].max().normalize()
     else:
-        target_day = pd.Timestamp.now(tz=GREENHOUSE_TZ).normalize()
+        target_day = pd.Timestamp.now(tz=timezone).normalize()
 
     next_day = target_day + pd.Timedelta(days=1)
 
