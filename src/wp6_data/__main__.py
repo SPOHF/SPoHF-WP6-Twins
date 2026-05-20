@@ -9,7 +9,6 @@ Usage:
     uv run python -m wp6_data --spohf      # run only SPoHF sync
 """
 
-import asyncio
 import logging
 import sys
 from typing import Any
@@ -17,6 +16,7 @@ from typing import Any
 import structlog
 
 from wp6_data.config import Settings
+from wp6_data.shared.compat import run_async
 from wp6_data.sync import SyncOrchestrator
 
 
@@ -55,7 +55,7 @@ def _run_spohf_sync(settings: Settings, logger: Any) -> int:
         sync_mode=settings.sync_mode,
     )
     orchestrator = SyncOrchestrator(settings)
-    stats = asyncio.run(orchestrator.run())
+    stats = run_async(orchestrator.run())
 
     if stats["errors"]:
         logger.warning("spohf_sync_completed_with_errors", errors=stats["errors"])
@@ -79,7 +79,7 @@ def _run_yookr_sync(settings: Settings, logger: Any) -> int:
         sync_mode=settings.sync_mode,
     )
     orchestrator = YookrSyncOrchestrator(settings)
-    stats = asyncio.run(orchestrator.run())
+    stats = run_async(orchestrator.run())
 
     if stats["errors"]:
         logger.error("yookr_sync_failed", errors=stats["errors"])

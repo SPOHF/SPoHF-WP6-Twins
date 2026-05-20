@@ -1,32 +1,75 @@
-"""Red sensor data provider — satisfies SensorDataProvider protocol.
+"""Red sensor data provider — federated over MySQL and red TimescaleDB.
 
-Thin wrapper around MySQLConnection, normalising the multi-table schema
-into the unified (device, sensor, time, value) shape.  Red-specific
-methods (get_par_readings, get_weather_station_readings) stay on
-MySQLConnection and are accessed directly by DLI routes.
+Routes per-sensor based on the `source` field on `sensor_defaults` entries
+in the red MetadataRegistry. Sensors with no source go to MySQL (the
+legacy LoRaWAN tables); sensors with a source go to TimescaleDB (manual
+uploads + future letsgrow sync). The routing map is built once at init.
+Federation is transparent — public protocol surface is unchanged.
+
+TSDB-side counts/last-seen come from the `sensors_daily_summary` continuous
+aggregate (see `wp6_data.db.schema`). Status sync rows come from
+`sync_metadata`. Daily coverage rows for TSDB devices come from the
+`daily_coverage` table; the MySQL leg still scans `SENSOR_TABLES` directly.
+
+Red-specific methods (get_par_readings, get_weather_station_readings)
+stay on MySQLConnection and are accessed directly by DLI routes.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from cachetools import TTLCache
 
+from wp6_data.shared.aggregation import bucket_and_aggregate
+from wp6_data.shared.sensor_summary import get_sensor_summary
+from wp6_data.shared.time import display_tz
+
 # Coverage only changes once per day — cache for 1 hour
 _coverage_cache: TTLCache[str, list[dict[str, Any]]] = TTLCache(maxsize=4, ttl=3600)
 
+# Cache key for the per-sensor cagg readout (shared TTLCache, 5min)
+_CAGG_CACHE_KEY = "red:tsdb-cagg"
+
 if TYPE_CHECKING:
     from wp6_data.red.db import MySQLConnection
+    from wp6_data.shared.metadata import MetadataRegistry
+
+
+async def _fetch_cagg_summary() -> list[dict[str, Any]]:
+    """Cached read of the cagg, per (device, sensor)."""
+    from wp6_data.red.tsdb import fetch_sensors_from_cagg
+
+    return await get_sensor_summary(_CAGG_CACHE_KEY, fetch_sensors_from_cagg)
+
+
+def invalidate_caches() -> None:
+    """Drop in-process caches that point at red TSDB.
+
+    Call this from write paths in the same process (e.g. Sijia ingest) so the
+    next dashboard request reflects the freshly-written rows. Cross-process
+    writers don't need this — their caches are naturally cold on next read.
+    """
+    from wp6_data.shared.sensor_summary import invalidate
+
+    invalidate(_CAGG_CACHE_KEY)
+    _coverage_cache.clear()
 
 
 class RedSensorProvider:
-    """SensorDataProvider backed by MySQL with per-table sensor schema.
+    """Federated SensorDataProvider over MySQL and red TimescaleDB.
 
     Lazily references deps.db so the provider can be created before
-    the database connection is established at startup.
+    the MySQL connection is established at startup.
     """
+
+    def __init__(self, metadata: MetadataRegistry) -> None:
+        self._metadata = metadata
+        self.tsdb_sensors: frozenset[str] = frozenset(
+            tag for tag, meta in metadata.sensor_defaults.items() if meta.source
+        )
 
     @property
     def db(self) -> MySQLConnection:
@@ -42,10 +85,12 @@ class RedSensorProvider:
         return None
 
     async def fetch_sync_metrics(self) -> list[dict[str, Any]]:
-        return []
+        from wp6_data.red.tsdb import fetch_sync_metrics_tsdb
+
+        return await fetch_sync_metrics_tsdb()
 
     async def fetch_daily_coverage(self) -> list[dict[str, Any]]:
-        """Derive daily coverage from MySQL sensor tables (cached 1 hour)."""
+        """Derive daily coverage from MySQL sensor tables + TSDB coverage table."""
         key = "red:coverage"
         if key in _coverage_cache:
             return _coverage_cache[key]
@@ -54,8 +99,9 @@ class RedSensorProvider:
         return result
 
     async def _fetch_daily_coverage(self) -> list[dict[str, Any]]:
-        """Query MySQL for distinct (device, day) per sensor table."""
+        """Distinct (device, sensor, day) triples — MySQL + TSDB merged."""
         from wp6_data.red.db import SENSOR_TABLES
+        from wp6_data.red.tsdb import fetch_daily_coverage_from_table
 
         records: list[dict[str, Any]] = []
         async with self.db.pool.acquire() as conn, conn.cursor() as cursor:
@@ -75,7 +121,40 @@ class RedSensorProvider:
                             "sensor": sensor,
                             "day": day,
                         })
+
+        records.extend(await fetch_daily_coverage_from_table())
         return records
+
+    def _split_by_route(
+        self, sensor_tags: list[str] | None,
+    ) -> tuple[list[str], list[str]]:
+        """Partition sensor_tags into (mysql_tags, tsdb_tags)."""
+        if not sensor_tags:
+            return [], []
+        mysql_tags = [t for t in sensor_tags if t not in self.tsdb_sensors]
+        tsdb_tags = [t for t in sensor_tags if t in self.tsdb_sensors]
+        return mysql_tags, tsdb_tags
+
+    async def _fetch_mysql(
+        self,
+        sensor_tags: list[str],
+        device_names: list[str] | None,
+        start: datetime | None,
+        end: datetime | None,
+        limit: int,
+    ) -> pd.DataFrame:
+        """MySQL leg of fetch_data — preserves the existing shape contract."""
+        device = device_names[0] if device_names else None
+        sensor = sensor_tags[0] if sensor_tags else None
+        if device and sensor:
+            return await self.db.get_readings_for_comparison(
+                device, sensor, start=start, end=end, limit=limit,
+            )
+        if sensor:
+            return await self.db.get_readings_by_measurement(
+                sensor, start=start, end=end, limit_per_table=limit,
+            )
+        return pd.DataFrame(columns=["device", "sensor", "time", "value"])
 
     async def fetch_data(
         self,
@@ -84,36 +163,82 @@ class RedSensorProvider:
         start: datetime | None = None,
         end: datetime | None = None,
         limit: int = 500_000,
+        *,
+        bucket: timedelta | None = None,
+        agg: str | None = None,
     ) -> pd.DataFrame:
-        """Fetch readings for a single device+sensor combo.
+        """Fetch readings, dispatching per-sensor between MySQL and TSDB.
 
-        The shared API route calls this with exactly one device and one sensor,
-        which maps to MySQLConnection.get_readings_for_comparison().
+        The TSDB leg buckets server-side; the legacy MySQL leg has no
+        ``time_bucket``, so it fetches raw and is folded into the same
+        bucketed contract by the shared pandas fallback. A sensor routes to
+        exactly one leg, so the legs never produce overlapping buckets.
         """
-        device = device_names[0] if device_names else None
-        sensor = sensor_tags[0] if sensor_tags else None
+        from wp6_data.red.tsdb import fetch_data_tsdb
 
-        if device and sensor:
-            return await self.db.get_readings_for_comparison(
-                device, sensor, start=start, end=end, limit=limit,
+        bucketed = bucket is not None and agg is not None
+        mysql_tags, tsdb_tags = self._split_by_route(sensor_tags)
+        frames: list[pd.DataFrame] = []
+        if mysql_tags:
+            mysql_df = await self._fetch_mysql(
+                mysql_tags, device_names, start, end, limit,
             )
+            if bucketed:
+                mysql_df = bucket_and_aggregate(
+                    mysql_df, bucket, agg, display_tz(),
+                )
+            frames.append(mysql_df)
+        if tsdb_tags:
+            frames.append(await fetch_data_tsdb(
+                sensor_tags=tsdb_tags,
+                device_names=device_names,
+                start=start, end=end, limit=limit,
+                bucket=bucket, agg=agg,
+            ))
+        if not frames:
+            return pd.DataFrame(columns=["device", "sensor", "time", "value"])
+        if len(frames) == 1:
+            return frames[0]
+        merged = pd.concat(frames, ignore_index=True)
+        if not merged.empty:
+            merged = merged.sort_values("time").reset_index(drop=True)
+        return merged
 
-        # Fallback: if only sensor given, use cross-table measurement query
-        if sensor:
-            return await self.db.get_readings_by_measurement(
-                sensor, start=start, end=end, limit_per_table=limit,
-            )
+    def _tsdb_devices_by_source(self) -> dict[str, list[str]]:
+        """Group TSDB-routed devices by their `source` value.
 
-        return pd.DataFrame(columns=["device", "sensor", "time", "value"])
+        Maps source → [device_id, ...]. Only devices with a non-empty
+        `source` are TSDB-backed; the rest are MySQL.
+        """
+        grouped: dict[str, list[str]] = {}
+        for device_id, dev in self._metadata.devices.items():
+            if dev.source:
+                grouped.setdefault(dev.source, []).append(device_id)
+        return grouped
+
+    def _enumerate_tsdb_sensors(self) -> list[tuple[str, str]]:
+        """List (device, sensor) pairs declared in metadata for TSDB sources."""
+        sensors_by_source: dict[str, list[str]] = {}
+        for tag, meta in self._metadata.sensor_defaults.items():
+            if meta.source:
+                sensors_by_source.setdefault(meta.source, []).append(tag)
+
+        pairs: list[tuple[str, str]] = []
+        for source, devices in self._tsdb_devices_by_source().items():
+            for device in devices:
+                for sensor in sensors_by_source.get(source, []):
+                    pairs.append((device, sensor))
+        return pairs
 
     async def fetch_available_sensors(self) -> list[dict[str, Any]]:
-        """Normalise red's device-centric model to [{device, sensor, readings}].
+        """Flat [{device, sensor, readings}, ...] across both backends.
 
-        Red's get_all_devices() returns {device_id: {tables, measurements, readings}}.
-        We flatten into the blue-style flat list.
+        - MySQL: derived from get_all_devices() (existing behaviour).
+        - TSDB: cagg-backed counts per (device, sensor); rows are emitted
+          for every metadata-declared pair, with a count of 0 when the cagg
+          has no data yet so the sensor still shows up on the home page.
         """
         all_devices = await self.db.get_all_devices()
-
         result: list[dict[str, Any]] = []
         for device_id, info in sorted(all_devices.items()):
             for measurement in sorted(info["measurements"]):
@@ -122,16 +247,60 @@ class RedSensorProvider:
                     "sensor": measurement,
                     "readings": info["readings"],
                 })
+
+        cagg_rows = await _fetch_cagg_summary()
+        cagg_lookup: dict[tuple[str, str], int] = {
+            (r["device"], r["sensor"]): int(r["readings"] or 0)
+            for r in cagg_rows
+        }
+        for device, sensor in self._enumerate_tsdb_sensors():
+            result.append({
+                "device": device,
+                "sensor": sensor,
+                "readings": cagg_lookup.get((device, sensor), 0),
+            })
         return result
 
     async def fetch_device_data(self) -> dict[str, dict]:
-        """Device overview for the home page."""
+        """Device overview for the home page (MySQL + TSDB merged).
+
+        TSDB devices' reading totals and last-seen come from the
+        sensors_daily_summary cagg via _fetch_cagg_summary (5-min TTL cache).
+        """
         all_devices = await self.db.get_all_devices()
+        cagg_rows = await _fetch_cagg_summary()
+
+        tsdb_per_device: dict[str, dict[str, Any]] = {}
+        for row in cagg_rows:
+            entry = tsdb_per_device.setdefault(
+                row["device"], {"readings": 0, "last_seen": None},
+            )
+            entry["readings"] += int(row["readings"] or 0)
+            latest = row.get("latest")
+            if latest and (entry["last_seen"] is None or latest > entry["last_seen"]):
+                entry["last_seen"] = latest
 
         device_data: dict[str, dict] = {}
         for device_id, info in all_devices.items():
             device_data[device_id] = {
                 "sensors": info["measurements"],
                 "readings": info["readings"],
+                "last_seen": info.get("last_seen"),
             }
+
+        for device, sensor in self._enumerate_tsdb_sensors():
+            tsdb_info = tsdb_per_device.get(device, {})
+            entry = device_data.setdefault(device, {
+                "sensors": [],
+                "readings": tsdb_info.get("readings", 0),
+                "last_seen": tsdb_info.get("last_seen"),
+            })
+            if sensor not in entry["sensors"]:
+                entry["sensors"].append(sensor)
         return device_data
+
+    async def fetch_manual_metadata(self) -> dict[str, Any]:
+        """Last-upload per source and last-measure per manual sensor key."""
+        from wp6_data.red.tsdb import fetch_manual_summary_tsdb
+
+        return await fetch_manual_summary_tsdb()

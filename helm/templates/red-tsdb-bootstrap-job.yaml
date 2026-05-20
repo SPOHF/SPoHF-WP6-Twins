@@ -1,0 +1,62 @@
+{{- if .Values.red.enabled }}
+{{- $redSecret := .Values.red.secrets.existingSecret | default (printf "%s-red-secrets" .Chart.Name) }}
+{{- $sharedSecret := .Values.secrets.existingSecret | default (printf "%s-secrets" .Chart.Name) }}
+{{- $bootstrapImage := .Values.red.tsdbBootstrap.image | default "timescale/timescaledb:2.26.4-pg17" }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Chart.Name }}-red-tsdb-bootstrap
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-red-tsdb-bootstrap
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 4
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}-red-tsdb-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: {{ $bootstrapImage | quote }}
+          env:
+            - name: PGHOST
+              value: {{ .Values.red.tsdbBootstrap.tsdbHost | quote }}
+            - name: PGPORT
+              value: {{ .Values.red.tsdbBootstrap.tsdbPort | quote }}
+            - name: PGUSER
+              value: "postgres"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $sharedSecret }}
+                  key: tsdb-password
+            - name: RED_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $redSecret }}
+                  key: tsdb-red-password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "waiting for postgres at $PGHOST:$PGPORT..."
+              until pg_isready -h "$PGHOST" -p "$PGPORT" -U postgres -d postgres -t 5; do
+                sleep 2
+              done
+              echo "postgres is ready; bootstrapping wp6_red role + database"
+              psql -d postgres -v ON_ERROR_STOP=1 -v red_pass="$RED_PASS" <<'SQL'
+              SELECT format('CREATE ROLE wp6_red WITH LOGIN PASSWORD %L', :'red_pass')
+              WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'wp6_red')\gexec
+
+              SELECT 'CREATE DATABASE wp6_red OWNER wp6_red'
+              WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'wp6_red')\gexec
+              SQL
+              echo "bootstrap complete"
+{{- end }}

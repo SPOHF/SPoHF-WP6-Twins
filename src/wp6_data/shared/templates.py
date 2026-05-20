@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from datetime import UTC, date, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from wp6_data.shared.metadata import MetadataRegistry
@@ -155,8 +155,16 @@ def render_card(
     return f"<article{cls}><h2>{title}</h2>{desc}{body}</article>"
 
 
-def render_table(headers: list[str], rows: list[list[str]], *, sortable: bool = True) -> str:
-    """Render an HTML table from headers and row data (cells may contain HTML)."""
+def render_table(
+    headers: list[str], rows: list[list[str]], *,
+    sortable: bool = True, group_col: int | None = None,
+) -> str:
+    """Render an HTML table from headers and row data (cells may contain HTML).
+
+    When *group_col* is set, the table is marked with ``data-group-col`` so that
+    the front-end can visually merge consecutive identical values in that column
+    while it is the active sort.
+    """
     thead = "<tr>" + "".join(
         f'<th style="cursor:pointer" onclick="sortTable(this)">{h}</th>'
         if sortable else f"<th>{h}</th>"
@@ -171,28 +179,88 @@ def render_table(headers: list[str], rows: list[list[str]], *, sortable: bool = 
         ) + "</tr>"
         for row in rows
     )
-    return f"<table><thead>{thead}</thead><tbody>{tbody}</tbody></table>"
+    table_attrs = (
+        f' data-group-col="{group_col}"' if group_col is not None else ""
+    )
+    return (
+        f"<table{table_attrs}><thead>{thead}</thead>"
+        f"<tbody>{tbody}</tbody></table>"
+    )
 
 
-def build_home_tables(
+EXPLORE_TAB_IDS = ("devices", "sensors", "manual")
+EXPLORE_TAB_LABELS = {
+    "devices": "Devices",
+    "sensors": "Sensors",
+    "manual": "Manual measurements",
+}
+
+
+def _format_timestamp_cell(dt: Any) -> tuple[str, str]:
+    """Render a datetime as an HTML cell tuple (display, sort_key).
+
+    Display is a relative phrase ("3 hours ago"); sort_key is the ISO string
+    so client-side sort orders by absolute time. ``None`` renders as a dash.
+    """
+    if dt is None:
+        return ("—", "")
+
+    from datetime import datetime
+
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        now = datetime.now(UTC)
+        delta = now - dt
+        seconds = delta.total_seconds()
+        if seconds < 60:
+            phrase = "just now"
+        elif seconds < 3600:
+            phrase = f"{int(seconds // 60)} min ago"
+        elif seconds < 86400:
+            phrase = f"{int(seconds // 3600)} h ago"
+        elif seconds < 7 * 86400:
+            phrase = f"{int(seconds // 86400)} d ago"
+        else:
+            phrase = dt.strftime("%Y-%m-%d")
+        # Tooltip carries the absolute UTC timestamp for precision.
+        title = dt.strftime("%Y-%m-%d %H:%M UTC")
+        html = f'<span title="{title}">{phrase}</span>'
+        return (html, dt.isoformat())
+    return (str(dt), str(dt))
+
+
+def build_explore_tabs(
     metadata: MetadataRegistry,
     devices: dict[str, dict],
     available_exports: dict[str, str],
-) -> tuple[str, str]:
-    """Build the sensor-type and device tables for a home page.
+    manual_metadata: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """Build the three explore tables (devices, sensors, manual measurements).
+
+    Sensors are split by ``sensor_default(key).source``: empty source = auto-
+    logged, non-empty = manual upload. Devices are similarly filtered by
+    ``device(id).source`` so that manual-measurement plants do not appear in
+    the Devices tab.
 
     Args:
         metadata: The twin's metadata registry.
-        devices: ``{device_id: {"sensors": [str], "readings": int}}``.
+        devices: ``{device_id: {"sensors": [str], "readings": int,
+                              "last_seen": datetime | None}}``.
         available_exports: Export availability dict for download links.
+        manual_metadata: ``{"uploads": {source: datetime},
+                           "measurements": {sensor_key: datetime}}``
+            from the provider's ``fetch_manual_metadata``.
 
     Returns:
-        ``(sensor_table_html, device_table_html)``
+        ``{"devices": html, "sensors": html, "manual": html}``
     """
+    manual_metadata = manual_metadata or {"uploads": {}, "measurements": {}}
+    manual_uploads = manual_metadata.get("uploads", {})
+    manual_measurements = manual_metadata.get("measurements", {})
     from wp6_data.shared.export import render_download_link
 
-    # --- Sensor type table ---
-    # Aggregate per-sensor: total readings + set of devices
+    # --- Aggregate per-sensor: total readings + set of devices ---
     sensor_readings: dict[str, int] = {}
     sensor_devices: dict[str, set[str]] = {}
     for device_id, info in devices.items():
@@ -200,10 +268,11 @@ def build_home_tables(
             sensor_readings[s] = sensor_readings.get(s, 0) + info["readings"]
             sensor_devices.setdefault(s, set()).add(device_id)
 
-    sensor_entries = []
+    auto_entries: list[dict[str, str]] = []
+    manual_entries: list[dict[str, str]] = []
     for key in sorted(sensor_readings, key=lambda k: -sensor_readings[k]):
         sm = metadata.sensor_default(key)
-        sensor_entries.append({
+        entry = {
             "key": key,
             "url": chart_url([
                 f"{d}:{key}" for d in sorted(sensor_devices.get(key, set()))
@@ -213,16 +282,42 @@ def build_home_tables(
             "unit": sm.unit,
             "Devices": ", ".join(sorted(sensor_devices.get(key, set()))),
             "Readings": f"{sensor_readings[key]:,}",
-        })
-    sensor_table = render_sensor_type_table(
-        sensor_entries, extra_headers=["Devices", "Readings"],
-    )
+            "Source": sm.source,
+        }
+        if sm.source:
+            entry["Last upload"] = _format_timestamp_cell(
+                manual_uploads.get(sm.source),
+            )
+            entry["Last measure"] = _format_timestamp_cell(
+                manual_measurements.get(key),
+            )
+            manual_entries.append(entry)
+        else:
+            auto_entries.append(entry)
 
-    # --- Device table ---
-    # Pre-build position and device-type series for group links
+    sensors_tab = render_sensor_type_table(
+        auto_entries, extra_headers=["Devices", "Readings"],
+    )
+    if manual_entries:
+        manual_tab = render_manual_measurement_table(
+            manual_entries,
+            extra_headers=["Readings", "Last upload", "Last measure"],
+        )
+    else:
+        manual_tab = (
+            "<p>No manual measurements have been uploaded yet.</p>"
+        )
+
+    # --- Devices tab: only auto-logged hardware (source == "") ---
+    auto_devices = {
+        device_id: info
+        for device_id, info in devices.items()
+        if not metadata.device(device_id).source
+    }
+
     position_series: dict[str, list[str]] = {}
     dtype_series: dict[str, list[str]] = {}
-    for device_id, info in devices.items():
+    for device_id, info in auto_devices.items():
         dm = metadata.device(device_id)
         series = [f"{device_id}:{s}" for s in sorted(info["sensors"])]
         if dm.position:
@@ -231,7 +326,7 @@ def build_home_tables(
             dtype_series.setdefault(dm.type, []).extend(series)
 
     device_entries = []
-    for device_id, info in sorted(devices.items()):
+    for device_id, info in sorted(auto_devices.items()):
         dm = metadata.device(device_id)
         dev_series = [f"{device_id}:{s}" for s in sorted(info["sensors"])]
         sensor_links = ", ".join(
@@ -246,24 +341,71 @@ def build_home_tables(
             else ""
         )
         type_html = (
-            f'<a href="{chart_url(dtype_series[dm.type])}">'
-            f"{dm.type}</a>"
+            f'<strong><a href="{chart_url(dtype_series[dm.type])}">'
+            f"{dm.type}</a></strong>"
             if dm.type
             else ""
         )
+        # Manual sources (devices whose readings come from a manually-uploaded
+        # file rather than an automated sensor) get a small badge so users can
+        # tell measurement plants apart from sensor stations at a glance.
+        source_badge = (
+            f' <small><mark>manual: {dm.source}</mark></small>'
+            if dm.source else ""
+        )
         device_entries.append({
-            "name": f'<a href="{chart_url(dev_series)}">{device_id}</a>',
+            "name": (
+                f'<strong><a href="{chart_url(dev_series)}">{device_id}</a>'
+                f"</strong>{source_badge}"
+            ),
             "position": pos_html,
             "type": type_html,
+            "type_sort": dm.type,
             "sensors": sensor_links,
             "readings": f'{info["readings"]:,}' if info["readings"] else "",
+            "Last seen": _format_timestamp_cell(info.get("last_seen")),
             "Download": render_download_link(device_id, available_exports),
         })
-    device_table = render_device_table(
-        device_entries, extra_columns=["Download"],
+    devices_tab = render_device_table(
+        device_entries, extra_columns=["Last seen", "Download"],
     )
 
-    return sensor_table, device_table
+    return {
+        "devices": devices_tab,
+        "sensors": sensors_tab,
+        "manual": manual_tab,
+    }
+
+
+def render_explore_tabs(tabs: dict[str, str], active: str = "devices") -> str:
+    """Wrap the explore tables in a tab switcher.
+
+    Args:
+        tabs: ``{tab_id: html}`` content for each tab.
+        active: Initially-selected tab id; falls back to "devices" if invalid.
+    """
+    if active not in EXPLORE_TAB_IDS:
+        active = "devices"
+
+    buttons = "".join(
+        f'<button type="button" role="tab" data-tab="{tid}"'
+        f' aria-selected="{"true" if tid == active else "false"}">'
+        f"{EXPLORE_TAB_LABELS[tid]}</button>"
+        for tid in EXPLORE_TAB_IDS
+    )
+    panels = "".join(
+        f'<div role="tabpanel" data-tab-panel="{tid}"'
+        f'{"" if tid == active else " hidden"}>'
+        f'{tabs.get(tid, "")}</div>'
+        for tid in EXPLORE_TAB_IDS
+    )
+
+    return (
+        '<div class="explore-tabs">'
+        f'<div class="tab-buttons" role="tablist">{buttons}</div>'
+        f"{panels}"
+        "</div>"
+    )
 
 
 def chart_url(series: list[str]) -> str:
@@ -303,15 +445,11 @@ def render_sensor_type_table(
 
     rows: list[list] = []
     for sensor_type in sorted(type_groups):
-        items = type_groups[sensor_type]
-        for i, s in enumerate(items):
+        for s in type_groups[sensor_type]:
             type_html = (
                 f'<strong><a href="/type/{sensor_type}">'
                 f"{sensor_type}</a></strong>"
-                if i == 0
-                else ""
             )
-            # Tuple (html, sort_value) so empty cells still sort correctly
             type_cell = (type_html, sensor_type)
             row: list = [
                 type_cell,
@@ -323,7 +461,60 @@ def render_sensor_type_table(
                     row.append(s.get(h, ""))
             rows.append(row)
 
-    return render_table(headers, rows)
+    return render_table(headers, rows, group_col=0)
+
+
+def render_manual_measurement_table(
+    measurements: list[dict[str, Any]],
+    *,
+    extra_headers: list[str] | None = None,
+) -> str:
+    """Render a manual-measurement table grouped by source (column 0).
+
+    Each dict in *measurements* should have keys:
+        - ``key``: measurement key
+        - ``url``: link for the measurement name
+        - ``type``: sensor type label (e.g. "fruit chemistry")
+        - ``alias``: display name for the measurement
+        - ``unit``: unit of measurement
+        - ``Source``: source string (e.g. "sijia")
+    Plus any extra keys matching *extra_headers*.
+    """
+    from collections import defaultdict as _defaultdict
+
+    source_groups: dict[str, list[dict[str, Any]]] = _defaultdict(list)
+    for m in measurements:
+        source_groups[m.get("Source", "")].append(m)
+
+    headers = ["Source", "Type", "Measurement", "Unit"]
+    if extra_headers:
+        headers.extend(extra_headers)
+
+    rows: list[list] = []
+    for source in sorted(source_groups):
+        for m in source_groups[source]:
+            source_cell = (f"<strong>{source}</strong>", source)
+            sensor_type = m.get("type", "")
+            type_cell = (
+                (
+                    f'<a href="/type/{sensor_type}">{sensor_type}</a>',
+                    sensor_type,
+                )
+                if sensor_type
+                else ("", "")
+            )
+            row: list = [
+                source_cell,
+                type_cell,
+                f'<a href="{m["url"]}">{m.get("alias") or m["key"]}</a>',
+                m.get("unit", ""),
+            ]
+            if extra_headers:
+                for h in extra_headers:
+                    row.append(m.get(h, ""))
+            rows.append(row)
+
+    return render_table(headers, rows, group_col=0)
 
 
 def render_device_table(
@@ -331,35 +522,48 @@ def render_device_table(
     *,
     extra_columns: list[str] | None = None,
 ) -> str:
-    """Render a uniform device table from metadata-enriched entries.
+    """Render a device table grouped by device type (column 0).
+
+    Devices without a type land in a single un-typed bucket sorted last.
 
     Each dict in *devices* should have keys:
         - ``name``: device name/id (displayed as-is, may contain HTML links)
         - ``position``: from device metadata
-        - ``type``: from device metadata
+        - ``type``: device type label
+        - ``type_sort``: raw type string for sort/grouping (defaults to ``type``)
         - ``sensors``: comma-separated sensor aliases
         - ``readings``: formatted reading count
     Plus any extra keys matching *extra_columns* headers.
     """
-    headers = ["Device", "Position", "Type", "Sensors", "Readings"]
+    headers = ["Type", "Device", "Position", "Sensors", "Readings"]
     if extra_columns:
         headers.extend(extra_columns)
 
-    rows: list[list[str]] = []
+    # Group by type_sort (raw type) so the merge-cell JS can identify groups.
+    grouped: dict[str, list[dict[str, str]]] = {}
     for d in devices:
-        row = [
-            d.get("name", ""),
-            d.get("position", ""),
-            d.get("type", ""),
-            d.get("sensors", ""),
-            d.get("readings", ""),
-        ]
-        if extra_columns:
-            for col in extra_columns:
-                row.append(d.get(col, ""))
-        rows.append(row)
+        grouped.setdefault(d.get("type_sort", ""), []).append(d)
 
-    return render_table(headers, rows)
+    # Empty-type bucket sorts last by using a high-codepoint sentinel.
+    def _sort_key(t: str) -> tuple[int, str]:
+        return (1, "") if t == "" else (0, t)
+
+    rows: list[list] = []
+    for type_key in sorted(grouped, key=_sort_key):
+        for d in grouped[type_key]:
+            row: list = [
+                (d.get("type", ""), type_key),
+                d.get("name", ""),
+                d.get("position", ""),
+                d.get("sensors", ""),
+                d.get("readings", ""),
+            ]
+            if extra_columns:
+                for col in extra_columns:
+                    row.append(d.get(col, ""))
+            rows.append(row)
+
+    return render_table(headers, rows, group_col=0)
 
 
 BASE_CSS = """
@@ -523,7 +727,30 @@ BASE_CSS = """
     .date-inputs label { margin-bottom: 0; }
     .date-inputs button { width: auto; padding: 0.25rem 0.75rem; margin-bottom: 0; }
 
+    /* --- Explore tabs --- */
+    .explore-tabs .tab-buttons {
+        display: flex; gap: 0.25rem;
+        border-bottom: 1px solid var(--pico-muted-border-color);
+        margin-bottom: 1rem;
+    }
+    .explore-tabs .tab-buttons button {
+        background: transparent; border: 0; border-radius: 0;
+        border-bottom: 2px solid transparent;
+        color: var(--pico-muted-color); cursor: pointer;
+        margin: 0 0 -1px 0; padding: 0.5rem 0.9rem;
+        width: auto; font-weight: 600;
+    }
+    .explore-tabs .tab-buttons button:hover { color: var(--pico-color); }
+    .explore-tabs .tab-buttons button[aria-selected="true"] {
+        color: var(--dashboard-primary);
+        border-bottom-color: var(--dashboard-primary);
+    }
+
     /* --- Tables --- */
+    /* Grouped tables: hide content of merged duplicate cells without
+       collapsing the cell itself (keeps row borders & widths consistent). */
+    td.cell-merged > * { display: none; }
+
     :root[data-dashboard] thead {
         background: transparent;
     }
@@ -763,6 +990,20 @@ BASE_CSS = """
         width: 100%;
         margin: 0.2rem 0 0;
     }
+    .axis-split-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        margin: 0.5rem 0 0.3rem;
+        cursor: pointer;
+    }
+    .axis-split-toggle input[type="checkbox"] {
+        margin: 0;
+    }
+    #axis-controls-split h4 {
+        margin: 0.6rem 0 0.2rem;
+    }
     .unit-badge {
         font-size: 0.65rem;
         opacity: 0.5;
@@ -819,7 +1060,65 @@ TOGGLE_JS = """
     });
 """
 
+EXPLORE_TABS_JS = """
+    (function() {
+        var root = document.querySelector('.explore-tabs');
+        if (!root) return;
+        var buttons = root.querySelectorAll('[data-tab]');
+        var panels = root.querySelectorAll('[data-tab-panel]');
+        buttons.forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var id = btn.dataset.tab;
+                buttons.forEach(function(b) {
+                    b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+                });
+                panels.forEach(function(p) {
+                    p.hidden = p.dataset.tabPanel !== id;
+                });
+                var url = new URL(window.location.href);
+                url.searchParams.set('tab', id);
+                history.replaceState(null, '', url.toString());
+            });
+        });
+    })();
+"""
+
+
 TABLE_SORT_JS = """
+    function refreshGrouping(table) {
+        var raw = table.dataset.groupCol;
+        if (raw === undefined) return;
+        var groupCol = parseInt(raw, 10);
+        if (isNaN(groupCol)) return;
+        // Find which header (if any) currently drives the sort.
+        var ths = table.querySelectorAll('thead th');
+        var sortedIdx = null;
+        ths.forEach(function(th, i) {
+            if (th.dataset.sortDir === 'asc' || th.dataset.sortDir === 'desc') {
+                sortedIdx = i;
+            }
+        });
+        // Merge only when no sort is active (initial render) or the active
+        // sort matches the group column — otherwise rows aren't grouped.
+        var shouldMerge = (sortedIdx === null || sortedIdx === groupCol);
+        var rows = table.querySelectorAll('tbody tr');
+        if (!shouldMerge) {
+            rows.forEach(function(r) {
+                var c = r.children[groupCol];
+                if (c) c.classList.remove('cell-merged');
+            });
+            return;
+        }
+        var prev = null;
+        rows.forEach(function(row) {
+            var cell = row.children[groupCol];
+            if (!cell) return;
+            var key = cell.dataset.sort || cell.textContent.trim();
+            if (key === prev) cell.classList.add('cell-merged');
+            else { cell.classList.remove('cell-merged'); prev = key; }
+        });
+    }
+
     function sortTable(th) {
         var table = th.closest('table');
         var tbody = table.querySelector('tbody');
@@ -844,7 +1143,10 @@ TABLE_SORT_JS = """
             return asc ? at.localeCompare(bt) : bt.localeCompare(at);
         });
         rows.forEach(function(r) { tbody.appendChild(r); });
+        refreshGrouping(table);
     }
+
+    document.querySelectorAll('table[data-group-col]').forEach(refreshGrouping);
 """
 
 UNIFIED_CHART_JS = """
@@ -859,11 +1161,19 @@ UNIFIED_CHART_JS = """
     var activeSeries = {};
     var seriesData = {};  // key -> {times: [], values: []}
     var totalPoints = 0;
-    var currentLabelFormat = 'smart';
-    var aggregateEnabled = false;
-    var aggregateFunc = 'avg';
     var BUCKET_STEPS = [0, 1, 5, 10, 15, 30, 60, 120, 360, 720, 1440, 10080, 20160, 43200];
-    var bucketMinutes = 10;
+
+    var splitMode = false;
+    function defaultAxisCfg() {
+        return {
+            labelFormat: 'smart',
+            aggregateEnabled: false,
+            aggregateFunc: 'avg',
+            bucketMinutes: 10
+        };
+    }
+    var axisCfg = { left: defaultAxisCfg(), right: defaultAxisCfg() };
+    function cfgFor(axis) { return splitMode ? axisCfg[axis] : axisCfg.left; }
 
     // Parse URL params
     var params = new URLSearchParams(window.location.search);
@@ -871,18 +1181,34 @@ UNIFIED_CHART_JS = """
     var rightSpecs = (params.get('r') || '').split(',').filter(Boolean);
     var startDate = params.get('start') || '';
     var endDate = params.get('end') || '';
-    var savedLabelFormat = params.get('lbl') || '';
-    if (savedLabelFormat && ['smart', 'short', 'raw'].indexOf(savedLabelFormat) !== -1) {
-        currentLabelFormat = savedLabelFormat;
+
+    function readLabelFormat(name, fallback) {
+        var v = params.get(name) || '';
+        return ['smart', 'short', 'raw'].indexOf(v) !== -1 ? v : fallback;
     }
-    var savedAgg = params.get('agg') || '';
-    if (savedAgg && ['avg', 'max', 'min', 'sum'].indexOf(savedAgg) !== -1) {
-        aggregateEnabled = true;
-        aggregateFunc = savedAgg;
+    function readAggInto(cfg, aggName, bktName) {
+        var agg = params.get(aggName);
+        if (agg === 'off') {
+            cfg.aggregateEnabled = false;
+        } else if (agg && ['avg', 'max', 'min', 'sum'].indexOf(agg) !== -1) {
+            cfg.aggregateEnabled = true;
+            cfg.aggregateFunc = agg;
+        }
+        var bkt = parseInt(params.get(bktName));
+        if (!isNaN(bkt) && BUCKET_STEPS.indexOf(bkt) !== -1) {
+            cfg.bucketMinutes = bkt;
+        }
     }
-    var savedBkt = parseInt(params.get('bkt'));
-    if (!isNaN(savedBkt) && BUCKET_STEPS.indexOf(savedBkt) !== -1) {
-        bucketMinutes = savedBkt;
+    axisCfg.left.labelFormat = readLabelFormat('lbl', 'smart');
+    readAggInto(axisCfg.left, 'agg', 'bkt');
+    if (params.get('split') === '1') {
+        splitMode = true;
+        // Right-axis values fall back to left for any param not explicitly set
+        axisCfg.right.labelFormat = readLabelFormat('lbl_r', axisCfg.left.labelFormat);
+        axisCfg.right.aggregateEnabled = axisCfg.left.aggregateEnabled;
+        axisCfg.right.aggregateFunc = axisCfg.left.aggregateFunc;
+        axisCfg.right.bucketMinutes = axisCfg.left.bucketMinutes;
+        readAggInto(axisCfg.right, 'agg_r', 'bkt_r');
     }
 
     // Build initial active set from URL
@@ -978,75 +1304,108 @@ UNIFIED_CHART_JS = """
         });
     });
 
-    // Label format toggle
-    var labelBtns = document.querySelectorAll('.label-btn');
-    labelBtns.forEach(function(btn) {
-        btn.classList.toggle('active', btn.dataset.label === currentLabelFormat);
-        btn.addEventListener('click', function() {
-            var fmt = btn.dataset.label;
-            if (fmt === currentLabelFormat) return;
-            currentLabelFormat = fmt;
-            labelBtns.forEach(function(b) {
-                b.classList.toggle('active', b === btn);
-            });
-            relabelAllTraces();
-            syncUrl();
-        });
-    });
-
-    // Aggregate toggle (OFF / AVG / MAX / MIN / SUM)
-    var aggBtns = document.querySelectorAll('.agg-btn');
-    function syncAggControls() {
-        if (bucketSlider) bucketSlider.disabled = !aggregateEnabled;
+    function activeAggValueFor(axis) {
+        var c = axisCfg[axis];
+        return c.aggregateEnabled ? c.aggregateFunc : 'off';
     }
-    function activeAggValue() {
-        return aggregateEnabled ? aggregateFunc : 'off';
-    }
-    aggBtns.forEach(function(btn) {
-        btn.classList.toggle('active',
-            btn.dataset.agg === activeAggValue());
-        btn.addEventListener('click', function() {
-            var fn = btn.dataset.agg;
-            if (fn === activeAggValue()) return;
-            if (fn === 'off') {
-                aggregateEnabled = false;
-            } else {
-                aggregateEnabled = true;
-                aggregateFunc = fn;
-            }
-            aggBtns.forEach(function(b) {
-                b.classList.toggle('active',
-                    b.dataset.agg === activeAggValue());
-            });
-            syncAggControls();
-            rebuildTraces();
-            syncUrl();
-            updateStats();
-            updateY2();
-        });
-    });
 
-    // Bucket slider
-    var bucketSlider = document.getElementById('bucket-slider');
-    var bucketLabelEl = document.getElementById('bucket-label');
-    if (bucketSlider) {
-        // Set slider position from bucketMinutes value
-        var initIdx = BUCKET_STEPS.indexOf(bucketMinutes);
-        if (initIdx < 0) initIdx = 3;
-        bucketSlider.value = initIdx;
-        bucketLabelEl.textContent = formatBucket(bucketMinutes);
-        bucketSlider.addEventListener('input', function() {
-            bucketLabelEl.textContent = formatBucket(BUCKET_STEPS[parseInt(bucketSlider.value)]);
+    function refreshControlActiveStates() {
+        document.querySelectorAll('.label-btn').forEach(function(btn) {
+            var axis = btn.dataset.axis;
+            btn.classList.toggle('active',
+                btn.dataset.label === axisCfg[axis].labelFormat);
         });
-        bucketSlider.addEventListener('change', function() {
-            bucketMinutes = BUCKET_STEPS[parseInt(bucketSlider.value)];
-            if (aggregateEnabled) {
-                rebuildTraces();
+        document.querySelectorAll('.agg-btn').forEach(function(btn) {
+            var axis = btn.dataset.axis;
+            btn.classList.toggle('active',
+                btn.dataset.agg === activeAggValueFor(axis));
+        });
+        document.querySelectorAll('.bucket-slider-input').forEach(function(slider) {
+            var axis = slider.dataset.axis;
+            var c = axisCfg[axis];
+            var idx = BUCKET_STEPS.indexOf(c.bucketMinutes);
+            if (idx < 0) idx = 3;
+            slider.value = idx;
+            slider.disabled = !c.aggregateEnabled;
+            var labelEl = slider.parentElement.querySelector(
+                '.bucket-label[data-axis="' + axis + '"]');
+            if (labelEl) labelEl.textContent = formatBucket(c.bucketMinutes);
+        });
+    }
+
+    function wireAxisControls(rootEl) {
+        rootEl.querySelectorAll('.label-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var axis = btn.dataset.axis;
+                var fmt = btn.dataset.label;
+                if (fmt === axisCfg[axis].labelFormat) return;
+                axisCfg[axis].labelFormat = fmt;
+                refreshControlActiveStates();
+                relabelAllTraces();
                 syncUrl();
-            }
+            });
+        });
+        rootEl.querySelectorAll('.agg-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var axis = btn.dataset.axis;
+                var fn = btn.dataset.agg;
+                if (fn === activeAggValueFor(axis)) return;
+                if (fn === 'off') {
+                    axisCfg[axis].aggregateEnabled = false;
+                } else {
+                    axisCfg[axis].aggregateEnabled = true;
+                    axisCfg[axis].aggregateFunc = fn;
+                }
+                refreshControlActiveStates();
+                refetchAll();
+            });
+        });
+        rootEl.querySelectorAll('.bucket-slider-input').forEach(function(slider) {
+            slider.addEventListener('input', function() {
+                var axis = slider.dataset.axis;
+                var minutes = BUCKET_STEPS[parseInt(slider.value)];
+                var labelEl = slider.parentElement.querySelector(
+                    '.bucket-label[data-axis="' + axis + '"]');
+                if (labelEl) labelEl.textContent = formatBucket(minutes);
+            });
+            slider.addEventListener('change', function() {
+                var axis = slider.dataset.axis;
+                axisCfg[axis].bucketMinutes = BUCKET_STEPS[parseInt(slider.value)];
+                if (axisCfg[axis].aggregateEnabled) {
+                    refetchAll();
+                }
+            });
         });
     }
-    syncAggControls();
+
+    var unifiedBlock = document.getElementById('axis-controls-unified');
+    var splitBlock = document.getElementById('axis-controls-split');
+    if (unifiedBlock) wireAxisControls(unifiedBlock);
+    if (splitBlock) wireAxisControls(splitBlock);
+
+    function applySplitVisibility() {
+        if (unifiedBlock) unifiedBlock.style.display = splitMode ? 'none' : '';
+        if (splitBlock)   splitBlock.style.display   = splitMode ? '' : 'none';
+    }
+
+    var splitToggle = document.getElementById('axis-split-toggle');
+    if (splitToggle) {
+        splitToggle.checked = splitMode;
+        applySplitVisibility();
+        splitToggle.addEventListener('change', function() {
+            if (splitToggle.checked) {
+                axisCfg.right = JSON.parse(JSON.stringify(axisCfg.left));
+                splitMode = true;
+            } else {
+                splitMode = false;
+            }
+            applySplitVisibility();
+            refreshControlActiveStates();
+            refetchAll();
+        });
+    }
+
+    refreshControlActiveStates();
 
     function buildTree(sensors, groupBy) {
         // Group sensors into {groupKey: [{device, sensor, ...}, ...]}
@@ -1213,6 +1572,7 @@ UNIFIED_CHART_JS = """
             fetchAndAdd(spec.key, spec.axis, function() {
                 loaded++;
                 if (loaded === allSpecs.length) {
+                    rebuildTraces();
                     updateStats();
                     updateY2();
                 }
@@ -1220,7 +1580,7 @@ UNIFIED_CHART_JS = """
         });
     }
 
-    function sensorLabel(key) {
+    function sensorLabel(key, axis) {
         var s = allSensors.find(function(s) {
             return s.device + ':' + s.sensor === key;
         });
@@ -1228,12 +1588,13 @@ UNIFIED_CHART_JS = """
         var sm = s.sensor_meta || {};
         var dm = s.device_meta || {};
         var alias = sm.alias || s.sensor;
+        var fmt = cfgFor(axis).labelFormat;
 
-        if (currentLabelFormat === 'raw') {
+        if (fmt === 'raw') {
             return s.device + ' | ' + s.sensor;
         }
         var pos = dm.position || s.device;
-        if (currentLabelFormat === 'short') {
+        if (fmt === 'short') {
             return pos + ' \u2014 ' + alias;
         }
         // 'smart': position + alias + intention snippet
@@ -1246,43 +1607,56 @@ UNIFIED_CHART_JS = """
         return label;
     }
 
+    function anyAggregateEnabled() {
+        return cfgFor('left').aggregateEnabled || cfgFor('right').aggregateEnabled;
+    }
+
     function relabelAllTraces() {
-        if (aggregateEnabled) { rebuildTraces(); return; }
+        if (anyAggregateEnabled()) { rebuildTraces(); return; }
         var keys = Object.keys(activeSeries);
         if (keys.length === 0) return;
         keys.forEach(function(k) {
             var idx = activeSeries[k].traceIdx;
-            Plotly.restyle(chartDiv, { name: sensorLabel(k) }, [idx]);
+            var axis = activeSeries[k].axis;
+            Plotly.restyle(chartDiv, { name: sensorLabel(k, axis) }, [idx]);
         });
     }
 
-    // Deterministic color per series key (avoids color shuffling on reload)
+    // Colors are assigned by sorted-key index: unique within a chart, and
+    // stable per key as long as the active-series set is unchanged.
     var TRACE_COLORS = [
         '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
         '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
         '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
         '#c49c94', '#f7b6d2', '#c7c7c7', '#dbdb8d', '#9edae5'
     ];
-    function keyColor(str) {
-        var h = 0;
-        for (var i = 0; i < str.length; i++) {
-            h = ((h << 5) - h + str.charCodeAt(i)) | 0;
-        }
-        return TRACE_COLORS[Math.abs(h) % TRACE_COLORS.length];
+    function buildColorMap() {
+        var sorted = Object.keys(activeSeries).slice().sort();
+        var m = {};
+        sorted.forEach(function(k, i) {
+            m[k] = TRACE_COLORS[i % TRACE_COLORS.length];
+        });
+        return m;
     }
 
-    function bucketTime(isoStr, minutes) {
-        if (minutes <= 0) return isoStr;
-        var d = new Date(isoStr);
-        var ms = minutes * 60000;
-        var bucketed = new Date(Math.round(d.getTime() / ms) * ms);
-        var pad = function(n) { return n < 10 ? '0' + n : n; };
-        var Y = bucketed.getFullYear();
-        var M = pad(bucketed.getMonth()+1);
-        var D = pad(bucketed.getDate());
-        var h = pad(bucketed.getHours());
-        var m = pad(bucketed.getMinutes());
-        return Y + '-' + M + '-' + D + 'T' + h + ':' + m + ':00.000000';
+    // Combine already-bucketed values from multiple series that share one
+    // axis label. The server aligned every series to identical bucket
+    // boundaries, so values at the same timestamp are directly combinable.
+    // AVG must be count-weighted: a plain mean of per-series means is biased
+    // when buckets hold unequal numbers of raw readings (e.g. a partial day).
+    function combineAgg(values, counts, func) {
+        if (values.length === 0) return null;
+        if (func === 'max') return Math.max.apply(null, values);
+        if (func === 'min') return Math.min.apply(null, values);
+        if (func === 'sum') {
+            var s = 0; values.forEach(function(v) { s += v; }); return s;
+        }
+        var num = 0, den = 0;  // avg, count-weighted
+        for (var i = 0; i < values.length; i++) {
+            num += values[i] * counts[i];
+            den += counts[i];
+        }
+        return den > 0 ? num / den : null;
     }
 
     function formatBucket(mins) {
@@ -1300,18 +1674,6 @@ UNIFIED_CHART_JS = """
         return (mins / 1440) + ' days';
     }
 
-    function applyAgg(values) {
-        var nums = values.filter(function(v) { return v !== null; });
-        if (nums.length === 0) return null;
-        if (aggregateFunc === 'max') return Math.max.apply(null, nums);
-        if (aggregateFunc === 'min') return Math.min.apply(null, nums);
-        if (aggregateFunc === 'sum') {
-            var s = 0; nums.forEach(function(v) { s += v; }); return s;
-        }
-        // avg
-        var s = 0; nums.forEach(function(v) { s += v; }); return s / nums.length;
-    }
-
     function rebuildTraces() {
         // Clear all Plotly traces
         var traceCount = chartDiv.data ? chartDiv.data.length : 0;
@@ -1324,88 +1686,107 @@ UNIFIED_CHART_JS = """
         var keys = Object.keys(activeSeries);
         if (keys.length === 0) return;
 
-        if (!aggregateEnabled) {
-            // Individual traces
-            var traces = [];
-            keys.forEach(function(k) {
-                var sd = seriesData[k];
-                if (!sd) return;
-                var axis = activeSeries[k].axis;
-                var color = keyColor(k);
+        var colorMap = buildColorMap();
+
+        // Partition keys by axis so each side can use its own config
+        var keysByAxis = { left: [], right: [] };
+        keys.forEach(function(k) {
+            var axis = activeSeries[k].axis;
+            keysByAxis[axis].push(k);
+        });
+
+        var traces = [];
+        var traceIdxMap = {};
+
+        ['left', 'right'].forEach(function(axis) {
+            var axisKeys = keysByAxis[axis];
+            if (axisKeys.length === 0) return;
+            var cfg = cfgFor(axis);
+
+            if (!cfg.aggregateEnabled) {
+                axisKeys.forEach(function(k) {
+                    var sd = seriesData[k];
+                    if (!sd) return;
+                    var color = colorMap[k];
+                    var trace = {
+                        x: sd.times, y: sd.values,
+                        name: sensorLabel(k, axis),
+                        mode: 'lines',
+                        yaxis: axis === 'right' ? 'y2' : 'y',
+                        line: {color: color}
+                    };
+                    if (axis === 'right') { trace.line.dash = 'dash'; }
+                    traceIdxMap[k] = traces.length;
+                    traces.push(trace);
+                });
+            } else {
+                var groups = {};
+                axisKeys.forEach(function(k) {
+                    var sd = seriesData[k];
+                    if (!sd) return;
+                    var label = sensorLabel(k, axis);
+                    if (!groups[label]) {
+                        groups[label] = { label: label, series: [], firstKey: k };
+                    } else if (k < groups[label].firstKey) {
+                        groups[label].firstKey = k;
+                    }
+                    groups[label].series.push(sd);
+                });
+                Object.keys(groups).forEach(function(label) {
+                    var g = groups[label];
+                    var merged;
+                    if (g.series.length === 1) {
+                        // Server already bucketed+aggregated this series.
+                        var s0 = g.series[0];
+                        merged = { times: s0.times, values: s0.values };
+                    } else {
+                        // Series share a label: recombine on the identical
+                        // server-side bucket timestamps, count-weighting AVG.
+                        var bmap = {};
+                        g.series.forEach(function(sd) {
+                            sd.times.forEach(function(t, i) {
+                                var v = sd.values[i];
+                                if (v === null || v === undefined) return;
+                                if (!bmap[t]) bmap[t] = { vals: [], counts: [] };
+                                bmap[t].vals.push(v);
+                                bmap[t].counts.push(sd.counts ? sd.counts[i] : 1);
+                            });
+                        });
+                        var sortedTimes = Object.keys(bmap).sort();
+                        var aggValues = sortedTimes.map(function(t) {
+                            return combineAgg(
+                                bmap[t].vals, bmap[t].counts, cfg.aggregateFunc);
+                        });
+                        merged = { times: sortedTimes, values: aggValues };
+                    }
+
+                    var suffix = g.series.length > 1
+                    ? ' [' + cfg.aggregateFunc.toUpperCase() + '\u00d7' + g.series.length + ']'
+                    : '';
+                var color = colorMap[g.firstKey];
                 var trace = {
-                    x: sd.times, y: sd.values,
-                    name: sensorLabel(k),
+                    x: merged.times, y: merged.values,
+                    name: g.label + suffix,
                     mode: 'lines',
                     yaxis: axis === 'right' ? 'y2' : 'y',
                     line: {color: color}
                 };
                 if (axis === 'right') { trace.line.dash = 'dash'; }
                 traces.push(trace);
-            });
-            if (traces.length > 0) Plotly.addTraces(chartDiv, traces);
-            // Update traceIdx
-            var ti = 0;
-            keys.forEach(function(k) {
-                if (seriesData[k]) { activeSeries[k].traceIdx = ti; ti++; }
-            });
-        } else {
-            // Group by smart label + axis
-            var groups = {};
-            keys.forEach(function(k) {
-                var sd = seriesData[k];
-                if (!sd) return;
-                var label = sensorLabel(k);
-                var axis = activeSeries[k].axis;
-                var groupKey = label + '||' + axis;
-                if (!groups[groupKey]) {
-                    groups[groupKey] = { label: label, axis: axis, series: [] };
-                }
-                groups[groupKey].series.push(sd);
-            });
+                });
+            }
+        });
 
-            var traces = [];
-            var groupKeys = Object.keys(groups);
-            groupKeys.forEach(function(gk) {
-                var g = groups[gk];
-                var merged;
-                if (g.series.length === 1 && bucketMinutes <= 0) {
-                    merged = { times: g.series[0].times, values: g.series[0].values };
-                } else {
-                    // Collect all timestamps into a sorted set
-                    var timeSet = {};
-                    g.series.forEach(function(sd) {
-                        sd.times.forEach(function(t, i) {
-                            var bt = bucketTime(t, bucketMinutes);
-                            if (!timeSet[bt]) timeSet[bt] = [];
-                            if (sd.values[i] !== null) timeSet[bt].push(sd.values[i]);
-                        });
-                    });
-                    var sortedTimes = Object.keys(timeSet).sort();
-                    var aggValues = sortedTimes.map(function(t) {
-                        return applyAgg(timeSet[t]);
-                    });
-                    merged = { times: sortedTimes, values: aggValues };
-                }
+        if (traces.length > 0) Plotly.addTraces(chartDiv, traces);
 
-                var suffix = g.series.length > 1
-                    ? ' [' + aggregateFunc.toUpperCase() + '\u00d7' + g.series.length + ']'
-                    : '';
-                var color = keyColor(g.label);
-                var trace = {
-                    x: merged.times, y: merged.values,
-                    name: g.label + suffix,
-                    mode: 'lines',
-                    yaxis: g.axis === 'right' ? 'y2' : 'y',
-                    line: {color: color}
-                };
-                if (g.axis === 'right') { trace.line.dash = 'dash'; }
-                traces.push(trace);
-            });
-
-            if (traces.length > 0) Plotly.addTraces(chartDiv, traces);
-            // In aggregate mode, traceIdx doesn't map 1:1 — set to -1
-            keys.forEach(function(k) { activeSeries[k].traceIdx = -1; });
-        }
+        keys.forEach(function(k) {
+            var axis = activeSeries[k].axis;
+            if (cfgFor(axis).aggregateEnabled) {
+                activeSeries[k].traceIdx = -1;
+            } else {
+                activeSeries[k].traceIdx = traceIdxMap[k] != null ? traceIdxMap[k] : -1;
+            }
+        });
     }
 
     function fetchAndAdd(key, axis, cb) {
@@ -1417,6 +1798,11 @@ UNIFIED_CHART_JS = """
             + '&sensor=' + encodeURIComponent(sensor);
         if (startDate) url += '&start=' + startDate;
         if (endDate) url += '&end=' + endDate;
+        var acfg = cfgFor(axis);
+        if (acfg.aggregateEnabled && acfg.bucketMinutes > 0) {
+            url += '&bkt=' + acfg.bucketMinutes
+                 + '&agg=' + encodeURIComponent(acfg.aggregateFunc);
+        }
 
         fetch(url)
             .then(function(r) { return r.json(); })
@@ -1426,56 +1812,63 @@ UNIFIED_CHART_JS = """
 
                 var times = data.map(function(d) { return d.time; });
                 var values = data.map(function(d) { return d.value; });
+                var counts = data.map(function(d) {
+                    return d.count != null ? d.count : 1; });
 
-                seriesData[key] = { times: times, values: values };
+                seriesData[key] = { times: times, values: values, counts: counts };
                 activeSeries[key] = {
                     axis: axis, traceIdx: -1, points: data.length,
                     truncated: !!resp.truncated,
                     limit: resp.limit || 0
                 };
                 totalPoints += data.length;
-
-                if (aggregateEnabled) {
-                    rebuildTraces();
-                } else {
-                    var color = keyColor(key);
-                    var trace = {
-                        x: times, y: values,
-                        name: sensorLabel(key),
-                        mode: 'lines',
-                        yaxis: axis === 'right' ? 'y2' : 'y',
-                        line: {color: color}
-                    };
-                    if (axis === 'right') { trace.line.dash = 'dash'; }
-                    Plotly.addTraces(chartDiv, [trace]);
-                    activeSeries[key].traceIdx = chartDiv.data.length - 1;
-                }
                 showEmpty(false);
                 if (cb) cb();
             });
     }
 
+    // Re-fetch every active series with the current per-axis aggregation
+    // config, then rebuild. Used whenever agg / bucket / split changes: the
+    // client no longer caches raw rows to recompute from (server-side agg),
+    // so a tiny refetch replaces the old free local recompute.
+    function refetchAll() {
+        var keys = Object.keys(activeSeries);
+        if (keys.length === 0) { rebuildTraces(); syncUrl(); return; }
+        var specs = keys.map(function(k) {
+            return { key: k, axis: activeSeries[k].axis }; });
+        totalPoints = 0;
+        var done = 0;
+        specs.forEach(function(s) {
+            fetchAndAdd(s.key, s.axis, function() {
+                done++;
+                if (done === specs.length) {
+                    rebuildTraces();
+                    syncUrl();
+                    updateStats();
+                    updateY2();
+                }
+            });
+        });
+    }
+
     function addOrUpdateSeries(key, axis) {
         if (activeSeries[key]) {
-            // Already loaded — just switch axis
+            // Already loaded. The cached series was fetched for the old
+            // axis; under split mode the new axis may have a different agg
+            // config, so refetch this one key (tiny payload).
+            totalPoints -= activeSeries[key].points || 0;
             activeSeries[key].axis = axis;
-            if (aggregateEnabled) {
+            fetchAndAdd(key, axis, function() {
                 rebuildTraces();
-            } else {
-                var idx = activeSeries[key].traceIdx;
-                var yaxis = axis === 'right' ? 'y2' : 'y';
-                var dash = axis === 'right' ? 'dash' : 'solid';
-                Plotly.restyle(chartDiv, {
-                    yaxis: yaxis, 'line.dash': dash, visible: true
-                }, [idx]);
-            }
-            syncUrl();
-            updateStats();
-            updateY2();
+                syncUrl();
+                updateStats();
+                updateY2();
+            });
         } else {
             // Need to fetch — syncUrl after fetch completes
             showEmpty(false);
             fetchAndAdd(key, axis, function() {
+                rebuildTraces();
                 syncUrl();
                 updateStats();
                 updateY2();
@@ -1485,21 +1878,10 @@ UNIFIED_CHART_JS = """
 
     function removeSeries(key) {
         if (!activeSeries[key]) return;
-        var idx = activeSeries[key].traceIdx;
         totalPoints -= activeSeries[key].points || 0;
         delete activeSeries[key];
         delete seriesData[key];
-        if (aggregateEnabled) {
-            rebuildTraces();
-        } else {
-            Plotly.deleteTraces(chartDiv, [idx]);
-            // Reindex remaining traces
-            Object.keys(activeSeries).forEach(function(k) {
-                if (activeSeries[k].traceIdx > idx) {
-                    activeSeries[k].traceIdx--;
-                }
-            });
-        }
+        rebuildTraces();
         if (Object.keys(activeSeries).length === 0) {
             showEmpty(true);
         }
@@ -1580,12 +1962,35 @@ UNIFIED_CHART_JS = """
         else p.delete('s');
         if (right.length) p.set('r', right.join(','));
         else p.delete('r');
-        if (currentLabelFormat !== 'smart') p.set('lbl', currentLabelFormat);
+        var L = axisCfg.left;
+        if (L.labelFormat !== 'smart') p.set('lbl', L.labelFormat);
         else p.delete('lbl');
-        if (aggregateEnabled) p.set('agg', aggregateFunc);
+        if (L.aggregateEnabled) p.set('agg', L.aggregateFunc);
         else p.delete('agg');
-        if (aggregateEnabled && bucketMinutes !== 10) p.set('bkt', bucketMinutes);
+        if (L.aggregateEnabled && L.bucketMinutes !== 10) p.set('bkt', L.bucketMinutes);
         else p.delete('bkt');
+        if (splitMode) {
+            p.set('split', '1');
+            var R = axisCfg.right;
+            if (R.labelFormat !== L.labelFormat) p.set('lbl_r', R.labelFormat);
+            else p.delete('lbl_r');
+            if (R.aggregateEnabled !== L.aggregateEnabled
+                || (R.aggregateEnabled && R.aggregateFunc !== L.aggregateFunc)) {
+                p.set('agg_r', R.aggregateEnabled ? R.aggregateFunc : 'off');
+            } else {
+                p.delete('agg_r');
+            }
+            if (R.aggregateEnabled && R.bucketMinutes !== L.bucketMinutes) {
+                p.set('bkt_r', R.bucketMinutes);
+            } else {
+                p.delete('bkt_r');
+            }
+        } else {
+            p.delete('split');
+            p.delete('lbl_r');
+            p.delete('agg_r');
+            p.delete('bkt_r');
+        }
         var newUrl = window.location.pathname;
         var qs = p.toString();
         if (qs) newUrl += '?' + qs;
@@ -1600,7 +2005,7 @@ UNIFIED_CHART_JS = """
     var dateForm = document.getElementById('dateFilter');
     if (dateForm) {
         var params = new URLSearchParams(window.location.search);
-        ['s', 'r', 'lbl', 'agg', 'bkt'].forEach(function(name) {
+        ['s', 'r', 'lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r'].forEach(function(name) {
             var val = params.get(name);
             if (val) {
                 var input = document.createElement('input');
@@ -1615,7 +2020,7 @@ UNIFIED_CHART_JS = """
     // Also keep hidden fields in sync when series change
     function syncDateFormParams() {
         if (!dateForm) return;
-        ['s', 'r', 'lbl', 'agg', 'bkt'].forEach(function(name) {
+        ['s', 'r', 'lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r'].forEach(function(name) {
             var existing = dateForm.querySelector(
                 'input[name="' + name + '"]');
             var p = new URLSearchParams(window.location.search);
@@ -1726,6 +2131,9 @@ DASHBOARD_JS = """
         if (chart.r) params.set('r', chart.r);
         params.set('start', dates.start);
         params.set('end', dates.end);
+        ['lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r'].forEach(function(k) {
+            if (chart[k]) params.set(k, chart[k]);
+        });
         return '/chart?' + params.toString();
     }
 
@@ -1933,6 +2341,10 @@ SAVE_TO_DASHBOARD_JS = """
             lbl: params.get('lbl') || '',
             agg: params.get('agg') || '',
             bkt: params.get('bkt') || '',
+            split: params.get('split') || '',
+            lbl_r: params.get('lbl_r') || '',
+            agg_r: params.get('agg_r') || '',
+            bkt_r: params.get('bkt_r') || '',
             createdAt: new Date().toISOString()
         };
 
@@ -2109,6 +2521,7 @@ def render_page(
         <script>{TOGGLE_JS}</script>
         <script>{_source_toggle_js()}</script>
         <script>{TABLE_SORT_JS}</script>
+        <script>{EXPLORE_TABS_JS}</script>
     </body>
     </html>
     """
@@ -2157,27 +2570,83 @@ to {end.isoformat()}</summary>
                     >By position</button>
             </div>
             <div id="sensor-panel">Loading sensors...</div>
-            <h4>Labels</h4>
-            <div class="group-toggle">
-                <button class="label-btn active" data-label="smart"
-                    >Smart</button>
-                <button class="label-btn" data-label="short"
-                    >Short</button>
-                <button class="label-btn" data-label="raw"
-                    >Raw ID</button>
+            <label class="axis-split-toggle">
+                <input type="checkbox" id="axis-split-toggle">
+                Configure axes separately
+            </label>
+            <div id="axis-controls-unified">
+                <h4>Labels</h4>
+                <div class="group-toggle">
+                    <button class="label-btn" data-label="smart" data-axis="left"
+                        >Smart</button>
+                    <button class="label-btn" data-label="short" data-axis="left"
+                        >Short</button>
+                    <button class="label-btn" data-label="raw" data-axis="left"
+                        >Raw ID</button>
+                </div>
+                <small>Aggregate matching labels</small>
+                <div class="group-toggle">
+                    <button class="agg-btn" data-agg="off" data-axis="left">OFF</button>
+                    <button class="agg-btn" data-agg="avg" data-axis="left">AVG</button>
+                    <button class="agg-btn" data-agg="max" data-axis="left">MAX</button>
+                    <button class="agg-btn" data-agg="min" data-axis="left">MIN</button>
+                    <button class="agg-btn" data-agg="sum" data-axis="left">SUM</button>
+                </div>
+                <div class="bucket-slider">
+                    <label>Bucket: <span class="bucket-label" data-axis="left">10 min</span></label>
+                    <input type="range" class="bucket-slider-input" data-axis="left"
+                        min="0" max="13" value="3" step="1">
+                </div>
             </div>
-            <small>Aggregate matching labels</small>
-            <div class="group-toggle">
-                <button class="agg-btn active" data-agg="off">OFF</button>
-                <button class="agg-btn" data-agg="avg">AVG</button>
-                <button class="agg-btn" data-agg="max">MAX</button>
-                <button class="agg-btn" data-agg="min">MIN</button>
-                <button class="agg-btn" data-agg="sum">SUM</button>
-            </div>
-            <div class="bucket-slider">
-                <label>Bucket: <span id="bucket-label">10 min</span></label>
-                <input type="range" id="bucket-slider"
-                    min="0" max="13" value="3" step="1">
+            <div id="axis-controls-split" style="display:none;">
+                <h4>Y-Left</h4>
+                <small>Labels</small>
+                <div class="group-toggle">
+                    <button class="label-btn" data-label="smart" data-axis="left"
+                        >Smart</button>
+                    <button class="label-btn" data-label="short" data-axis="left"
+                        >Short</button>
+                    <button class="label-btn" data-label="raw" data-axis="left"
+                        >Raw ID</button>
+                </div>
+                <small>Aggregate matching labels</small>
+                <div class="group-toggle">
+                    <button class="agg-btn" data-agg="off" data-axis="left">OFF</button>
+                    <button class="agg-btn" data-agg="avg" data-axis="left">AVG</button>
+                    <button class="agg-btn" data-agg="max" data-axis="left">MAX</button>
+                    <button class="agg-btn" data-agg="min" data-axis="left">MIN</button>
+                    <button class="agg-btn" data-agg="sum" data-axis="left">SUM</button>
+                </div>
+                <div class="bucket-slider">
+                    <label>Bucket: <span class="bucket-label" data-axis="left">10 min</span></label>
+                    <input type="range" class="bucket-slider-input" data-axis="left"
+                        min="0" max="13" value="3" step="1">
+                </div>
+                <h4>Y-Right</h4>
+                <small>Labels</small>
+                <div class="group-toggle">
+                    <button class="label-btn" data-label="smart" data-axis="right"
+                        >Smart</button>
+                    <button class="label-btn" data-label="short" data-axis="right"
+                        >Short</button>
+                    <button class="label-btn" data-label="raw" data-axis="right"
+                        >Raw ID</button>
+                </div>
+                <small>Aggregate matching labels</small>
+                <div class="group-toggle">
+                    <button class="agg-btn" data-agg="off" data-axis="right">OFF</button>
+                    <button class="agg-btn" data-agg="avg" data-axis="right">AVG</button>
+                    <button class="agg-btn" data-agg="max" data-axis="right">MAX</button>
+                    <button class="agg-btn" data-agg="min" data-axis="right">MIN</button>
+                    <button class="agg-btn" data-agg="sum" data-axis="right">SUM</button>
+                </div>
+                <div class="bucket-slider">
+                    <label>Bucket:
+                        <span class="bucket-label" data-axis="right">10 min</span>
+                    </label>
+                    <input type="range" class="bucket-slider-input" data-axis="right"
+                        min="0" max="13" value="3" step="1">
+                </div>
             </div>
         </div>
         <div class="chart-main">

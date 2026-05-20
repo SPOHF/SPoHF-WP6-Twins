@@ -6,7 +6,7 @@ Each DataSource in blue's config gets its own provider instance.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -37,6 +37,9 @@ class BlueSensorProvider:
         start: datetime | None = None,
         end: datetime | None = None,
         limit: int = 500_000,
+        *,
+        bucket: timedelta | None = None,
+        agg: str | None = None,
     ) -> pd.DataFrame:
         return await deps.fetch_data(
             sensor_tags=sensor_tags,
@@ -45,6 +48,8 @@ class BlueSensorProvider:
             end=end,
             limit=limit,
             project=self._project,
+            bucket=bucket,
+            agg=agg,
         )
 
     async def fetch_available_sensors(self) -> list[dict[str, Any]]:
@@ -61,10 +66,22 @@ class BlueSensorProvider:
         device_data: dict[str, dict] = {}
         for s in sensors:
             info = device_data.setdefault(
-                s["device"], {"sensors": set(), "readings": 0},
+                s["device"],
+                {"sensors": set(), "readings": 0, "last_seen": None},
             )
             info["sensors"].add(s["sensor"])
             info["readings"] += s["readings"]
         for info in device_data.values():
             info["sensors"] = list(info["sensors"])
         return device_data
+
+    async def fetch_manual_metadata(self) -> dict[str, Any]:
+        """Manual-upload freshness for the blue home page.
+
+        Delegates to the shared twin-agnostic manual-upload summary query.
+        Returns empty dicts until the first manual upload is applied.
+        """
+        from wp6_data.db.pool import get_pool
+        from wp6_data.db.queries import fetch_manual_summary
+
+        return await fetch_manual_summary(get_pool())

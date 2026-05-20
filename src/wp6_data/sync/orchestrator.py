@@ -11,13 +11,14 @@ import structlog
 from tenacity import RetryError
 
 from wp6_data.api import SensorReading, SpoHFClient
+from wp6_data.blue.tsdb import ensure_schema_blue
 from wp6_data.config import Settings
 from wp6_data.db import (
     close_pool,
-    ensure_schema,
     get_pool,
     init_pool,
     refresh_sensor_summary,
+    refresh_sensor_summary_recent,
     upsert_daily_coverage,
     upsert_readings,
 )
@@ -112,7 +113,7 @@ class SyncOrchestrator:
 
         pool = await init_pool(self._dsn)
         try:
-            await ensure_schema(pool)
+            await ensure_schema_blue(pool)
 
             # Sync each configured endpoint
             for endpoint in self.settings.endpoint_list:
@@ -124,8 +125,15 @@ class SyncOrchestrator:
                     logger.exception("endpoint_sync_failed", endpoint=endpoint)
                     stats["errors"].append(f"{endpoint}: {e}")
 
-            # Refresh the continuous aggregate so dashboards see new data
-            await refresh_sensor_summary(pool)
+            # Refresh the cagg so dashboards see freshly-written data
+            # immediately. The background policy runs on its own 15-min
+            # clock (not aligned with sync), so we can't rely on it for
+            # post-sync freshness. Incremental: scope to last 2 days
+            # (bounded, cheap). Full: whole-history refresh once.
+            if self.settings.sync_mode.lower() == "full":
+                await refresh_sensor_summary(pool)
+            else:
+                await refresh_sensor_summary_recent(pool)
 
             stats["duration_seconds"] = (
                 datetime.now(UTC) - start_time

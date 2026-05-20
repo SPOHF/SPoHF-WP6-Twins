@@ -10,17 +10,30 @@ image:
 # Dashboard
 dashboard:
   enabled: true
+  # Intentionally 1 replica so failures (OOM, slow query) stay visible
+  # rather than being masked by the second pod still serving requests.
   replicas: 1
   resources:
     requests:
       cpu: 200m
-      memory: 512Mi
+      memory: 768Mi
     limits:
       cpu: 750m
-      memory: 1Gi
+      memory: 2Gi
   ingress:
     enabled: true
     host: ""  # Required: e.g., wp6.example.com
+  # Blue-specific secrets (currently just the TSDB connection URL).
+  # OIDC and other genuinely-shared secrets stay in the top-level `secrets`.
+  secrets:
+    existingSecret: ""  # default: <release>-blue-secrets
+    # Keys expected in secret:
+    # - tsdb-url: Postgres connection string for blue's database (wp6_blue)
+  # Persistent volume for blue manual uploads (insect CSV + future sources).
+  # Files: /data/blue-manual-uploads/{slug}/{sha256}{suffix}; only the latest
+  # 2 per source kept on disk (audit rows in manual_uploads kept forever).
+  manualUploads:
+    size: "5Gi"
   # CSV export job (runs nightly, generates downloadable CSVs per device)
   export:
     enabled: true
@@ -35,12 +48,13 @@ dashboard:
         memory: 1Gi
 
 # Secrets (referenced from ExternalSecret or direct)
+# Top-level `secrets` holds genuinely-shared values (OIDC). Twin-specific
+# values (tsdb-url) live in `dashboard.secrets` (blue) and `red.secrets` (red).
 secrets:
   create: false  # Set to true to create secret from values, false to use existing
   existingSecret: ""  # Name of existing secret (default: <release>-secrets)
   oidcClientSecret: ""   # OIDC client secret for wp6-data client
   oidcSessionSecret: ""  # Random string for signing session cookies (generate with: python -c "import secrets; print(secrets.token_hex(32))")
-  tsdbUrl: ""        # e.g., postgresql://user:pass@host:5432/dbname
 
 # Grey Dashboard (in-memory demo, no auth, no database)
 grey:
@@ -63,6 +77,7 @@ grey:
 # Red Dashboard (MySQL backend with auth)
 red:
   enabled: false
+  # Intentionally 1 replica — same reasoning as the blue dashboard above.
   replicas: 1
   image:
     repository: ""  # If empty, uses main image.repository with "-red" suffix
@@ -70,10 +85,10 @@ red:
   resources:
     requests:
       cpu: 200m
-      memory: 512Mi
+      memory: 768Mi
     limits:
       cpu: 750m
-      memory: 1Gi
+      memory: 2Gi
   ingress:
     enabled: true
     host: ""  # Required if enabled: e.g., wp6-red.example.com
@@ -83,11 +98,22 @@ red:
     database: ""
     user: ""
     # password from secret
-  # Secret for red-specific credentials (mysql password)
+  # Secret for red-specific credentials (mysql password, tsdb url + role pw)
   secrets:
     existingSecret: ""  # Name of existing secret (default: <release>-red-secrets)
     # Keys expected in secret:
-    # - mysql-password: MySQL password
+    # - mysql-password: MySQL password (live SPoHF feed)
+    # - tsdb-url: Postgres connection string for red's database (wp6_red)
+    # - tsdb-red-password: password for the wp6_red role (used by bootstrap Job
+    #   to provision the role; must match the password embedded in tsdb-url)
+  # PVC for manually-uploaded measurement files (Sijia, etc.)
+  manualUploads:
+    size: "5Gi"
+  # Bootstrap Job (Helm hook) — creates wp6_red role + database in shared TSDB
+  tsdbBootstrap:
+    image: ""  # Defaults to timescale/timescaledb:2.26.4-pg17
+    tsdbHost: "wp6-data-timescaledb"
+    tsdbPort: "5432"
   # CSV export job (runs nightly, generates downloadable CSVs)
   export:
     enabled: true

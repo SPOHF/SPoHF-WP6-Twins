@@ -3,13 +3,34 @@
 from datetime import date, timedelta
 from unittest.mock import patch
 
+from wp6_data.shared.metadata import (
+    DeviceMetadata,
+    MetadataRegistry,
+    SensorMetadata,
+    TwinMetadata,
+)
 from wp6_data.shared.templates import (
+    build_explore_tabs,
     default_date_range,
     render_date_filter,
+    render_explore_tabs,
     render_page,
     render_unified_chart_page,
     resolve_date_range,
 )
+
+
+def _registry(
+    sensor_defaults: dict[str, SensorMetadata] | None = None,
+    devices: dict[str, DeviceMetadata] | None = None,
+) -> MetadataRegistry:
+    """Build an in-memory MetadataRegistry for tests (bypasses YAML)."""
+    reg = MetadataRegistry.__new__(MetadataRegistry)
+    reg._meta = TwinMetadata(
+        sensor_defaults=sensor_defaults or {},
+        devices=devices or {},
+    )
+    return reg
 
 
 class TestResolveDateRange:
@@ -194,3 +215,153 @@ class TestRenderUnifiedChartPage:
         html = render_unified_chart_page("Test", date(2026, 1, 1), date(2026, 1, 8))
         assert "panel-toggle" in html
         assert "Hide controls" in html
+
+
+class TestBuildExploreTabs:
+    def test_returns_three_tabs(self):
+        tabs = build_explore_tabs(_registry(), {}, {})
+        assert set(tabs) == {"devices", "sensors", "manual"}
+
+    def test_splits_sensors_by_source(self):
+        registry = _registry(
+            sensor_defaults={
+                "par": SensorMetadata(type="radiation", unit="μmol", alias="PAR"),
+                "chlorophyll": SensorMetadata(
+                    type="chemistry", unit="mg/L",
+                    alias="Chl", source="sijia",
+                ),
+            },
+            devices={
+                "s2100-01-par": DeviceMetadata(position="B4"),
+                "neurath-B-2034-strabelina": DeviceMetadata(source="sijia"),
+            },
+        )
+        device_data = {
+            "s2100-01-par": {"sensors": ["par"], "readings": 100},
+            "neurath-B-2034-strabelina": {
+                "sensors": ["chlorophyll"], "readings": 50,
+            },
+        }
+        tabs = build_explore_tabs(registry, device_data, {})
+
+        # Auto sensor only on Sensors tab
+        assert "PAR" in tabs["sensors"]
+        assert "Chl" not in tabs["sensors"]
+        # Manual sensor only on Manual tab
+        assert "Chl" in tabs["manual"]
+        assert "PAR" not in tabs["manual"]
+
+    def test_devices_tab_excludes_manual_source_devices(self):
+        registry = _registry(
+            sensor_defaults={
+                "par": SensorMetadata(type="radiation"),
+                "chlorophyll": SensorMetadata(type="chemistry", source="sijia"),
+            },
+            devices={
+                "s2100-01-par": DeviceMetadata(position="B4"),
+                "neurath-B-2034-strabelina": DeviceMetadata(source="sijia"),
+            },
+        )
+        device_data = {
+            "s2100-01-par": {"sensors": ["par"], "readings": 100},
+            "neurath-B-2034-strabelina": {
+                "sensors": ["chlorophyll"], "readings": 50,
+            },
+        }
+        tabs = build_explore_tabs(registry, device_data, {})
+
+        assert "s2100-01-par" in tabs["devices"]
+        assert "neurath-B-2034-strabelina" not in tabs["devices"]
+
+    def test_manual_tab_empty_state_when_no_manual_sensors(self):
+        registry = _registry(
+            sensor_defaults={"par": SensorMetadata(type="radiation")},
+            devices={"s2100-01-par": DeviceMetadata()},
+        )
+        device_data = {"s2100-01-par": {"sensors": ["par"], "readings": 1}}
+        tabs = build_explore_tabs(registry, device_data, {})
+        assert "No manual measurements" in tabs["manual"]
+
+
+class TestManualMeasurementTab:
+    def test_renders_with_source_grouping_columns(self):
+        registry = _registry(
+            sensor_defaults={
+                "chlorophyll": SensorMetadata(
+                    type="fruit chemistry", unit="mg/L",
+                    alias="Chlorophyll", source="sijia",
+                ),
+            },
+            devices={
+                "neurath-B-2034-strabelina": DeviceMetadata(source="sijia"),
+            },
+        )
+        device_data = {
+            "neurath-B-2034-strabelina": {
+                "sensors": ["chlorophyll"], "readings": 12, "last_seen": None,
+            },
+        }
+        tabs = build_explore_tabs(registry, device_data, {})
+        manual_html = tabs["manual"]
+        # Headers include Source first, plus Type/Measurement/Unit/Readings
+        # /Last upload/Last measure
+        for header in (
+            "Source", "Type", "Measurement", "Unit", "Readings",
+            "Last upload", "Last measure",
+        ):
+            assert f">{header}</th>" in manual_html, header
+        # Group column attribute is present (Source is col 0)
+        assert 'data-group-col="0"' in manual_html
+        # Source label sijia appears (no link, plain bold text)
+        assert "<strong>sijia</strong>" in manual_html
+
+    def test_empty_manual_keeps_descriptive_message(self):
+        registry = _registry(
+            sensor_defaults={"par": SensorMetadata(type="radiation")},
+            devices={"s2100-01-par": DeviceMetadata()},
+        )
+        device_data = {"s2100-01-par": {
+            "sensors": ["par"], "readings": 1, "last_seen": None,
+        }}
+        tabs = build_explore_tabs(registry, device_data, {})
+        assert "No manual measurements" in tabs["manual"]
+        # Empty state is a paragraph, not a table
+        assert "<table" not in tabs["manual"]
+
+
+class TestRenderExploreTabs:
+    def test_renders_all_three_tab_buttons(self):
+        html = render_explore_tabs(
+            {"devices": "<p>D</p>", "sensors": "<p>S</p>", "manual": "<p>M</p>"},
+        )
+        assert 'data-tab="devices"' in html
+        assert 'data-tab="sensors"' in html
+        assert 'data-tab="manual"' in html
+        assert "Manual measurements" in html
+
+    def test_default_active_tab_is_devices(self):
+        html = render_explore_tabs({"devices": "", "sensors": "", "manual": ""})
+        assert 'data-tab="devices" aria-selected="true"' in html
+        assert 'data-tab="sensors" aria-selected="false"' in html
+
+    def test_query_param_drives_active_tab(self):
+        html = render_explore_tabs(
+            {"devices": "", "sensors": "", "manual": ""}, active="manual",
+        )
+        assert 'data-tab="manual" aria-selected="true"' in html
+        assert 'data-tab="devices" aria-selected="false"' in html
+
+    def test_invalid_active_falls_back_to_devices(self):
+        html = render_explore_tabs(
+            {"devices": "", "sensors": "", "manual": ""}, active="nonsense",
+        )
+        assert 'data-tab="devices" aria-selected="true"' in html
+
+    def test_inactive_panels_are_hidden(self):
+        html = render_explore_tabs(
+            {"devices": "<p>D</p>", "sensors": "<p>S</p>", "manual": "<p>M</p>"},
+            active="sensors",
+        )
+        assert 'data-tab-panel="devices" hidden' in html
+        assert 'data-tab-panel="sensors">' in html
+        assert 'data-tab-panel="manual" hidden' in html

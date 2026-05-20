@@ -41,6 +41,7 @@ class SensorMetadata(BaseModel):
     unit: str = ""
     alias: str = ""
     intention: str = ""
+    source: str = ""  # routing key; "" = MySQL default for red, datalake for blue
 
 
 class DeviceMetadata(BaseModel):
@@ -51,6 +52,7 @@ class DeviceMetadata(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     type: str = ""
+    source: str = ""  # UI-labelling hint; canonical routing is sensor-level
     sensors: dict[str, SensorMetadata] = {}
 
 
@@ -79,6 +81,16 @@ class MetadataRegistry:
     def sensor_default(self, sensor_key: str) -> SensorMetadata:
         """Return the global default metadata for a measurement key."""
         return self._meta.sensor_defaults.get(sensor_key, SensorMetadata())
+
+    @property
+    def sensor_defaults(self) -> dict[str, SensorMetadata]:
+        """Read-only view of all sensor_defaults entries."""
+        return self._meta.sensor_defaults
+
+    @property
+    def devices(self) -> dict[str, DeviceMetadata]:
+        """Read-only view of all device entries."""
+        return self._meta.devices
 
     def sensor(
         self, sensor_key: str, device_key: str | None = None,

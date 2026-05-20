@@ -12,6 +12,9 @@ from typing import Any
 
 import pandas as pd
 
+from wp6_data.shared.aggregation import bucket_and_aggregate
+from wp6_data.shared.time import display_tz
+
 # Demo sensor definitions: (device, sensor, base_value, amplitude)
 _SENSORS = [
     ("herb-box-01", "temp", 22.0, 3.0),
@@ -78,6 +81,9 @@ class GreySensorProvider:
         start: datetime | None = None,
         end: datetime | None = None,
         limit: int = 500_000,
+        *,
+        bucket: timedelta | None = None,
+        agg: str | None = None,
     ) -> pd.DataFrame:
         now = datetime.now(tz=UTC)
         if end is None:
@@ -94,9 +100,13 @@ class GreySensorProvider:
             records.extend(_generate_readings(device, sensor, base, amp, start, end))
 
         df = pd.DataFrame(records)
-        if not df.empty:
-            df = df.sort_values("time").head(limit)
-        return df
+        if df.empty:
+            return df
+        df["time"] = pd.to_datetime(df["time"], utc=True)
+        if bucket is not None and agg is not None:
+            # Synthetic backend has no SQL engine — use the shared fallback.
+            return bucket_and_aggregate(df, bucket, agg, display_tz())
+        return df.sort_values("time").head(limit)
 
     async def fetch_available_sensors(self) -> list[dict[str, Any]]:
         return [
@@ -107,6 +117,13 @@ class GreySensorProvider:
     async def fetch_device_data(self) -> dict[str, dict]:
         devices: dict[str, dict] = {}
         for device, sensor, _, _ in _SENSORS:
-            info = devices.setdefault(device, {"sensors": [], "readings": 1008})
+            info = devices.setdefault(
+                device,
+                {"sensors": [], "readings": 1008, "last_seen": None},
+            )
             info["sensors"].append(sensor)
         return devices
+
+    async def fetch_manual_metadata(self) -> dict[str, Any]:
+        """Grey twin has only synthetic data, no manual uploads."""
+        return {"uploads": {}, "measurements": {}}

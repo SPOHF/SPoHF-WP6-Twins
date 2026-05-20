@@ -1,0 +1,36 @@
+"""Twin-agnostic manual-upload capability.
+
+A manual source is anything that arrives as a file an admin uploads, with
+no automated sensor pipeline behind it. The per-source seam is a single
+:class:`ManualSource` descriptor; everything else — content-addressed
+storage, transactional all-or-nothing apply, the ``manual_uploads`` audit
+trail, the 2-file prune, the preview/apply/history UI, and the CLI — is
+shared here and unaware of any specific twin or source.
+"""
+
+from wp6_data.shared.manual_ingest.cli import run_ingest
+from wp6_data.shared.manual_ingest.parsing import DecodedRow, bind
+from wp6_data.shared.manual_ingest.routes import make_card, make_source_router
+from wp6_data.shared.manual_ingest.service import ApplyResult, ManualIngestService
+from wp6_data.shared.manual_ingest.source import ManualSource
+from wp6_data.shared.manual_ingest.types import (
+    ManualParseError,
+    Reading,
+    SkippedRow,
+    ValidationReport,
+)
+
+__all__ = [
+    "ApplyResult",
+    "DecodedRow",
+    "ManualIngestService",
+    "ManualParseError",
+    "ManualSource",
+    "Reading",
+    "SkippedRow",
+    "ValidationReport",
+    "bind",
+    "make_card",
+    "make_source_router",
+    "run_ingest",
+]

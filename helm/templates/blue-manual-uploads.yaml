@@ -1,0 +1,14 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Chart.Name }}-blue-manual-uploads
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-blue-manual-uploads
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.dashboard.manualUploads.size | default "5Gi" }}
+{{- end }}

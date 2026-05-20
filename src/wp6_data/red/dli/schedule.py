@@ -11,7 +11,7 @@ from wp6_data.red.dli.constants import READING_INTERVAL_SECONDS, SECONDS_PER_HOU
 
 if False:  # TYPE_CHECKING
     from wp6_data.red.dli.model import TwoStageLightModel
-    from wp6_data.red.dli.weather import DailyForecast, OpenMeteoClient
+    from wp6_data.shared.weather import DailyForecast, OpenMeteoClient
 
 
 async def fetch_weather_for_range(

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -38,10 +38,21 @@ class SensorDataProvider(Protocol):
         start: datetime | None = None,
         end: datetime | None = None,
         limit: int = 500_000,
+        *,
+        bucket: timedelta | None = None,
+        agg: str | None = None,
     ) -> pd.DataFrame:
         """Fetch time-series readings.
 
-        Returns DataFrame with columns: device, sensor, time, value.
+        Returns a DataFrame with columns ``device, sensor, time, value``.
+
+        When ``bucket`` and ``agg`` are both given, readings are aggregated
+        server-side into fixed-width time buckets (``agg`` is one of
+        :data:`~wp6_data.shared.aggregation.CHART_AGG_FUNCS`) and an extra
+        ``count`` column carries the number of non-null raw values per bucket.
+        The row ``limit`` then applies to *bucketed* rows, so a long range no
+        longer silently truncates the underlying data. With neither set,
+        behaviour and shape are unchanged (raw rows, no ``count``).
         """
         ...
 
@@ -55,7 +66,17 @@ class SensorDataProvider(Protocol):
     async def fetch_device_data(self) -> dict[str, dict]:
         """Device overview for the home page.
 
-        Returns {device_id: {sensors: [str, ...], readings: int}}.
+        Returns ``{device_id: {sensors: [str, ...], readings: int,
+                              last_seen: datetime | None}}``.
+        """
+        ...
+
+    async def fetch_manual_metadata(self) -> dict[str, Any]:
+        """Aggregate metadata for manually-uploaded measurements.
+
+        Returns ``{"uploads": {source: datetime},
+                  "measurements": {sensor_key: datetime}}``.
+        Empty dicts when the twin has no manual data.
         """
         ...
 
@@ -126,6 +147,9 @@ class TwinConfig:
     theme: ThemeColors
     extra_routers: list[APIRouter] = field(default_factory=list)
     hero_cards: list[Callable[..., Awaitable[str] | str]] = field(
+        default_factory=list,
+    )
+    status_extras: list[Callable[..., Awaitable[str] | str]] = field(
         default_factory=list,
     )
     home_extra_html: str = ""

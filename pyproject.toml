@@ -14,6 +14,7 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "psycopg-pool>=3.2",
     "numpy>=2.0",
+    "openpyxl>=3.1.5",
     "pandas>=3.0.0",
     "plotly>=6.5.2",
     "pydantic>=2.10",
@@ -25,6 +26,7 @@ dependencies = [
     "tenacity>=9.0",
     "uvicorn>=0.40.0",
     "pyyaml>=6.0",
+    "python-multipart>=0.0.27",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +41,9 @@ dev = [
 [project.scripts]
 wp6-data-sync = "wp6_data.__main__:main"
 wp6-red-export = "wp6_data.red.export:main"
+wp6-red-ingest-sijia = "wp6_data.red.sijia.ingest:main"
 wp6-blue-export = "wp6_data.blue.export:main"
+wp6-blue-ingest-insects = "wp6_data.blue.manual:ingest_insects"
 
 [build-system]
 requires = ["hatchling"]
@@ -64,6 +68,3 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "--ignore=tests/e2e"
 markers = ["e2e: end-to-end tests requiring TimescaleDB"]
-
-[dependency-groups]
-dev = []

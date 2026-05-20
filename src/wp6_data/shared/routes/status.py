@@ -1,8 +1,9 @@
 """Shared status page: sync metrics and data coverage timeline."""
 
+import inspect
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from wp6_data.shared import (
@@ -164,14 +165,24 @@ async def _build_coverage_html(provider: SensorDataProvider) -> str:
 
 @router.get("/status", response_class=HTMLResponse)
 async def status(
+    request: Request,
     config: Annotated[TwinConfig, Depends(get_twin_config)],
     provider: Annotated[SensorDataProvider, Depends(get_provider)],
 ) -> str:
-    """Combined status page: sync status and data coverage."""
+    """Combined status page: sync status, data coverage, and twin extras."""
     sync_table = await _build_sync_table(provider)
     sync_html = sync_table if sync_table else "<p>No sync metadata available.</p>"
 
     coverage_html = await _build_coverage_html(provider)
+
+    extras_parts: list[str] = []
+    for extra_fn in config.status_extras:
+        result = extra_fn(request)
+        if inspect.isawaitable(result):
+            result = await result
+        if result:
+            extras_parts.append(result)
+    extras_html = "\n".join(extras_parts)
 
     content = f"""
         <h1>Status</h1>
@@ -180,6 +191,8 @@ async def status(
 
         {render_card("Data Coverage", coverage_html,
                       description="Each block is one week. From start of project to now.")}
+
+        {extras_html}
     """
 
     return render_page(

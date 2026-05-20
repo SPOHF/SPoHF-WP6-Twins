@@ -1,12 +1,13 @@
 """Shared JSON API endpoints for the unified chart page."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 from wp6_data.config import Settings
+from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.metadata import MetadataRegistry
 from wp6_data.shared.routes.deps import get_metadata, get_provider
@@ -49,10 +50,31 @@ async def get_series(
     start: Annotated[date | None, Query()] = None,
     end: Annotated[date | None, Query()] = None,
     limit: int = Query(default=None, description="Max records"),
+    bkt: int = Query(default=0, description="Aggregation bucket in minutes (0 = raw)"),
+    agg: str | None = Query(default=None, description="Aggregation function"),
 ) -> dict[str, Any]:
-    """Fetch time-series data for a single device+sensor combo."""
+    """Fetch time-series data for a single device+sensor combo.
+
+    When ``bkt`` > 0 and ``agg`` is one of avg/min/max/sum, aggregation is
+    pushed server-side: the ``limit`` then caps *bucketed* rows (not raw
+    readings), so long ranges no longer silently truncate, and each point
+    carries a ``count`` of underlying non-null readings for correct
+    count-weighted client-side merge of series sharing a label.
+    """
     if limit is None:
         limit = _settings.chart_query_limit
+
+    bucket: timedelta | None = None
+    if bkt > 0 and agg is not None:
+        if agg not in CHART_AGG_FUNCS:
+            valid = sorted(CHART_AGG_FUNCS)
+            return JSONResponse(
+                content={"error": f"Invalid agg {agg!r}; expected one of {valid}"},
+                status_code=400,
+            )
+        bucket = timedelta(minutes=bkt)
+    else:
+        agg = None  # bkt without agg (or vice-versa) → raw, no partial agg
 
     _start, _end, start_dt, end_dt = resolve_date_range(start, end)
 
@@ -63,19 +85,25 @@ async def get_series(
             start=start_dt,
             end=end_dt,
             limit=limit,
+            bucket=bucket,
+            agg=agg,
         )
     except Exception:
         return JSONResponse(content={"error": "Database not connected"}, status_code=503)
 
     if df.empty:
-        return {"data": [], "truncated": False}
+        return {"data": [], "truncated": False, "limit": limit}
 
     truncated = len(df) >= limit
+    has_count = "count" in df.columns
     records: list[dict[str, Any]] = []
     for _, row in df.iterrows():
         t: datetime = row["time"]
-        records.append({
+        rec: dict[str, Any] = {
             "time": to_local_isoformat(t),
             "value": None if row["value"] is None else float(row["value"]),
-        })
+        }
+        if has_count:
+            rec["count"] = int(row["count"])
+        records.append(rec)
     return {"data": records, "truncated": truncated, "limit": limit}

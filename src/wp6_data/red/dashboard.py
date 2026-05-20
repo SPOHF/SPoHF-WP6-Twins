@@ -4,12 +4,15 @@ from pathlib import Path
 
 import structlog
 
+from wp6_data.db.pool import close_pool, init_pool
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.provider import RedSensorProvider
-from wp6_data.red.routes import browse, dli, dli_model, multi_height
+from wp6_data.red.routes import browse, dli, dli_model, multi_height, sijia
 from wp6_data.red.routes import charts as red_charts
 from wp6_data.red.routes.dli_model.train import train_model_from_db
+from wp6_data.red.routes.sijia.card import render_sijia_card
+from wp6_data.red.tsdb import ensure_schema_red
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
 from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
@@ -18,7 +21,7 @@ log = structlog.get_logger()
 
 
 async def _startup() -> None:
-    """Connect to MySQL and train DLI model if needed."""
+    """Connect to MySQL, bootstrap red TSDB schema, and train DLI model if needed."""
     deps.db = MySQLConnection(
         host=deps.DB_HOST,
         port=deps.DB_PORT,
@@ -27,6 +30,9 @@ async def _startup() -> None:
         database=deps.DB_NAME,
     )
     await deps.db.connect()
+
+    pool = await init_pool(deps.settings.tsdb_url)
+    await ensure_schema_red(pool)
 
     from wp6_data.red.dli import get_model
 
@@ -50,6 +56,7 @@ async def _startup() -> None:
 async def _shutdown() -> None:
     if deps.db:
         await deps.db.close()
+    await close_pool()
 
 
 def _dli_card() -> str:
@@ -76,7 +83,7 @@ config = TwinConfig(
     data_sources=[
         DataSource(
             key="mysql", label="GTL (MySQL, LoRaWAN)",
-            provider=RedSensorProvider(),
+            provider=RedSensorProvider(metadata=deps.metadata),
         ),
     ],
     metadata=deps.metadata,
@@ -85,9 +92,12 @@ config = TwinConfig(
         primary="#dc2626", primary_light="#ef4444", primary_dark="#b91c1c",
         accent="#f97316", surface_rgb="220, 38, 38",
     ),
+
     extra_routers=[browse.router, dli.router, dli_model.router, red_charts.router, \
-                   multi_height.router],
+                   multi_height.router, sijia.router],
     hero_cards=[_dli_card, _multi_height_card],
+    status_extras=[render_sijia_card],
+
     home_extra_html=(
         '<a href="/static/red/sensor_locations.docx" download role="button"'
         ' class="outline" style="width:100%">'
@@ -102,4 +112,10 @@ app = create_app(config)
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    from wp6_data.shared.compat import run_async
+
+    async def _serve() -> None:
+        cfg = uvicorn.Config(app, host="0.0.0.0", port=8000)
+        await uvicorn.Server(cfg).serve()
+
+    run_async(_serve())

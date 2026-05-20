@@ -27,7 +27,7 @@ Both sources store data in the same TimescaleDB instance, separated by the `proj
 
 ```bash
 # 1. Start TimescaleDB
-docker compose -f docker-compose.blue.yml up -d
+docker compose -f docker-compose.tsdb.yml up -d
 
 # 2. Install dependencies
 uv sync
@@ -81,8 +81,8 @@ Non-numeric sensor values (e.g. `"high"`, `"low"`) are stored as `NULL` in the `
 ### Local Development Database
 
 ```bash
-docker compose -f docker-compose.blue.yml up -d    # Start TimescaleDB on port 5433
-docker compose -f docker-compose.blue.yml down -v   # Fresh start (destroys data)
+docker compose -f docker-compose.tsdb.yml up -d    # Start TimescaleDB on port 5433
+docker compose -f docker-compose.tsdb.yml down -v   # Fresh start (destroys data)
 ```
 
 ### Application Images
