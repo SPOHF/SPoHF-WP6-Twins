@@ -1246,29 +1246,53 @@ CORRELATE_JS = """
             });
     }
 
+    var allSensors = [];
+    var currentGrouping = 'measurement';
+
     // --- Build sensor tree ---
-    function buildPanel(sensors) {
+    function buildPanel(sensors, groupBy) {
         var groups = {};
         sensors.forEach(function(s) {
-            var type = s.type || s.sensor;
-            if (!groups[type]) groups[type] = [];
-            groups[type].push(s);
+            var key;
+            if (groupBy === 'device') key = s.device;
+            else if (groupBy === 'position')
+                key = (s.device_meta && s.device_meta.position) || 'Ungrouped';
+            else key = (s.sensor_meta && s.sensor_meta.type) || s.sensor;
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(s);
         });
 
         var html = '';
-        Object.keys(groups).sort().forEach(function(type) {
-            html += '<details class="sensor-group" open><summary>'
-                + type + ' <span class="group-badge" id="badge-' + type + '"></span>'
+        Object.keys(groups).sort().forEach(function(groupKey) {
+            var items = groups[groupKey];
+            var open = items.some(function(s) {
+                return selectedSensors.indexOf(s.device + ':' + s.sensor) !== -1;
+            });
+            html += '<details class="sensor-group"' + (open ? ' open' : '') + '>';
+            html += '<summary>' + groupKey
+                + ' <small>(' + items.length + ')</small>'
+                + '<span class="group-badge"></span>'
                 + '</summary>';
-            groups[type].forEach(function(s) {
+            items.forEach(function(s) {
                 var key = s.device + ':' + s.sensor;
+                var sm = s.sensor_meta || {};
+                var dm = s.device_meta || {};
+                var label;
+                if (groupBy === 'device') label = sm.alias || s.sensor;
+                else if (groupBy === 'position') label = (sm.alias || s.sensor) + ' \u2014 ' + s.device;
+                else label = s.device + ' \u2014 ' + (sm.alias || s.sensor);
+                var unitBadge = sm.unit ? ' <span class="unit-badge">' + sm.unit + '</span>' : '';
+                var tipParts = [key];
+                if (dm.description) tipParts.push(dm.description);
+                if (dm.position) tipParts.push('Position: ' + dm.position);
+                if (sm.intention) tipParts.push(sm.intention);
+                var tip = tipParts.join(' | ');
                 var checked = selectedSensors.indexOf(key) !== -1;
-                var label = s.label || (s.device + '\u2014' + s.sensor);
                 html += '<div class="sensor-item' + (checked ? ' active' : '') + '"'
                     + ' data-key="' + key + '">'
                     + '<label class="cb-label"><input type="checkbox" data-key="' + key + '"'
                     + (checked ? ' checked' : '') + '></label>'
-                    + '<span class="device-name" title="' + key + '">' + label + '</span>'
+                    + '<span class="device-name" title="' + tip + '">' + label + unitBadge + '</span>'
                     + '</div>';
             });
             html += '</details>';
@@ -1332,6 +1356,20 @@ CORRELATE_JS = """
         });
     }
 
+    // --- Grouping toggle ---
+    var corrGroupBtns = document.querySelectorAll('.group-btn[data-group]');
+    corrGroupBtns.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var mode = btn.dataset.group;
+            if (mode === currentGrouping) return;
+            currentGrouping = mode;
+            corrGroupBtns.forEach(function(b) {
+                b.classList.toggle('active', b === btn);
+            });
+            buildPanel(allSensors, currentGrouping);
+        });
+    });
+
     // --- Method toggle ---
     document.querySelectorAll('.corr-method-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {
@@ -1388,8 +1426,22 @@ CORRELATE_JS = """
 
     fetch('/api/sensors')
         .then(function(r) { return r.json(); })
-        .then(function(sensors) {
-            buildPanel(sensors);
+        .then(function(data) {
+            allSensors = [];
+            if (Array.isArray(data)) {
+                data.forEach(function(d) {
+                    var dm = d.meta || {};
+                    (d.sensors || []).forEach(function(s) {
+                        allSensors.push({
+                            device: d.device,
+                            sensor: s.sensor,
+                            device_meta: dm,
+                            sensor_meta: s.meta || {},
+                        });
+                    });
+                });
+            }
+            buildPanel(allSensors, currentGrouping);
             if (selectedSensors.length >= 2) refresh();
             else if (selectedSensors.length > 0) {
                 statsDiv.textContent = 'Select at least 2 sensors to compute correlation.';
@@ -1445,6 +1497,50 @@ UNIFIED_CHART_JS = """
 
     var leftSpecs = (params.get('s') || '').split(',').filter(Boolean);
     var rightSpecs = (params.get('r') || '').split(',').filter(Boolean);
+
+    // Chart-type picker: show card selection when no chart type or sensors chosen
+    if (!params.get('ct') && leftSpecs.length === 0 && rightSpecs.length === 0) {
+        var outerPanel = document.querySelector('.sensor-panel');
+        if (outerPanel) outerPanel.classList.add('collapsed');
+        var emptyHint = document.getElementById('chart-empty');
+        if (emptyHint) emptyHint.style.display = 'none';
+        if (toggleBtn) toggleBtn.style.display = 'none';
+        var saveBtn = document.getElementById('save-to-dashboard');
+        if (saveBtn) saveBtn.style.display = 'none';
+        var pickerStyle = document.createElement('style');
+        pickerStyle.textContent = [
+            '.ct-picker{display:flex;gap:2rem;justify-content:center;align-items:center;',
+            'min-height:500px;flex-wrap:wrap;}',
+            '.ct-card{display:flex;flex-direction:column;align-items:center;',
+            'padding:2rem 2.5rem;border:1px solid var(--pico-muted-border-color,#dee2e6);',
+            'border-radius:0.75rem;text-decoration:none;color:inherit;',
+            'transition:background 0.15s,box-shadow 0.15s;min-width:170px;',
+            'background:var(--dashboard-surface,#fff);}',
+            '.ct-card:hover,.ct-card:focus-visible{',
+            'background:var(--dashboard-surface-hover,#f4f6f8);',
+            'box-shadow:0 4px 16px rgba(0,0,0,0.1);outline:none;}'
+        ].join('');
+        document.head.appendChild(pickerStyle);
+        chartDiv.innerHTML = '<div class="ct-picker">'
+            + '<a class="ct-card" href="?ct=line">'
+            + '<span style="font-size:2.5rem">&#128200;</span>'
+            + '<strong style="margin-top:0.75rem">Line Chart</strong>'
+            + '<span style="font-size:0.82rem;opacity:0.65;margin-top:0.25rem;text-align:center">Trends over time</span>'
+            + '</a>'
+            + '<a class="ct-card" href="?ct=bar_v">'
+            + '<span style="font-size:2.5rem">&#128202;</span>'
+            + '<strong style="margin-top:0.75rem">Bar Chart</strong>'
+            + '<span style="font-size:0.82rem;opacity:0.65;margin-top:0.25rem;text-align:center">Grouped comparisons</span>'
+            + '</a>'
+            + '<a class="ct-card" href="/correlate">'
+            + '<span style="font-size:2.5rem">&#128290;</span>'
+            + '<strong style="margin-top:0.75rem">Correlation Matrix</strong>'
+            + '<span style="font-size:0.82rem;opacity:0.65;margin-top:0.25rem;text-align:center">Sensor relationships</span>'
+            + '</a>'
+            + '</div>';
+        return;
+    }
+
     var startDate = params.get('start') || '';
     var endDate = params.get('end') || '';
 
@@ -1494,6 +1590,19 @@ UNIFIED_CHART_JS = """
         yaxis2: {overlaying: 'y', side: 'right', showgrid: false}
     };
     Plotly.newPlot(chartDiv, [], layout, {responsive: true});
+
+    // Show only the relevant chart-type controls for the current mode:
+    // line mode → hide the whole section; bar mode → hide the Line button only
+    (function restrictChartTypeUI() {
+        var section = document.getElementById('chart-type-section');
+        if (!section) return;
+        if (chartType === 'line') {
+            section.style.display = 'none';
+        } else {
+            var lineBtn = section.querySelector('.ct-btn[data-ct="line"]');
+            if (lineBtn) lineBtn.style.display = 'none';
+        }
+    }());
 
     // Toggle panel
     if (toggleBtn) {
@@ -2112,10 +2221,16 @@ UNIFIED_CHART_JS = """
 
         if (traces.length > 0) Plotly.addTraces(chartDiv, traces);
 
-        // Keep layout in sync with chart type
+        // Keep layout in sync with chart type; reset axis types so Plotly
+        // re-infers them from the new trace data (prevents date-type axis
+        // being reused when switching between vertical and horizontal bars).
         Plotly.relayout(chartDiv, {
             hovermode: chartType === 'bar_h' ? 'y unified' : 'x unified',
-            barmode: chartType !== 'line' ? 'group' : null
+            barmode: chartType !== 'line' ? 'group' : null,
+            'xaxis.type': '-',
+            'yaxis.type': '-',
+            'xaxis.autorange': true,
+            'yaxis.autorange': true
         });
         rebuildShapes();
 
@@ -3007,13 +3122,13 @@ def render_unified_chart_page(
 
     content = f"""
     <div class="chart-layout">
-        <div class="sensor-panel" id="sensor-panel-wrapper">
+        <div class="sensor-panel" id="sensor-panel-wrapper"><script>(function(){{var p=new URLSearchParams(location.search);if(!p.get('ct')&&!p.get('s')&&!p.get('r')){{document.currentScript.parentElement.classList.add('collapsed');}}}})();</script>
             <details class="date-filter-collapsible" open>
                 <summary>Date range: {start.isoformat()} \
 to {end.isoformat()}</summary>
                 {filter_html}
             </details>
-            <div style="margin-bottom:0.5rem">
+            <div id="chart-type-section" style="margin-bottom:0.5rem">
                 <small style="color:var(--pico-muted-color)">Chart type</small>
                 <div class="group-toggle">
                     <button class="ct-btn active" data-ct="line">Line</button>
@@ -3258,11 +3373,14 @@ def render_correlation_page(
             <h4>Method</h4>
             <div class="group-toggle">
                 <button class="group-btn corr-method-btn active"
-                    data-method="pearson">Pearson</button>
+                    data-method="pearson"
+                    title="Pearson r: measures linear correlation. Best for normally-distributed continuous data with a linear relationship.">Pearson</button>
                 <button class="group-btn corr-method-btn"
-                    data-method="spearman">Spearman</button>
+                    data-method="spearman"
+                    title="Spearman \u03c1: rank-based correlation. Captures monotonic (not just linear) relationships and is robust to outliers.">Spearman</button>
                 <button class="group-btn corr-method-btn"
-                    data-method="kendall">Kendall</button>
+                    data-method="kendall"
+                    title="Kendall \u03c4: concordance-based rank correlation. More reliable for small samples and handles ties better than Spearman.">Kendall</button>
             </div>
             <hr style="margin:0.5rem 0">
             <h4>Date range</h4>
@@ -3285,6 +3403,14 @@ def render_correlation_page(
             <hr style="margin:0.5rem 0">
             <h4>Sensors <a href="#" id="corr-clear"
                 class="clear-btn" title="Clear all selections">[x]</a></h4>
+            <div class="group-toggle">
+                <button class="group-btn active" data-group="measurement"
+                    >By type</button>
+                <button class="group-btn" data-group="device"
+                    >By device</button>
+                <button class="group-btn" data-group="position"
+                    >By position</button>
+            </div>
             <div id="correlate-sensor-panel">Loading sensors&hellip;</div>
         </div>
         <div class="chart-main">
@@ -3297,8 +3423,8 @@ def render_correlation_page(
         </div>
     </div>
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-    <script>{{CORRELATE_JS}}</script>
-    """.replace("{{CORRELATE_JS}}", CORRELATE_JS)
+    <script>{CORRELATE_JS}</script>
+    """
 
     return render_page(
         f"{title_prefix} \u2014 Correlate",
