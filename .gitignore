@@ -40,5 +40,5 @@ exports-blue/
 # Experiments with dashboards
 dev/data/
 *.parquet
-*.csv
+# *.csv
 .ipynb_checkpoints/
