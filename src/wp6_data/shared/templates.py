@@ -1279,7 +1279,8 @@ CORRELATE_JS = """
                 var dm = s.device_meta || {};
                 var label;
                 if (groupBy === 'device') label = sm.alias || s.sensor;
-                else if (groupBy === 'position') label = (sm.alias || s.sensor) + ' \u2014 ' + s.device;
+                else if (groupBy === 'position') label = (sm.alias || s.sensor)\
+                    + ' \u2014 ' + s.device;
                 else label = s.device + ' \u2014 ' + (sm.alias || s.sensor);
                 var unitBadge = sm.unit ? ' <span class="unit-badge">' + sm.unit + '</span>' : '';
                 var tipParts = [key];
@@ -1292,7 +1293,8 @@ CORRELATE_JS = """
                     + ' data-key="' + key + '">'
                     + '<label class="cb-label"><input type="checkbox" data-key="' + key + '"'
                     + (checked ? ' checked' : '') + '></label>'
-                    + '<span class="device-name" title="' + tip + '">' + label + unitBadge + '</span>'
+                    + '<span class="device-name" title="' + tip + '">'\
+                    + label + unitBadge + '</span>'
                     + '</div>';
             });
             html += '</details>';
@@ -1525,17 +1527,20 @@ UNIFIED_CHART_JS = """
             + '<a class="ct-card" href="?ct=line">'
             + '<span style="font-size:2.5rem">&#128200;</span>'
             + '<strong style="margin-top:0.75rem">Line Chart</strong>'
-            + '<span style="font-size:0.82rem;opacity:0.65;margin-top:0.25rem;text-align:center">Trends over time</span>'
+            + '<span style="font-size:0.82rem;opacity:0.65;'\
+            + 'margin-top:0.25rem;text-align:center">Trends over time</span>'
             + '</a>'
             + '<a class="ct-card" href="?ct=bar_v">'
             + '<span style="font-size:2.5rem">&#128202;</span>'
             + '<strong style="margin-top:0.75rem">Bar Chart</strong>'
-            + '<span style="font-size:0.82rem;opacity:0.65;margin-top:0.25rem;text-align:center">Grouped comparisons</span>'
+            + '<span style="font-size:0.82rem;opacity:0.65;'\
+            + 'margin-top:0.25rem;text-align:center">Grouped comparisons</span>'
             + '</a>'
             + '<a class="ct-card" href="/correlate">'
             + '<span style="font-size:2.5rem">&#128290;</span>'
             + '<strong style="margin-top:0.75rem">Correlation Matrix</strong>'
-            + '<span style="font-size:0.82rem;opacity:0.65;margin-top:0.25rem;text-align:center">Sensor relationships</span>'
+            + '<span style="font-size:0.82rem;opacity:0.65;'\
+            + 'margin-top:0.25rem;text-align:center">Sensor relationships</span>'
             + '</a>'
             + '</div>';
         return;
@@ -3112,7 +3117,11 @@ def render_unified_chart_page(
 
     content = f"""
     <div class="chart-layout">
-        <div class="sensor-panel" id="sensor-panel-wrapper"><script>(function(){{var p=new URLSearchParams(location.search);if(!p.get('ct')&&!p.get('s')&&!p.get('r')){{document.currentScript.parentElement.classList.add('collapsed');}}}})();</script>
+        <div class="sensor-panel" id="sensor-panel-wrapper">\
+<script>(function(){{var p=new URLSearchParams(location.search);\
+if(!p.get('ct')&&!p.get('s')&&!p.get('r'))\
+{{document.currentScript.parentElement.classList.add('collapsed');}}}})();\
+</script>
             <details class="date-filter-collapsible" open>
                 <summary>Date range: {start.isoformat()} \
 to {end.isoformat()}</summary>
@@ -3363,13 +3372,16 @@ def render_correlation_page(
             <div class="group-toggle">
                 <button class="group-btn corr-method-btn active"
                     data-method="pearson"
-                    title="Pearson r: measures linear correlation. Best for normally-distributed continuous data with a linear relationship.">Pearson</button>
+                    title="Pearson r: measures linear correlation. Best for\
+ normally-distributed continuous data with a linear relationship.">Pearson</button>
                 <button class="group-btn corr-method-btn"
                     data-method="spearman"
-                    title="Spearman \u03c1: rank-based correlation. Captures monotonic (not just linear) relationships and is robust to outliers.">Spearman</button>
+                    title="Spearman \u03c1: rank-based correlation. \
+Captures monotonic (not just linear) relationships and is robust to outliers.">Spearman</button>
                 <button class="group-btn corr-method-btn"
                     data-method="kendall"
-                    title="Kendall \u03c4: concordance-based rank correlation. More reliable for small samples and handles ties better than Spearman.">Kendall</button>
+                    title="Kendall \u03c4: concordance-based rank correlation. \
+More reliable for small samples and handles ties better than Spearman.">Kendall</button>
             </div>
             <hr style="margin:0.5rem 0">
             <h4>Date range</h4>
