@@ -72,7 +72,7 @@ def _multi_height_card() -> str:
         "Multi Height Profile",
         '<a href="/multi_height" role="button">Multi Height Dashboard</a>',
         description="Visual overview of sensor data at multiple heights.",
-        card_class="card-bg card-bg-green",
+        card_class="card-bg card-bg-multi-height",
     )
 
 
