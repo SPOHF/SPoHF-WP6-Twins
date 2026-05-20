@@ -3,8 +3,77 @@
 Extracted from red/dli/aggregation.py for cross-twin reuse.
 """
 
+from datetime import timedelta
+from zoneinfo import ZoneInfo
+
 import numpy as np
 import pandas as pd
+
+# Canonical chart aggregation functions. Single source of truth shared by:
+#   - /api/series input validation,
+#   - the TSDB SQL push-down (avg/min/max/sum are valid aggregate function
+#     names in both PostgreSQL and MySQL, so the key doubles as the SQL func),
+#   - the pandas fallback below (value = the mapped pandas op).
+CHART_AGG_FUNCS: dict[str, str] = {
+    "avg": "mean",
+    "min": "min",
+    "max": "max",
+    "sum": "sum",
+}
+
+# Column contract for bucketed output, in order.
+BUCKETED_COLUMNS = ["device", "sensor", "time", "value", "count"]
+
+
+def bucket_and_aggregate(
+    df: pd.DataFrame,
+    bucket: timedelta,
+    agg: str,
+    tz: ZoneInfo,
+) -> pd.DataFrame:
+    """Bucket a long-format readings frame per (device, sensor) and aggregate.
+
+    Fallback for backends that cannot bucket server-side (legacy red MySQL,
+    synthetic grey). The TSDB providers do the equivalent in SQL; both legs
+    MUST produce the same shape so the contract is uniform:
+
+        in:  columns device, sensor, time (tz-aware UTC), value
+        out: columns device, sensor, time, value, count
+
+    ``time`` is the bucket start; ``count`` is the number of non-null raw
+    values in the bucket. ``count`` is required so the client can recombine
+    series that share an axis label with a count-weighted average (an
+    average-of-averages would otherwise be wrong).
+
+    Buckets are floored at ``tz`` wall-clock to match
+    ``time_bucket(interval, time, <tz>)``. The two DST-transition buckets per
+    year in this fallback leg are an accepted approximation — the legacy path
+    is migrating to TimescaleDB where the SQL push-down is exact.
+    """
+    if agg not in CHART_AGG_FUNCS:
+        raise ValueError(f"Unknown aggregation {agg!r}; expected one of {sorted(CHART_AGG_FUNCS)}")
+    if df.empty:
+        return pd.DataFrame(columns=BUCKETED_COLUMNS)
+
+    pandas_op = CHART_AGG_FUNCS[agg]
+    freq = pd.Timedelta(bucket)
+
+    # Floor at local wall-clock, then return to UTC — mirrors TimescaleDB's
+    # timezone-aware time_bucket so day/hour boundaries land on local midnight.
+    floored = (
+        df["time"]
+        .dt.tz_convert(tz)
+        .dt.tz_localize(None)
+        .dt.floor(freq)
+        .dt.tz_localize(tz, ambiguous=True, nonexistent="shift_forward")
+        .dt.tz_convert("UTC")
+    )
+
+    grouped = df.assign(time=floored).groupby(
+        ["device", "sensor", "time"], sort=True,
+    )["value"]
+    out = grouped.agg(value=pandas_op, count="count").reset_index()
+    return out[BUCKETED_COLUMNS]
 
 
 def encode_day_of_year(day: int) -> tuple[float, float]:

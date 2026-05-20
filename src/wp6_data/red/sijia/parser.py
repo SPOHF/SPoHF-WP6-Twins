@@ -1,12 +1,42 @@
-"""Parser for the Sijia (Neurath) seasonal greenhouse Excel dataset."""
+"""Parser for the Sijia (Neurath) seasonal greenhouse Excel dataset.
 
-import hashlib
+This is the source-specific half of the manual-ingest capability: the
+Excel/openpyxl reading, the Sijia column→sensor map, the Neurath device
+naming, and the percentage scaling. The twin-agnostic data types
+(``Reading``/``SkippedRow``/``ValidationReport``) and the base parse error
+now live in ``wp6_data.shared.manual_ingest`` and are re-exported here so the
+existing Sijia parser test suite and importers are unaffected.
+"""
+
 import io
-from collections import defaultdict
-from dataclasses import dataclass
-from datetime import date, datetime, time
+from collections.abc import Iterator
+from datetime import datetime, time
 
 import openpyxl
+
+from wp6_data.shared.manual_ingest.parsing import DecodedRow, bind
+from wp6_data.shared.manual_ingest.types import (
+    ManualParseError,
+    Reading,
+    SkippedRow,
+    ValidationReport,
+)
+
+__all__ = [
+    "COLUMN_TO_SENSOR",
+    "DEFAULT_MEASUREMENT_HOUR",
+    "EXPECTED_HEADERS",
+    "META_COLUMNS",
+    "PERCENTAGE_SENSORS",
+    "SHEET_NAME",
+    "SOURCE",
+    "Reading",
+    "SijiaParseError",
+    "SkippedRow",
+    "ValidationReport",
+    "parse",
+    "validate",
+]
 
 SOURCE = "sijia"
 SHEET_NAME = "2025-26_Measurement"
@@ -43,51 +73,14 @@ EXPECTED_HEADERS: tuple[str, ...] = META_COLUMNS + tuple(COLUMN_TO_SENSOR.keys()
 PERCENTAGE_SENSORS: frozenset[str] = frozenset({"water_content", "minerals"})
 
 
-class SijiaParseError(Exception):
-    """File is structurally unparseable (wrong sheet, wrong headers).
+class SijiaParseError(ManualParseError):
+    """Sijia file is structurally unparseable (wrong sheet, wrong headers).
 
     Per-row dtype failures are reported via ValidationReport.skipped_rows
-    rather than raised — only structural failures fast-fail.
+    rather than raised — only structural failures fast-fail. Subclasses the
+    shared ManualParseError so the shared route factory can render a friendly
+    rejection page for it.
     """
-
-
-@dataclass(frozen=True)
-class Reading:
-    source: str
-    device_name: str
-    sensor_tag: str
-    time: datetime
-    value: float
-
-
-@dataclass(frozen=True)
-class SkippedRow:
-    row_index: int  # 1-based, matching Excel row numbering
-    reason: str
-
-
-@dataclass(frozen=True)
-class ValidationReport:
-    file_hash: str  # sha256 hex
-    file_size: int  # bytes
-    total_rows: int  # populated source rows (NaN-Date filler dropped)
-    valid_rows: int  # source rows that survived dtype validation
-    # Number of rows that will be INSERTed into `readings` if Apply is clicked.
-    # Differs from valid_rows: each Excel row produces up to 14 readings (one
-    # per non-NaN sensor cell), and rows sharing (device, time, sensor) are
-    # aggregated to a single mean-valued reading. This is the field to compare
-    # against `existing_row_count` for regression detection.
-    emitted_row_count: int = 0
-    skipped_rows: tuple[SkippedRow, ...] = ()
-    devices: tuple[str, ...] = ()  # sorted, distinct
-    sensors: tuple[str, ...] = ()  # sorted, distinct
-    date_range: tuple[date, date] | None = None  # None when no valid rows
-    # Comparison facts vs. existing data for the same source. Populated by
-    # ManualIngestService.validate(); the parser leaves them at defaults.
-    existing_row_count: int = 0
-    existing_date_range: tuple[date, date] | None = None
-    devices_removed: tuple[str, ...] = ()  # in existing, missing from new
-    sensors_removed: tuple[str, ...] = ()  # in existing, missing from new
 
 
 def _device_name(variety: str, block: str, row: float) -> str:
@@ -104,11 +97,12 @@ _SENSOR_COL_INDICES: tuple[tuple[int, str], ...] = tuple(
 )
 
 
-def _extract(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
-    """Shared pipeline. Validates structure, then returns (readings, skipped, total_rows).
+def _decode(file_bytes: bytes) -> Iterator[DecodedRow | SkippedRow]:
+    """Decode the Sijia workbook into one row per measurement.
 
-    Raises SijiaParseError if the sheet or column headers don't match expectations.
-    Per-row dtype failures are collected into `skipped`, not raised.
+    The only Sijia-specific code: structural validation, the Neurath device
+    naming, the date→13:00 anchoring and the percentage scaling. Bucketing,
+    mean-aggregation and the ValidationReport are the shared scaffold.
 
     Implementation note: openpyxl in read_only mode is used directly rather
     than pandas read_excel because the Sijia file routinely carries 6+
@@ -140,16 +134,11 @@ def _extract(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
                 f"got {actual_headers!r}"
             )
 
-        buckets: dict[tuple[str, datetime, str], list[float]] = defaultdict(list)
-        skipped: list[SkippedRow] = []
-        total_rows = 0
-
         for excel_idx, raw_row in enumerate(rows_iter, start=2):
             # First all-empty / NULL-Date row marks end of measurements;
             # Excel pads worksheets to 1,048,576 rows that we must NOT iterate.
             if raw_row[_DATE_COL_IDX] is None:
                 break
-            total_rows += 1
 
             variety = raw_row[_VARIETY_COL_IDX]
             block = raw_row[_BLOCK_COL_IDX]
@@ -179,50 +168,13 @@ def _extract(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
                 row_cells.append((sensor, scaled))
 
             if error is not None:
-                skipped.append(SkippedRow(row_index=excel_idx, reason=error))
-                continue
-            for sensor, scaled in row_cells:
-                buckets[(device, ts, sensor)].append(scaled)
+                yield SkippedRow(row_index=excel_idx, reason=error)
+            else:
+                yield DecodedRow(
+                    device_name=device, time=ts, cells=tuple(row_cells),
+                )
     finally:
         wb.close()
 
-    readings = [
-        Reading(
-            source=SOURCE,
-            device_name=device,
-            sensor_tag=sensor,
-            time=ts,
-            value=sum(values) / len(values),
-        )
-        for (device, ts, sensor), values in buckets.items()
-    ]
-    return readings, skipped, total_rows
 
-
-def parse(file_bytes: bytes) -> list[Reading]:
-    readings, _, _ = _extract(file_bytes)
-    return readings
-
-
-def validate(file_bytes: bytes) -> ValidationReport:
-    readings, skipped, total_rows = _extract(file_bytes)
-
-    devices = tuple(sorted({r.device_name for r in readings}))
-    sensors = tuple(sorted({r.sensor_tag for r in readings}))
-    if readings:
-        dates = sorted({r.time.date() for r in readings})
-        date_range: tuple[date, date] | None = (dates[0], dates[-1])
-    else:
-        date_range = None
-
-    return ValidationReport(
-        file_hash=hashlib.sha256(file_bytes).hexdigest(),
-        file_size=len(file_bytes),
-        total_rows=total_rows,
-        valid_rows=total_rows - len(skipped),
-        emitted_row_count=len(readings),
-        skipped_rows=tuple(skipped),
-        devices=devices,
-        sensors=sensors,
-        date_range=date_range,
-    )
+parse, validate = bind(SOURCE, _decode)

@@ -1,8 +1,9 @@
 """Twin-agnostic upload storage for manually-uploaded source files.
 
-Files land at ``{base_dir}/{source}/{sha256}.xlsx`` so they're addressable by
-hash (the validation_id used by the upload flow) and grouped per source for
-the 2-file prune policy (issue 008).
+Files land at ``{base_dir}/{source}/{sha256}{suffix}`` so they're addressable
+by hash (the validation_id used by the upload flow) and grouped per source for
+the 2-file prune policy. ``suffix`` comes from the source descriptor and
+defaults to ``.xlsx`` so callers that omit it are unaffected.
 
 The audit table (``manual_uploads``) is the system of record for upload
 provenance — pruning unlinks files from disk and marks the corresponding
@@ -23,17 +24,27 @@ class UploadStorage:
         self.base_dir = base_dir
         self.pool = pool
 
-    def write(self, source: str, file_bytes: bytes) -> tuple[Path, str]:
+    def path_for(
+        self, source: str, file_hash: str, suffix: str = ".xlsx",
+    ) -> Path:
+        """Where the file for ``file_hash`` lives — the single place that
+        knows the ``{base_dir}/{source}/{hash}{suffix}`` layout, so write and
+        the service's read-back agree on the path."""
+        return self.base_dir / source / f"{file_hash}{suffix}"
+
+    def write(
+        self, source: str, file_bytes: bytes, suffix: str = ".xlsx",
+    ) -> tuple[Path, str]:
         """Persist `file_bytes` under the per-source directory.
 
         The filename is the sha256 hex of the bytes, which makes writes
         idempotent (the same bytes always land at the same path) and lets
-        callers use the hash as the validation_id.
+        callers use the hash as the validation_id. ``suffix`` keeps the
+        on-disk extension honest per source (defaults to ``.xlsx``).
         """
         file_hash = hashlib.sha256(file_bytes).hexdigest()
-        source_dir = self.base_dir / source
-        source_dir.mkdir(parents=True, exist_ok=True)
-        path = source_dir / f"{file_hash}.xlsx"
+        path = self.path_for(source, file_hash, suffix)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(file_bytes)
         return path, file_hash
 

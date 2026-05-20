@@ -1,10 +1,19 @@
 """Shared fixtures for e2e tests requiring a real TimescaleDB instance."""
 
-import psycopg
-import pytest_asyncio
-from psycopg_pool import AsyncConnectionPool
+import os
 
-from wp6_data.db.schema import ensure_schema
+# Blue is an authenticated twin (require_auth=True), so building its app
+# enters a lifespan that runs OIDC startup. e2e runs in a clean env with no
+# OIDC secrets and no reachable issuer; dev-auth mode makes startup_oidc
+# short-circuit before any secret check or network call. setdefault so a
+# real OIDC env still wins. Must be set before the blue app is imported.
+os.environ.setdefault("WP6_OIDC_DEV_AUTH", "true")
+
+import psycopg  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from psycopg_pool import AsyncConnectionPool  # noqa: E402
+
+from wp6_data.blue.tsdb import ensure_schema_blue  # noqa: E402
 
 TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
 RED_TSDB_DSN = "postgresql://wp6_red:wp6dev@localhost:5433/wp6_red"
@@ -21,7 +30,7 @@ async def _bootstrap_blue_schema():
     pool = AsyncConnectionPool(TSDB_DSN, min_size=1, max_size=1, open=False)
     await pool.open()
     try:
-        await ensure_schema(pool)
+        await ensure_schema_blue(pool)
         yield
     finally:
         await pool.close()

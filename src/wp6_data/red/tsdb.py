@@ -14,7 +14,7 @@ readings hypertable.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -22,24 +22,17 @@ import structlog
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from wp6_data.config import Settings
 from wp6_data.db.queries import rebuild_daily_coverage
-from wp6_data.db.schema import ensure_aggregates
+from wp6_data.db.schema import MANUAL_UPLOADS_SQL, ensure_aggregates
+from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 
 logger = structlog.get_logger()
 
-SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS manual_uploads (
-    id          BIGSERIAL    PRIMARY KEY,
-    source      TEXT         NOT NULL,
-    filename    TEXT         NOT NULL,
-    file_hash   TEXT         NOT NULL,
-    file_path   TEXT,
-    file_pruned BOOLEAN      NOT NULL DEFAULT FALSE,
-    uploaded_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    row_count   INTEGER      NOT NULL,
-    error       TEXT
-);
-
+# `manual_uploads` is now the shared, twin-agnostic constant; red's readings
+# DDL (with its `source` column + `upload_id` FK + source-aware dedup index)
+# stays red-owned. Composed so the emitted bootstrap SQL is unchanged.
+_READINGS_RED_SQL = """
 CREATE TABLE IF NOT EXISTS readings (
     time        TIMESTAMPTZ      NOT NULL,
     device_name TEXT             NOT NULL,
@@ -59,6 +52,10 @@ CREATE INDEX IF NOT EXISTS idx_readings_device_tag
 CREATE UNIQUE INDEX IF NOT EXISTS idx_readings_dedup
     ON readings (source, device_name, sensor_tag, time);
 """
+
+# Shared audit table + red readings DDL. Concatenation preserves the exact
+# statement set red bootstrapped before promotion.
+SCHEMA_SQL = MANUAL_UPLOADS_SQL + _READINGS_RED_SQL
 
 
 async def ensure_schema_red(pool: AsyncConnectionPool) -> None:
@@ -107,10 +104,15 @@ async def fetch_data_tsdb(
     start: datetime | None = None,
     end: datetime | None = None,
     limit: int = 500_000,
+    *,
+    bucket: timedelta | None = None,
+    agg: str | None = None,
 ) -> pd.DataFrame:
     """Fetch readings from the red TSDB `readings` table.
 
-    Returns DataFrame with columns: device, sensor, time, value.
+    Returns a DataFrame with columns ``device, sensor, time, value`` (plus
+    ``count`` when ``bucket`` + ``agg`` push aggregation into a ``time_bucket``
+    GROUP BY; see :func:`wp6_data.shared.aggregation.bucket_and_aggregate`).
     """
     from wp6_data.db.pool import get_pool
 
@@ -131,13 +133,38 @@ async def fetch_data_tsdb(
     params["limit"] = limit
 
     where = " AND ".join(conditions)
-    query = f"""
-        SELECT device_name AS device, sensor_tag AS sensor, time, value
-        FROM readings
-        WHERE {where}
-        ORDER BY time
-        LIMIT %(limit)s
-    """
+    columns = ["device", "sensor", "time", "value"]
+
+    if bucket is not None and agg is not None:
+        if agg not in CHART_AGG_FUNCS:
+            raise ValueError(f"Unknown aggregation {agg!r}")
+        params["bucket"] = bucket
+        params["tz"] = Settings().display_timezone
+        # GROUP BY / ORDER BY the real columns + the time_bucket expression,
+        # NOT the `AS time` alias: it collides with readings.time, and
+        # Postgres resolves that ambiguity differently in GROUP BY (input
+        # column) vs ORDER BY (output alias), which silently defeats the
+        # bucketing and disorders ties.
+        query = f"""
+            SELECT device_name AS device, sensor_tag AS sensor,
+                   time_bucket(%(bucket)s, time, %(tz)s) AS time,
+                   {agg}(value) AS value,
+                   count(value) AS count
+            FROM readings
+            WHERE {where}
+            GROUP BY device_name, sensor_tag, time_bucket(%(bucket)s, time, %(tz)s)
+            ORDER BY time_bucket(%(bucket)s, time, %(tz)s)
+            LIMIT %(limit)s
+        """
+        columns = ["device", "sensor", "time", "value", "count"]
+    else:
+        query = f"""
+            SELECT device_name AS device, sensor_tag AS sensor, time, value
+            FROM readings
+            WHERE {where}
+            ORDER BY time
+            LIMIT %(limit)s
+        """
 
     pool = get_pool()
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -145,7 +172,7 @@ async def fetch_data_tsdb(
         records = await cur.fetchall()
 
     if not records:
-        return _EMPTY_READINGS.copy()
+        return pd.DataFrame(columns=columns)
     df = pd.DataFrame(records)
     df["time"] = pd.to_datetime(df["time"], utc=True)
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
@@ -193,30 +220,14 @@ async def fetch_manual_summary_tsdb() -> dict[str, Any]:
     Returns ``{"uploads": {source: last_uploaded_at},
               "measurements": {sensor_tag: last_measure_time}}``.
     Drives the Manual tab's *Last upload* (per-source) and
-    *Last measure* (per measurement type) columns.
+    *Last measure* (per measurement type) columns. Delegates to the shared,
+    twin-agnostic query (promoted out of red so blue shares one provenance
+    model); behaviour is unchanged for red.
     """
     from wp6_data.db.pool import get_pool
+    from wp6_data.db.queries import fetch_manual_summary
 
-    pool = get_pool()
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(
-            "SELECT source, MAX(uploaded_at) AS last_upload "
-            "FROM manual_uploads GROUP BY source",
-        )
-        upload_rows = await cur.fetchall()
-        await cur.execute(
-            "SELECT r.sensor_tag, MAX(r.time) AS last_measure "
-            "FROM readings r WHERE r.upload_id IS NOT NULL "
-            "GROUP BY r.sensor_tag",
-        )
-        measure_rows = await cur.fetchall()
-
-    return {
-        "uploads": {r["source"]: r["last_upload"] for r in upload_rows},
-        "measurements": {
-            r["sensor_tag"]: r["last_measure"] for r in measure_rows
-        },
-    }
+    return await fetch_manual_summary(get_pool())
 
 
 async def fetch_daily_coverage_from_table() -> list[dict[str, Any]]:

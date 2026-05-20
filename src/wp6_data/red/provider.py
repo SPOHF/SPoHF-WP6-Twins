@@ -17,13 +17,15 @@ stay on MySQLConnection and are accessed directly by DLI routes.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from cachetools import TTLCache
 
+from wp6_data.shared.aggregation import bucket_and_aggregate
 from wp6_data.shared.sensor_summary import get_sensor_summary
+from wp6_data.shared.time import display_tz
 
 # Coverage only changes once per day — cache for 1 hour
 _coverage_cache: TTLCache[str, list[dict[str, Any]]] = TTLCache(maxsize=4, ttl=3600)
@@ -161,21 +163,37 @@ class RedSensorProvider:
         start: datetime | None = None,
         end: datetime | None = None,
         limit: int = 500_000,
+        *,
+        bucket: timedelta | None = None,
+        agg: str | None = None,
     ) -> pd.DataFrame:
-        """Fetch readings, dispatching per-sensor between MySQL and TSDB."""
+        """Fetch readings, dispatching per-sensor between MySQL and TSDB.
+
+        The TSDB leg buckets server-side; the legacy MySQL leg has no
+        ``time_bucket``, so it fetches raw and is folded into the same
+        bucketed contract by the shared pandas fallback. A sensor routes to
+        exactly one leg, so the legs never produce overlapping buckets.
+        """
         from wp6_data.red.tsdb import fetch_data_tsdb
 
+        bucketed = bucket is not None and agg is not None
         mysql_tags, tsdb_tags = self._split_by_route(sensor_tags)
         frames: list[pd.DataFrame] = []
         if mysql_tags:
-            frames.append(await self._fetch_mysql(
+            mysql_df = await self._fetch_mysql(
                 mysql_tags, device_names, start, end, limit,
-            ))
+            )
+            if bucketed:
+                mysql_df = bucket_and_aggregate(
+                    mysql_df, bucket, agg, display_tz(),
+                )
+            frames.append(mysql_df)
         if tsdb_tags:
             frames.append(await fetch_data_tsdb(
                 sensor_tags=tsdb_tags,
                 device_names=device_names,
                 start=start, end=end, limit=limit,
+                bucket=bucket, agg=agg,
             ))
         if not frames:
             return pd.DataFrame(columns=["device", "sensor", "time", "value"])

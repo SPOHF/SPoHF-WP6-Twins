@@ -4,13 +4,14 @@ The `readings` table itself diverges between blue and red (column names, dedup
 key, presence of `upload_id`), so each twin owns its own readings DDL. This
 module owns the twin-agnostic parts:
 
+* `MANUAL_UPLOADS_SQL` — the `manual_uploads` audit table, the permanent
+  system of record for every manual upload, identical between twins.
 * `AUX_SCHEMA_SQL` — `sync_metadata` and `daily_coverage` tables, identical
   between twins.
-* `CAGG_SQL_TEMPLATE` — the `sensors_daily_summary` continuous aggregate. The
-  template is parameterised by the categorical column name on `readings`
-  (blue uses ``project``, red uses ``source`` — see
-  ``project_blue_project_vs_red_source`` memo for why these are different
-  concepts, not aliases).
+* `CAGG_SQL_TEMPLATE` — the `sensors_daily_summary` continuous aggregate,
+  parameterised by the categorical column name on a twin's `readings`
+  table (a twin with multiple parallel automated pipelines uses a different
+  column than one keyed only by provenance).
 
 Twin code calls `ensure_aggregates(pool, project_column=...)` after creating
 its own `readings` hypertable.
@@ -21,25 +22,21 @@ from psycopg_pool import AsyncConnectionPool
 
 logger = structlog.get_logger()
 
-# Blue's readings hypertable. Red has its own DDL in `wp6_data.red.tsdb`.
-READINGS_BLUE_SQL = """
-CREATE TABLE IF NOT EXISTS readings (
-    time        TIMESTAMPTZ      NOT NULL,
-    device_name TEXT             NOT NULL,
-    sensor_tag  TEXT             NOT NULL,
-    value       DOUBLE PRECISION,
-    raw_value   TEXT,
-    project     TEXT             NOT NULL DEFAULT 'unknown',
-    synced_at   TIMESTAMPTZ      NOT NULL DEFAULT NOW()
+# The manual-upload audit trail. Twin-agnostic: the `source` column here is
+# the upload slug, not the readings categorical column. Pruning nulls
+# `file_path`/sets `file_pruned`; the row itself is never deleted.
+MANUAL_UPLOADS_SQL = """
+CREATE TABLE IF NOT EXISTS manual_uploads (
+    id          BIGSERIAL    PRIMARY KEY,
+    source      TEXT         NOT NULL,
+    filename    TEXT         NOT NULL,
+    file_hash   TEXT         NOT NULL,
+    file_path   TEXT,
+    file_pruned BOOLEAN      NOT NULL DEFAULT FALSE,
+    uploaded_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    row_count   INTEGER      NOT NULL,
+    error       TEXT
 );
-
-SELECT create_hypertable('readings', 'time', if_not_exists => TRUE);
-
-CREATE INDEX IF NOT EXISTS idx_readings_device_tag
-    ON readings (device_name, sensor_tag, time DESC);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_readings_dedup
-    ON readings (device_name, sensor_tag, time);
 """
 
 AUX_SCHEMA_SQL = """
@@ -123,12 +120,3 @@ async def ensure_aggregates(
         finally:
             await conn.set_autocommit(False)
     logger.info("aggregates_ensured", project_column=project_column)
-
-
-async def ensure_schema(pool: AsyncConnectionPool) -> None:
-    """Ensure blue's full TSDB schema (readings + aux tables + cagg)."""
-    async with pool.connection() as conn:
-        await conn.execute(READINGS_BLUE_SQL)
-        await conn.commit()
-    await ensure_aggregates(pool, project_column="project")
-    logger.info("tsdb_schema_ensured")

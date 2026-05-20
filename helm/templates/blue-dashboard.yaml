@@ -41,16 +41,20 @@ spec:
                   key: oidc-session-secret
             - name: WP6_OIDC_REDIRECT_BASE
               value: {{ printf "https://%s" .Values.dashboard.ingress.host | quote }}
+            - name: WP6_BLUE_UPLOAD_DIR
+              value: /data/blue-manual-uploads
             {{- if .Values.dashboard.export.enabled }}
             - name: WP6_BLUE_EXPORT_DIR
               value: /data/exports
             {{- end }}
-          {{- if .Values.dashboard.export.enabled }}
           volumeMounts:
+            - name: blue-manual-uploads
+              mountPath: /data/blue-manual-uploads
+            {{- if .Values.dashboard.export.enabled }}
             - name: exports
               mountPath: /data/exports
               readOnly: true
-          {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.dashboard.resources | nindent 12 }}
           livenessProbe:
@@ -74,12 +78,15 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 5
             failureThreshold: 18
-      {{- if .Values.dashboard.export.enabled }}
       volumes:
+        - name: blue-manual-uploads
+          persistentVolumeClaim:
+            claimName: {{ .Chart.Name }}-blue-manual-uploads
+        {{- if .Values.dashboard.export.enabled }}
         - name: exports
           persistentVolumeClaim:
             claimName: {{ .Chart.Name }}-blue-exports
-      {{- end }}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
