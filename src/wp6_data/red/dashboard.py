@@ -60,6 +60,15 @@ def _dli_card() -> str:
         card_class="card-bg card-bg-sun",
     )
 
+def _multi_height_card() -> str:
+    return render_card(
+        "Multi Height Profile",
+        '<a href="/multi_height" role="button">Multi Height Dashboard</a>',
+        description="Visual overview of sensor data at multiple heights.",
+        card_class="card-bg card-bg-green",
+
+    )
+
 
 config = TwinConfig(
     twin_id="red",
@@ -78,7 +87,7 @@ config = TwinConfig(
     ),
     extra_routers=[browse.router, dli.router, dli_model.router, red_charts.router, \
                    multi_height.router],
-    hero_cards=[_dli_card],
+    hero_cards=[_dli_card, _multi_height_card],
     home_extra_html=(
         '<a href="/static/red/sensor_locations.docx" download role="button"'
         ' class="outline" style="width:100%">'
