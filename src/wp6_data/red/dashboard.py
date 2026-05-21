@@ -8,7 +8,7 @@ from wp6_data.db.pool import close_pool, init_pool
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.provider import RedSensorProvider
-from wp6_data.red.routes import browse, dli, dli_model, sijia
+from wp6_data.red.routes import browse, dli, dli_model, multi_height, sijia
 from wp6_data.red.routes import charts as red_charts
 from wp6_data.red.routes.dli_model.train import train_model_from_db
 from wp6_data.red.routes.sijia.card import render_sijia_card
@@ -67,6 +67,14 @@ def _dli_card() -> str:
         card_class="card-bg card-bg-sun",
     )
 
+def _multi_height_card() -> str:
+    return render_card(
+        "Multi Height Profile",
+        '<a href="/multi_height" role="button">Multi Height Dashboard</a>',
+        description="Visual overview of sensor data at multiple heights.",
+        card_class="card-bg card-bg-multi-height",
+    )
+
 
 config = TwinConfig(
     twin_id="red",
@@ -83,12 +91,16 @@ config = TwinConfig(
         primary="#dc2626", primary_light="#ef4444", primary_dark="#b91c1c",
         accent="#f97316", surface_rgb="220, 38, 38",
     ),
-    extra_routers=[
-        browse.router, dli.router, dli_model.router,
-        red_charts.router, sijia.router,
-    ],
-    hero_cards=[_dli_card],
+
+    extra_routers=[browse.router, 
+                   dli.router, 
+                   dli_model.router, 
+                   red_charts.router,
+                   multi_height.router, 
+                   sijia.router],
+    hero_cards=[_dli_card, _multi_height_card],
     status_extras=[render_sijia_card],
+
     home_extra_html=(
         '<a href="/static/red/sensor_locations.docx" download role="button"'
         ' class="outline" style="width:100%">'

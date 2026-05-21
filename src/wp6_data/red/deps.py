@@ -4,7 +4,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from wp6_data.config import RedSettings
+from wp6_data.config import RedSettings, Settings
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.dli import OpenMeteoClient
 from wp6_data.shared.export import get_export_metadata as _get_export_metadata
@@ -12,6 +12,7 @@ from wp6_data.shared.metadata import MetadataRegistry
 
 load_dotenv()
 
+base_settings = Settings()
 settings = RedSettings()
 metadata = MetadataRegistry(Path(__file__).parent / "metadata.yaml")
 

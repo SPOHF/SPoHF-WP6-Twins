@@ -36,5 +36,10 @@ exports-blue/
 
 # Pesky temp microsoft files
 ~$*.docx
+
 uploads-red/
 uploads-blue/
+
+# Experiments with dashboards
+dev/
+.ipynb_checkpoints/
