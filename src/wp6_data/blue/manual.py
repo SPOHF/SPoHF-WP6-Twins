@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
 
 from wp6_data.blue.insects import INSECTS
+from wp6_data.blue.long_data import LONG_DATA
 from wp6_data.config import Settings
 from wp6_data.db.pool import get_pool
 from wp6_data.shared.manual_ingest import (
@@ -35,7 +36,7 @@ log = structlog.get_logger()
 
 # Blue's manual sources. A new one = its decoder/descriptor module + an
 # entry here; the rest of this module stays unchanged.
-SOURCES: tuple[ManualSource, ...] = (INSECTS,)
+SOURCES: tuple[ManualSource, ...] = (INSECTS, LONG_DATA)
 
 
 def _invalidate_blue_caches() -> None:
@@ -122,3 +123,12 @@ def _cli(source: ManualSource, usage: str) -> None:
 def ingest_insects() -> None:
     """Console-script entry: `wp6-blue-ingest-insects <path-to-csv>`."""
     _cli(INSECTS, "usage: wp6-blue-ingest-insects <path-to-csv>")
+
+
+def ingest_long_data() -> None:
+    """Console-script entry: `wp6-blue-ingest-long-data <path-to-xlsx>`.
+
+    Ingests one yearly Long_Data Excel file; replaces only that file's
+    calendar year(s) so prior years stay intact (see ADR 0002).
+    """
+    _cli(LONG_DATA, "usage: wp6-blue-ingest-long-data <path-to-xlsx>")

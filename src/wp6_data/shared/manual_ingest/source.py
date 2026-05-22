@@ -10,8 +10,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 
 from wp6_data.shared.manual_ingest.types import Reading, ValidationReport
+
+# Given the (min, max) date range of an upload, return an extra SQL WHERE
+# fragment + its params that narrow which existing rows the apply replaces
+# (and the preview compares against). ``None`` = whole-source replace.
+ReplaceScope = Callable[[tuple[date, date]], tuple[str, list]]
 
 
 @dataclass(frozen=True)
@@ -35,3 +41,6 @@ class ManualSource:
     parse: Callable[[bytes], list[Reading]]
     validate: Callable[[bytes], ValidationReport]
     parse_error: type[Exception]  # subclass of ManualParseError
+    # Optional: narrow the replace/compare to part of the source's rows so one
+    # source can be fed by several files (e.g. yearly). ``None`` = whole-source.
+    replace_scope: ReplaceScope | None = None

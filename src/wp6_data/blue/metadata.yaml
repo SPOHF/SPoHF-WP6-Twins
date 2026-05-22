@@ -99,6 +99,75 @@ sensor_defaults:
     unit: "count"
     alias: "D. suzukii"
     source: "insects"
+  # Manual long_data measures (yearly Excel). `source: long_data` marks them
+  # manual for the home-page split; fresh vs after-storage are distinct tags.
+  shoot_length:
+    type: "plant growth"
+    unit: "cm"
+    alias: "Shoot Len"
+    source: "long_data"
+  brix:
+    type: "fruit quality"
+    unit: "%"
+    alias: "Brix"
+    source: "long_data"
+  brix_after_storage:
+    type: "fruit quality"
+    unit: "%"
+    alias: "Brix (stored)"
+    source: "long_data"
+  firmness:
+    # 2025 unit is bar (burst pressure); the 2024 unit is unknown, so cross-year
+    # firmness is not reliably comparable.
+    type: "fruit quality"
+    unit: "bar"
+    alias: "Firmness"
+    source: "long_data"
+  firmness_after_storage:
+    type: "fruit quality"
+    unit: "bar"
+    alias: "Firmness (stored)"
+    source: "long_data"
+  berry_weight:
+    type: "fruit quality"
+    unit: "g"
+    alias: "Berry wt"
+    source: "long_data"
+  berry_weight_after_storage:
+    type: "fruit quality"
+    unit: "g"
+    alias: "Berry wt (stored)"
+    source: "long_data"
+  sample_weight_before_storage:
+    type: "fruit quality"
+    unit: "g"
+    alias: "Sample wt"
+    source: "long_data"
+  sample_weight_after_storage:
+    type: "fruit quality"
+    unit: "g"
+    alias: "Sample wt (stored)"
+    source: "long_data"
+  yield_per_plant:
+    type: "yield"
+    unit: "g"
+    alias: "Yield"
+    source: "long_data"
+  score:
+    type: "phenology"
+    unit: ""  # ordinal 1-10 (plant vigour/health, 10 best)
+    alias: "Vigour"
+    source: "long_data"
+  budscore:
+    type: "phenology"
+    unit: ""  # ordinal 1-10 (bud count)
+    alias: "Buds"
+    source: "long_data"
+  flowering_score:
+    type: "phenology"
+    unit: ""  # ordinal 1-10 (flower count)
+    alias: "Flowering"
+    source: "long_data"
 
 devices:
   "PH2 | 4D25":
@@ -251,3 +320,45 @@ devices:
         intention: "Total insects caught per trap-check round"
       suzukii:
         intention: "Spotted-wing drosophila (D. suzukii) caught per round"
+
+  # long_data plant/treatment devices are data-driven (one per treatment×plant,
+  # plus a `plant 0` per treatment for samples) — far too many to list. One
+  # wildcard pattern per treatment gives them all their `position`, reusing the
+  # automated sensors' codes so manual + automated readings of a plot group
+  # together. `position` is matched most-specific-first (see MetadataRegistry).
+  "Org1 / plant *":
+    position: "Org1"
+    type: "Blueberry plant (manual)"
+    source: "long_data"
+  "Org2 / plant *":
+    position: "Org2"
+    type: "Blueberry plant (manual)"
+    source: "long_data"
+  "Std / plant *":
+    position: "Std"
+    type: "Blueberry plant (manual)"
+    source: "long_data"
+  "Ca / plant *":
+    position: "Ca"
+    type: "Blueberry plant (manual)"
+    source: "long_data"
+  "K / plant *":
+    position: "K"
+    type: "Blueberry plant (manual)"
+    source: "long_data"
+  "G_K / plant *":
+    position: "G_K"
+    type: "Blueberry plant (manual)"
+    source: "long_data"
+  "V_CA / plant *":
+    position: "V_CA"
+    type: "Blueberry plant (manual)"
+    source: "long_data"
+  "V_CA_G_BrPK / plant *":
+    position: "V_CA_G_BrPK"
+    type: "Blueberry plant (manual)"
+    source: "long_data"
+  "V_K_G_CaBrP / plant *":
+    position: "V_K_G_CaBrP"
+    type: "Blueberry plant (manual)"
+    source: "long_data"
