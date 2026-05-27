@@ -100,6 +100,7 @@ def add_ideal_range(
     mid: float | None = None,
     *,
     y_ref: str = "y",
+    x_ref: str = "x",
     orientation: str = "h",
 ) -> go.Figure:
     """Overlay an ideal-range band and optional centre line on an existing figure.
@@ -140,7 +141,7 @@ def add_ideal_range(
         else:
             band = dict(
                 type="rect",
-                xref=y_ref,
+                xref=x_ref,
                 yref="paper",
                 x0=lo_f,
                 x1=hi_f,
@@ -169,7 +170,7 @@ def add_ideal_range(
         else:
             line = dict(
                 type="line",
-                xref=y_ref,
+                xref=x_ref,
                 yref="paper",
                 x0=mid_f,
                 x1=mid_f,
@@ -268,6 +269,15 @@ def make_heatmap(
         Plotly Figure with a single heatmap trace.  Returns an empty figure
         with an annotation when fewer than 2 sensors have overlapping data.
     """
+    _valid_methods = {"pearson", "spearman", "kendall"}
+    if method not in _valid_methods:
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"Invalid correlation method '{method}'. Choose: pearson, spearman, kendall",
+            showarrow=False,
+        )
+        return fig
+
     df = df.copy()
     df["key"] = df["device"] + ":" + df["sensor"]
 

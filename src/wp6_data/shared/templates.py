@@ -1285,7 +1285,7 @@ CORRELATE_JS = """
                 var dm = s.device_meta || {};
                 var label;
                 if (groupBy === 'device') label = sm.alias || s.sensor;
-                else if (groupBy === 'position') label = (sm.alias || s.sensor)\
+                else if (groupBy === 'position') label = (sm.alias || s.sensor)
                     + ' \u2014 ' + s.device;
                 else label = s.device + ' \u2014 ' + (sm.alias || s.sensor);
                 var unitBadge = sm.unit ? ' <span class="unit-badge">' + esc(sm.unit) + '</span>' : '';
@@ -1299,7 +1299,7 @@ CORRELATE_JS = """
                     + ' data-key="' + esc(key) + '">'
                     + '<label class="cb-label"><input type="checkbox" data-key="' + esc(key) + '"'
                     + (checked ? ' checked' : '') + '></label>'
-                    + '<span class="device-name" title="' + esc(tip) + '">'\
+                    + '<span class="device-name" title="' + esc(tip) + '">'
                     + esc(label) + unitBadge + '</span>'
                     + '</div>';
             });
@@ -1507,46 +1507,6 @@ UNIFIED_CHART_JS = """
 
     var leftSpecs = (params.get('s') || '').split(',').filter(Boolean);
     var rightSpecs = (params.get('r') || '').split(',').filter(Boolean);
-
-    // Chart-type picker: show card selection when no chart type or sensors chosen
-    if (!params.get('ct') && leftSpecs.length === 0 && rightSpecs.length === 0) {
-        var outerPanel = document.querySelector('.sensor-panel');
-        if (outerPanel) outerPanel.classList.add('collapsed');
-        var emptyHint = document.getElementById('chart-empty');
-        if (emptyHint) emptyHint.style.display = 'none';
-        if (toggleBtn) toggleBtn.style.display = 'none';
-        var saveBtn = document.getElementById('save-to-dashboard');
-        if (saveBtn) saveBtn.style.display = 'none';
-        var pickerStyle = document.createElement('style');
-        pickerStyle.textContent = [
-            '.ct-picker{display:flex;gap:2rem;justify-content:center;align-items:center;',
-            'min-height:500px;flex-wrap:wrap;}',
-            '.ct-card{display:flex;flex-direction:column;align-items:center;',
-            'padding:2rem 2.5rem;border:1px solid var(--pico-muted-border-color,#dee2e6);',
-            'border-radius:0.75rem;text-decoration:none;color:inherit;',
-            'transition:background 0.15s,box-shadow 0.15s;min-width:170px;',
-            'background:var(--dashboard-surface,#fff);}',
-            '.ct-card:hover,.ct-card:focus-visible{',
-            'background:var(--dashboard-surface-hover,#f4f6f8);',
-            'box-shadow:0 4px 16px rgba(0,0,0,0.1);outline:none;}'
-        ].join('');
-        document.head.appendChild(pickerStyle);
-        chartDiv.innerHTML = '<div class="ct-picker">'
-            + '<a class="ct-card" href="?ct=line">'
-            + '<span style="font-size:2.5rem">&#128200;</span>'
-            + '<strong style="margin-top:0.75rem">Line Chart</strong>'
-            + '<span style="font-size:0.82rem;opacity:0.65;'\
-            + 'margin-top:0.25rem;text-align:center">Trends over time</span>'
-            + '</a>'
-            + '<a class="ct-card" href="?ct=bar_v">'
-            + '<span style="font-size:2.5rem">&#128202;</span>'
-            + '<strong style="margin-top:0.75rem">Bar Chart</strong>'
-            + '<span style="font-size:0.82rem;opacity:0.65;'\
-            + 'margin-top:0.25rem;text-align:center">Grouped comparisons</span>'
-            + '</a>'
-            + '</div>';
-        return;
-    }
 
     var startDate = params.get('start') || '';
     var endDate = params.get('end') || '';
@@ -2979,7 +2939,6 @@ def render_nav_bar(*, data_source: str | None = None) -> str:
         '<a href="/">Home</a>'
         '<a href="/dashboard">Dashboard</a>'
         '<a href="/chart">Chart</a>'
-        '<a href="/correlate">Correlate</a>'
         "</div>",
     ]
     if source_html:
@@ -3101,14 +3060,13 @@ def render_unified_chart_page(
 
     content = f"""
     <div class="chart-layout">
-        <div class="sensor-panel" id="sensor-panel-wrapper">\
-<script>(function(){{var p=new URLSearchParams(location.search);\
-if(!p.get('ct')&&!p.get('s')&&!p.get('r'))\
-{{document.currentScript.parentElement.classList.add('collapsed');}}}})();\
+        <div class="sensor-panel" id="sensor-panel-wrapper">
+<script>(function(){{var p=new URLSearchParams(location.search);
+if(!p.get('s')&&!p.get('r'))
+{{document.currentScript.parentElement.classList.add('collapsed');}}}})();
 </script>
             <details class="date-filter-collapsible" open>
-                <summary>Date range: {start.isoformat()} \
-to {end.isoformat()}</summary>
+                <summary>Date range: {start.isoformat()} to {end.isoformat()}</summary>
                 {filter_html}
             </details>
             <div id="chart-type-section" style="margin-bottom:0.5rem">

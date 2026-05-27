@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 
 from wp6_data.shared import render_date_filter, render_page, resolve_date_range
-from wp6_data.shared.charts import make_correlation_matrix
+from wp6_data.shared.charts import make_heatmap
 from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.twin import SensorDataProvider
 

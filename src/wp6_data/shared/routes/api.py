@@ -176,12 +176,18 @@ async def get_correlate(
             device_names=list(set(device_names)),
             start=start_dt,
             end=end_dt,
+            bucket=timedelta(hours=1),
+            agg="avg",
         )
     except Exception:
         return JSONResponse(content={"error": "Database not connected"}, status_code=503)
 
     if df.empty:
-        return {"sensors": keys, "matrix": []}
+        return {
+            "sensors": keys,
+            "matrix": [],
+            "warning": "No data found for the selected date range. Try extending the range.",
+        }
 
     df = df.copy()
     df["key"] = df["device"] + ":" + df["sensor"]
@@ -189,10 +195,9 @@ async def get_correlate(
     df = df[df["key"].isin(set(keys))]
 
     df["time"] = pd.to_datetime(df["time"], utc=True)
-    df["hour"] = df["time"].dt.floor("1h")
 
     pivot = (
-        df.groupby(["hour", "key"])["value"]
+        df.groupby(["time", "key"])["value"]
         .mean()
         .unstack("key")
         .sort_index()

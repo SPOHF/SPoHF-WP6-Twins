@@ -23,6 +23,14 @@ def _monitor_card() -> str:
         description="GDD, soil conditions, light, and microclimate analytics.",
     )
 
+
+def _correlate_card() -> str:
+    return render_card(
+        "Correlation",
+        '<a href="/correlate" role="button" class="outline">Correlation Matrix</a>',
+        description="Visualise relationships between sensors.",
+    )
+
 YOOKR_PROJECT = "yookr-direct"
 
 
@@ -62,7 +70,7 @@ config = TwinConfig(
         ops.router, blue_charts.router, monitor_router,
         *blue_manual.manual_routers(),
     ],
-    hero_cards=[_monitor_card],
+    hero_cards=[_monitor_card, _correlate_card],
     status_extras=blue_manual.manual_cards(),
     export_sanitise_names=True,
     # Authenticated twin (TwinConfig.require_auth defaults to True): the app
