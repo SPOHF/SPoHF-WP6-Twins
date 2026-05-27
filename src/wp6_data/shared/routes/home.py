@@ -66,6 +66,12 @@ async def home(
             card_class="card card-bg card-bg-chart",
         )}
 
+        {render_card(
+            "Correlation",
+            '<a href="/correlate" role="button" class="outline">Correlation Matrix</a>',
+            description="Visualise relationships between sensors.",
+        )}
+
         {hero_html}
 
         {render_card("Explore", render_explore_tabs(explore_tabs, active=tab))}

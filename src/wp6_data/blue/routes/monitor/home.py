@@ -59,14 +59,6 @@ async def monitor_home() -> str:
                    sensors across the farm.</p>
                 <a href="/monitor/microclimate" class="btn">View Microclimate</a>
             </article>
-
-            <article>
-                <h3>Sensor Correlations</h3>
-                <p>Pearson / Spearman / Kendall correlation matrix
-                   across all sensor types. Reveals co-movement
-                   between climate, soil, and light.</p>
-                <a href="/monitor/correlation" class="btn">View Correlations</a>
-            </article>
         </div>
     """
     return render_page(PAGE_TITLE, content, show_back_link=True,

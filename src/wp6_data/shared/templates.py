@@ -1250,6 +1250,9 @@ CORRELATE_JS = """
     var currentGrouping = 'measurement';
 
     // --- Build sensor tree ---
+    function esc(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
     function buildPanel(sensors, groupBy) {
         var groups = {};
         sensors.forEach(function(s) {
@@ -1282,7 +1285,7 @@ CORRELATE_JS = """
                 else if (groupBy === 'position') label = (sm.alias || s.sensor)\
                     + ' \u2014 ' + s.device;
                 else label = s.device + ' \u2014 ' + (sm.alias || s.sensor);
-                var unitBadge = sm.unit ? ' <span class="unit-badge">' + sm.unit + '</span>' : '';
+                var unitBadge = sm.unit ? ' <span class="unit-badge">' + esc(sm.unit) + '</span>' : '';
                 var tipParts = [key];
                 if (dm.description) tipParts.push(dm.description);
                 if (dm.position) tipParts.push('Position: ' + dm.position);
@@ -1290,11 +1293,11 @@ CORRELATE_JS = """
                 var tip = tipParts.join(' | ');
                 var checked = selectedSensors.indexOf(key) !== -1;
                 html += '<div class="sensor-item' + (checked ? ' active' : '') + '"'
-                    + ' data-key="' + key + '">'
-                    + '<label class="cb-label"><input type="checkbox" data-key="' + key + '"'
+                    + ' data-key="' + esc(key) + '">'
+                    + '<label class="cb-label"><input type="checkbox" data-key="' + esc(key) + '"'
                     + (checked ? ' checked' : '') + '></label>'
-                    + '<span class="device-name" title="' + tip + '">'\
-                    + label + unitBadge + '</span>'
+                    + '<span class="device-name" title="' + esc(tip) + '">'\
+                    + esc(label) + unitBadge + '</span>'
                     + '</div>';
             });
             html += '</details>';
@@ -1430,19 +1433,21 @@ CORRELATE_JS = """
         .then(function(r) { return r.json(); })
         .then(function(data) {
             allSensors = [];
-            if (Array.isArray(data)) {
-                data.forEach(function(d) {
-                    var dm = d.meta || {};
-                    (d.sensors || []).forEach(function(s) {
-                        allSensors.push({
-                            device: d.device,
-                            sensor: s.sensor,
-                            device_meta: dm,
-                            sensor_meta: s.meta || {},
-                        });
+            if (!Array.isArray(data)) {
+                panelDiv.innerHTML = '<em>' + (data && data.error ? esc(data.error) : 'Could not load sensors.') + '</em>';
+                return;
+            }
+            data.forEach(function(d) {
+                var dm = d.meta || {};
+                (d.sensors || []).forEach(function(s) {
+                    allSensors.push({
+                        device: d.device,
+                        sensor: s.sensor,
+                        device_meta: dm,
+                        sensor_meta: s.meta || {},
                     });
                 });
-            }
+            });
             buildPanel(allSensors, currentGrouping);
             if (selectedSensors.length >= 2) refresh();
             else if (selectedSensors.length > 0) {
@@ -1536,12 +1541,6 @@ UNIFIED_CHART_JS = """
             + '<span style="font-size:0.82rem;opacity:0.65;'\
             + 'margin-top:0.25rem;text-align:center">Grouped comparisons</span>'
             + '</a>'
-            + '<a class="ct-card" href="/correlate">'
-            + '<span style="font-size:2.5rem">&#128290;</span>'
-            + '<strong style="margin-top:0.75rem">Correlation Matrix</strong>'
-            + '<span style="font-size:0.82rem;opacity:0.65;'\
-            + 'margin-top:0.25rem;text-align:center">Sensor relationships</span>'
-            + '</a>'
             + '</div>';
         return;
     }
@@ -1595,13 +1594,6 @@ UNIFIED_CHART_JS = """
         yaxis2: {overlaying: 'y', side: 'right', showgrid: false}
     };
     Plotly.newPlot(chartDiv, [], layout, {responsive: true});
-
-    // Show only the relevant chart-type controls for the current mode:
-    // line mode → hide the whole section; bar mode → hide the Line button only
-    (function restrictChartTypeUI() {
-        var section = document.getElementById('chart-type-section');
-        if (section) section.style.display = 'none';
-    }());
 
     // Toggle panel
     if (toggleBtn) {
@@ -2049,26 +2041,14 @@ UNIFIED_CHART_JS = """
         return (mins / 1440) + ' days';
     }
 
-    function applyAgg(values, func) {
-        var nums = values.filter(function(v) { return v !== null; });
-        if (nums.length === 0) return null;
-        if (func === 'max') return Math.max.apply(null, nums);
-        if (func === 'min') return Math.min.apply(null, nums);
-        if (func === 'sum') {
-            var s = 0; nums.forEach(function(v) { s += v; }); return s;
-        }
-        // avg
-        var s = 0; nums.forEach(function(v) { s += v; }); return s / nums.length;
-    }
-
     function rebuildShapes() {
         var shapes = [];
-        function addBand(ir, yref) {
+        function addBand(ir, yref, fill, stroke) {
             if (ir.lo !== null && ir.hi !== null) {
                 shapes.push({
                     type: 'rect', xref: 'paper', yref: yref,
                     x0: 0, x1: 1, y0: ir.lo, y1: ir.hi,
-                    fillcolor: 'rgba(52,168,83,0.12)',
+                    fillcolor: fill,
                     line: {width: 0}, layer: 'below'
                 });
             }
@@ -2077,13 +2057,13 @@ UNIFIED_CHART_JS = """
                     type: 'line', xref: 'paper', yref: yref,
                     x0: 0, x1: 1, y0: ir.mid, y1: ir.mid,
                     line: {
-                        color: 'rgba(52,168,83,0.8)', width: 1.5, dash: 'dash'
+                        color: stroke, width: 1.5, dash: 'dash'
                     }
                 });
             }
         }
-        addBand(idealRange.left, 'y');
-        addBand(idealRange.right, 'y2');
+        addBand(idealRange.left, 'y', 'rgba(52,168,83,0.12)', 'rgba(52,168,83,0.8)');
+        addBand(idealRange.right, 'y2', 'rgba(255,152,0,0.12)', 'rgba(255,152,0,0.8)');
         Plotly.relayout(chartDiv, {shapes: shapes});
     }
 
@@ -2755,12 +2735,12 @@ DASHBOARD_JS = """
             var hasRight = results.some(function(r) { return r.axis === 'right'; });
             // Build shapes for ideal range
             var shapes = [];
-            function addBand(lo, hi, mid, yref) {
+            function addBand(lo, hi, mid, yref, fill, stroke) {
                 if (lo !== null && hi !== null) {
                     shapes.push({
                         type: 'rect', xref: 'paper', yref: yref,
                         x0: 0, x1: 1, y0: lo, y1: hi,
-                        fillcolor: 'rgba(52,168,83,0.12)',
+                        fillcolor: fill,
                         line: {width: 0}, layer: 'below'
                     });
                 }
@@ -2769,7 +2749,7 @@ DASHBOARD_JS = """
                         type: 'line', xref: 'paper', yref: yref,
                         x0: 0, x1: 1, y0: mid, y1: mid,
                         line: {
-                            color: 'rgba(52,168,83,0.8)',
+                            color: stroke,
                             width: 1.5, dash: 'dash'
                         }
                     });
@@ -2780,23 +2760,23 @@ DASHBOARD_JS = """
                 isNaN(pf(chart.ir_lo)) ? null : pf(chart.ir_lo),
                 isNaN(pf(chart.ir_hi)) ? null : pf(chart.ir_hi),
                 isNaN(pf(chart.ir_mid)) ? null : pf(chart.ir_mid),
-                'y'
+                'y', 'rgba(52,168,83,0.12)', 'rgba(52,168,83,0.8)'
             );
             addBand(
                 isNaN(pf(chart.ir_lo_r)) ? null : pf(chart.ir_lo_r),
                 isNaN(pf(chart.ir_hi_r)) ? null : pf(chart.ir_hi_r),
                 isNaN(pf(chart.ir_mid_r)) ? null : pf(chart.ir_mid_r),
-                'y2'
+                'y2', 'rgba(255,152,0,0.12)', 'rgba(255,152,0,0.8)'
             );
             var layout = {
                 height: 250,
                 margin: { t: 10, b: 30, l: 40, r: hasRight ? 40 : 10 },
                 showlegend: false,
-                xaxis: { type: isH ? '-' : 'date' },
+                xaxis: { type: 'date' },
                 yaxis: {},
                 yaxis2: { overlaying: 'y', side: 'right', showgrid: false },
                 barmode: ct !== 'line' ? 'group' : undefined,
-                hovermode: isH ? 'y unified' : 'x unified',
+                hovermode: 'x unified',
                 shapes: shapes,
                 template: 'plotly_white',
                 paper_bgcolor: 'rgba(0,0,0,0)',
@@ -2996,6 +2976,7 @@ def render_nav_bar(*, data_source: str | None = None) -> str:
         '<a href="/">Home</a>'
         '<a href="/dashboard">Dashboard</a>'
         '<a href="/chart">Chart</a>'
+        '<a href="/correlate">Correlate</a>'
         "</div>",
     ]
     if source_html:

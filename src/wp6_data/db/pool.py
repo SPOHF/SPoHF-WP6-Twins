@@ -20,9 +20,7 @@ async def init_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> Async
         open=False,
         kwargs={"connect_timeout": 5},
     )
-    # wait=False: don't block startup if DB is unreachable; connections are
-    # created lazily on first use (pool.connection() timeout guards each call).
-    await _pool.open(wait=False)
+    await _pool.open()
     logger.info("tsdb_pool_opened", min_size=min_size, max_size=max_size)
     return _pool
 

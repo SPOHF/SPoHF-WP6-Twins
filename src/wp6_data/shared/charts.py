@@ -193,7 +193,6 @@ def make_bar_chart(
     y_label: str | None = None,
     barmode: str = "group",
     text_auto: bool = True,
-    orientation: str = "v",
     ideal_lo: float | None = None,
     ideal_hi: float | None = None,
     ideal_mid: float | None = None,
@@ -202,14 +201,13 @@ def make_bar_chart(
 
     Args:
         df: DataFrame with data to plot
-        x: Column name for x-axis (or value axis when ``orientation='h'``)
-        y: Column name for y-axis values (or category axis when ``orientation='h'``)
+        x: Column name for x-axis
+        y: Column name for y-axis values
         color: Optional column name for grouping/coloring bars
         title: Chart title
         y_label: Optional y-axis label (defaults to y column name)
         barmode: Bar mode ('group', 'stack', 'relative')
         text_auto: Show values on bars
-        orientation: ``'v'`` for vertical bars (default), ``'h'`` for horizontal bars
         ideal_lo: Lower bound of ideal range band (optional)
         ideal_hi: Upper bound of ideal range band (optional)
         ideal_mid: Centre / target reference line (optional)
@@ -217,7 +215,6 @@ def make_bar_chart(
     Returns:
         Plotly Figure object
     """
-    # px.bar expects orientation kwarg and swaps x/y meaning when 'h'
     fig = px.bar(
         df,
         x=x,
@@ -226,48 +223,28 @@ def make_bar_chart(
         title=title,
         barmode=barmode,
         text_auto=".1f" if text_auto else False,
-        orientation=orientation,
     )
-
-    if orientation == "h":
-        fig.update_layout(
-            template="plotly_white",
-            hovermode="y unified",
-            height=500,
-            xaxis_title=y_label or y,
-            yaxis_title="",
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
+    fig.update_layout(
+        template="plotly_white",
+        hovermode="x unified",
+        height=500,
+        yaxis_title=y_label or y,
+        xaxis_title="",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    if text_auto:
+        fig.update_traces(textposition="outside")
+    if any(v is not None for v in (ideal_lo, ideal_hi, ideal_mid)):
+        add_ideal_range(
+            fig, ideal_lo, ideal_hi, ideal_mid,
+            y_ref="y", orientation="h",
         )
-        if text_auto:
-            fig.update_traces(textposition="outside")
-        if any(v is not None for v in (ideal_lo, ideal_hi, ideal_mid)):
-            add_ideal_range(
-                fig, ideal_lo, ideal_hi, ideal_mid,
-                y_ref="x", orientation="v",
-            )
-    else:
-        fig.update_layout(
-            template="plotly_white",
-            hovermode="x unified",
-            height=500,
-            yaxis_title=y_label or y,
-            xaxis_title="",
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-        )
-        if text_auto:
-            fig.update_traces(textposition="outside")
-        if any(v is not None for v in (ideal_lo, ideal_hi, ideal_mid)):
-            add_ideal_range(
-                fig, ideal_lo, ideal_hi, ideal_mid,
-                y_ref="y", orientation="h",
-            )
 
     return fig
 
 
-def make_correlation_matrix(
+def make_heatmap(
     df: pd.DataFrame,
     sensors: list[str] | None = None,
     method: str = "pearson",

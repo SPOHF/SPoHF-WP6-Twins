@@ -5,7 +5,7 @@ import pandas as pd
 from wp6_data.shared.charts import (
     add_ideal_range,
     make_bar_chart,
-    make_correlation_matrix,
+    make_heatmap,
     make_dual_axis_chart,
     make_line_chart,
     prepare_comparison,
@@ -287,29 +287,13 @@ class TestMakeBarChartEnhancements:
         assert fig is not None
         assert len(fig.data) == 1
 
-    def test_horizontal_orientation(self):
-        fig = make_bar_chart(_bar_df(), x="treatment", y="value", orientation="h")
-        # px.bar with orientation='h' swaps x/y internally
-        assert fig is not None
-
-    def test_horizontal_hovermode_is_y_unified(self):
-        fig = make_bar_chart(_bar_df(), x="treatment", y="value", orientation="h")
-        assert fig.layout.hovermode == "y unified"
-
     def test_vertical_hovermode_is_x_unified(self):
-        fig = make_bar_chart(_bar_df(), x="treatment", y="value", orientation="v")
+        fig = make_bar_chart(_bar_df(), x="treatment", y="value")
         assert fig.layout.hovermode == "x unified"
 
     def test_ideal_range_adds_shape_vertical(self):
         fig = make_bar_chart(
             _bar_df(), x="treatment", y="value",
-            ideal_lo=9.0, ideal_hi=14.0,
-        )
-        assert len(fig.layout.shapes) >= 1
-
-    def test_ideal_range_adds_shape_horizontal(self):
-        fig = make_bar_chart(
-            _bar_df(), x="treatment", y="value", orientation="h",
             ideal_lo=9.0, ideal_hi=14.0,
         )
         assert len(fig.layout.shapes) >= 1
@@ -333,7 +317,7 @@ class TestMakeBarChartEnhancements:
 
 
 # ---------------------------------------------------------------------------
-# make_correlation_matrix
+# make_heatmap
 # ---------------------------------------------------------------------------
 
 def _corr_df():
@@ -349,51 +333,51 @@ def _corr_df():
     })
 
 
-class TestMakeCorrelationMatrix:
+class TestMakeHeatmap:
     def test_returns_figure(self):
-        fig = make_correlation_matrix(_corr_df())
+        fig = make_heatmap(_corr_df())
         assert fig is not None
 
     def test_has_heatmap_trace(self):
         import plotly.graph_objects as go
-        fig = make_correlation_matrix(_corr_df())
+        fig = make_heatmap(_corr_df())
         assert any(isinstance(t, go.Heatmap) for t in fig.data)
 
     def test_matrix_values_in_range(self):
         import numpy as np
-        fig = make_correlation_matrix(_corr_df())
+        fig = make_heatmap(_corr_df())
         z = fig.data[0].z
         valid = [v for row in z for v in row if v is not None and not np.isnan(v)]
         assert all(-1.0 <= v <= 1.0 for v in valid)
 
     def test_diagonal_is_one(self):
         import numpy as np
-        fig = make_correlation_matrix(_corr_df())
+        fig = make_heatmap(_corr_df())
         z = fig.data[0].z
         for i in range(len(z)):
             assert abs(z[i][i] - 1.0) < 1e-6
 
     def test_sensor_filter(self):
         # With filter to one key → fewer than 2 sensors → fallback figure
-        fig = make_correlation_matrix(_corr_df(), sensors=["d1:temp"])
+        fig = make_heatmap(_corr_df(), sensors=["d1:temp"])
         # Should return figure with annotation, no heatmap
         assert len(fig.data) == 0 or not any(
             hasattr(t, "zmin") for t in fig.data
         )
 
     def test_custom_title(self):
-        fig = make_correlation_matrix(_corr_df(), title="My Matrix")
+        fig = make_heatmap(_corr_df(), title="My Matrix")
         assert fig.layout.title.text == "My Matrix"
 
     def test_empty_df_returns_figure(self):
         empty = pd.DataFrame(columns=["device", "sensor", "time", "value"])
-        fig = make_correlation_matrix(empty)
+        fig = make_heatmap(empty)
         assert fig is not None
         assert len(fig.data) == 0
 
     def test_upper_triangle_is_nan(self):
         import numpy as np
-        fig = make_correlation_matrix(_corr_df())
+        fig = make_heatmap(_corr_df())
         z = fig.data[0].z
         # z[0][1] is upper-triangle (row 0, col 1) → should be NaN
         assert np.isnan(z[0][1])

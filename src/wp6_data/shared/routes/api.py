@@ -13,11 +13,10 @@ from wp6_data.config import Settings
 from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.metadata import MetadataRegistry
-from wp6_data.shared.routes.deps import get_metadata, get_provider, get_twin_config
-from wp6_data.shared.sensor_summary import get_enriched_cache, set_enriched_cache
+from wp6_data.shared.routes.deps import get_metadata, get_provider
 from wp6_data.shared.templates import resolve_date_range
 from wp6_data.shared.time import to_local_isoformat
-from wp6_data.shared.twin import SensorDataProvider, TwinConfig
+from wp6_data.shared.twin import SensorDataProvider
 
 _settings = Settings()
 
@@ -28,17 +27,8 @@ router = APIRouter(prefix="/api", dependencies=[Depends(verify_session_user)])
 async def list_sensors(
     provider: Annotated[SensorDataProvider, Depends(get_provider)],
     metadata: Annotated[MetadataRegistry, Depends(get_metadata)],
-    twin_config: Annotated[TwinConfig, Depends(get_twin_config)],
-) -> list[dict[str, str]]:
+) -> JSONResponse:
     """List all available device+sensor combos, for the side panel tree."""
-    cache_key = f"{twin_config.twin_id}:{provider.data_source_label or 'default'}"
-    cached = get_enriched_cache(cache_key)
-    if cached is not None:
-        return JSONResponse(
-            content=cached,
-            headers={"Cache-Control": "private, max-age=300"},
-        )
-
     try:
         sensors = await asyncio.wait_for(
             provider.fetch_available_sensors(), timeout=10.0
@@ -56,7 +46,6 @@ async def list_sensors(
         for s in sorted(sensors, key=lambda s: (s["sensor"], s["device"]))
     ]
     enriched = metadata.enrich_sensor_list(flat)
-    set_enriched_cache(cache_key, enriched)
     return JSONResponse(
         content=enriched,
         headers={"Cache-Control": "private, max-age=300"},
@@ -158,6 +147,11 @@ async def get_correlate(
     if len(keys) < 2:
         return JSONResponse(
             content={"error": "At least 2 sensors required"},
+            status_code=422,
+        )
+    if len(keys) > 20:
+        return JSONResponse(
+            content={"error": "Maximum 20 sensors allowed per correlation request"},
             status_code=422,
         )
 
