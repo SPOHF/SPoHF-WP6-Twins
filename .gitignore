@@ -36,5 +36,14 @@ exports-blue/
 
 # Pesky temp microsoft files
 ~$*.docx
+~$*.xlsx
+
+# Manual-source raw data (passed to the CLI at runtime; never committed)
+Long_Data*.xlsx
+
 uploads-red/
 uploads-blue/
+
+# Experiments with dashboards
+dev/
+.ipynb_checkpoints/

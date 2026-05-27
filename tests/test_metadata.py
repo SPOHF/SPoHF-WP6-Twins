@@ -144,3 +144,72 @@ def test_every_sijia_parser_sensor_has_a_red_metadata_entry() -> None:
         tag for tag in expected_tags if registry.sensor_default(tag).source != "sijia"
     ]
     assert missing == []
+
+
+# --- Wildcard device matching (data-driven device families) ---------------
+
+
+def _registry_from_yaml(tmp_path: Path, body: str) -> MetadataRegistry:
+    yaml_path = tmp_path / "meta.yaml"
+    yaml_path.write_text(body)
+    return MetadataRegistry(yaml_path)
+
+
+def test_wildcard_device_inherits_pattern_position(tmp_path: Path) -> None:
+    """A device with no exact entry inherits a matching wildcard pattern."""
+    registry = _registry_from_yaml(
+        tmp_path,
+        'devices:\n  "Org1 / plant *":\n    position: Org1\n',
+    )
+    assert registry.device("Org1 / plant 12").position == "Org1"
+    assert registry.device("Org1 / plant 0").position == "Org1"
+
+
+def test_exact_device_beats_wildcard(tmp_path: Path) -> None:
+    """An exact device key takes precedence over any matching pattern."""
+    registry = _registry_from_yaml(
+        tmp_path,
+        'devices:\n'
+        '  "Org1 / plant *":\n    position: Org1\n'
+        '  "Org1 / plant 1":\n    position: Special\n',
+    )
+    assert registry.device("Org1 / plant 1").position == "Special"
+    assert registry.device("Org1 / plant 2").position == "Org1"
+
+
+def test_most_specific_pattern_wins(tmp_path: Path) -> None:
+    """When two patterns match, the longest (most specific) one wins."""
+    registry = _registry_from_yaml(
+        tmp_path,
+        'devices:\n'
+        '  "Ca / *":\n    position: Broad\n'
+        '  "Ca / plant *":\n    position: Narrow\n',
+    )
+    assert registry.device("Ca / plant 5").position == "Narrow"
+
+
+def test_no_matching_pattern_returns_empty(tmp_path: Path) -> None:
+    """A device matching no exact key or pattern returns empty defaults."""
+    registry = _registry_from_yaml(
+        tmp_path,
+        'devices:\n  "Org1 / plant *":\n    position: Org1\n',
+    )
+    assert registry.device("K / plant 5") == DeviceMetadata()
+
+
+def test_wildcard_device_supplies_sensor_intention(tmp_path: Path) -> None:
+    """A wildcard device's sensor block enriches matching devices."""
+    registry = _registry_from_yaml(
+        tmp_path,
+        "sensor_defaults:\n"
+        '  shoot_length:\n    unit: cm\n'
+        "devices:\n"
+        '  "Org1 / plant *":\n'
+        "    position: Org1\n"
+        "    sensors:\n"
+        "      shoot_length:\n"
+        '        intention: "Cane length"\n',
+    )
+    meta = registry.sensor("shoot_length", "Org1 / plant 7")
+    assert meta.unit == "cm"  # from defaults
+    assert meta.intention == "Cane length"  # from the matched wildcard device

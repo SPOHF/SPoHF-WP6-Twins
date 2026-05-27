@@ -25,6 +25,7 @@ YAML structure::
 from __future__ import annotations
 
 from collections import defaultdict
+from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -32,6 +33,13 @@ if TYPE_CHECKING:
 
 import yaml
 from pydantic import BaseModel
+
+_GLOB_CHARS = frozenset("*?[")
+
+
+def _is_glob(key: str) -> bool:
+    """True if a device key is a wildcard pattern (vs. a literal device name)."""
+    return any(c in _GLOB_CHARS for c in key)
 
 
 class SensorMetadata(BaseModel):
@@ -73,10 +81,29 @@ class MetadataRegistry:
             self._meta = TwinMetadata(**raw)
         else:
             self._meta = TwinMetadata()
+        # Device keys containing a glob metacharacter are wildcard patterns
+        # (e.g. "Org1 / plant *"), letting a family of data-driven devices
+        # inherit one entry. Pre-sorted longest-first so the most specific
+        # pattern wins; exact keys always take precedence (see `_resolve`).
+        self._device_patterns: list[str] = sorted(
+            (k for k in self._meta.devices if _is_glob(k)),
+            key=lambda k: (-len(k), k),
+        )
+
+    def _resolve(self, device_key: str) -> DeviceMetadata | None:
+        """Resolve a device to its metadata: exact match, else most-specific
+        wildcard pattern, else ``None``."""
+        exact = self._meta.devices.get(device_key)
+        if exact is not None:
+            return exact
+        for pattern in self._device_patterns:
+            if fnmatchcase(device_key, pattern):
+                return self._meta.devices[pattern]
+        return None
 
     def device(self, device_key: str) -> DeviceMetadata:
         """Return metadata for a device, or empty defaults if not enriched."""
-        return self._meta.devices.get(device_key, DeviceMetadata())
+        return self._resolve(device_key) or DeviceMetadata()
 
     def sensor_default(self, sensor_key: str) -> SensorMetadata:
         """Return the global default metadata for a measurement key."""
@@ -103,7 +130,7 @@ class MetadataRegistry:
         if device_key is None:
             return defaults
 
-        dev = self._meta.devices.get(device_key)
+        dev = self._resolve(device_key)
         if dev is None:
             return defaults
 

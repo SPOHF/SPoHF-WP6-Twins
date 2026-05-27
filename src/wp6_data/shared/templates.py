@@ -693,6 +693,9 @@ BASE_CSS = """
     .card-bg-status::after {
         background-image: url(/static/cards/status.svg);
     }
+    .card-bg-multi-height::after {
+        background-image: url(/static/cards/multi_height.svg);
+    }
 
     /* --- Stats cards --- */
     .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }

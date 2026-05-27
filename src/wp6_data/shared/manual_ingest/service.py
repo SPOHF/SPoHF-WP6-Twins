@@ -75,7 +75,7 @@ class ManualIngestService:
             self._source.slug, file_bytes, suffix=self._source.file_suffix,
         )
         report = self._source.validate(file_bytes)
-        existing = await self._fetch_existing_facts()
+        existing = await self._fetch_existing_facts(report.date_range)
         new_devices = set(report.devices)
         new_sensors = set(report.sensors)
         return replace(
@@ -86,25 +86,52 @@ class ManualIngestService:
             sensors_removed=tuple(sorted(existing["sensors"] - new_sensors)),
         )
 
-    async def _fetch_existing_facts(self) -> dict:
-        """Query the TSDB for the comparison facts the preview page surfaces."""
+    def _scope_clause(
+        self, date_range: tuple[date, date] | None,
+    ) -> tuple[str, list]:
+        """Extra WHERE fragment narrowing replace/compare to the upload's scope.
+
+        Whole-source by default (empty clause). A source with a ``replace_scope``
+        narrows it to part of its rows (e.g. long_data restricts to the calendar
+        years in the file) so one source fed by yearly files replaces only the
+        uploaded year. A scoped source with an empty upload matches nothing
+        (``1=0``) rather than wiping the whole source.
+        """
+        if self._source.replace_scope is None:
+            return "", []
+        if date_range is None:
+            return " AND 1=0", []
+        return self._source.replace_scope(date_range)
+
+    async def _fetch_existing_facts(
+        self, date_range: tuple[date, date] | None = None,
+    ) -> dict:
+        """Query the TSDB for the comparison facts the preview page surfaces.
+
+        Scoped to the same rows the apply will replace, so a single-year
+        upload does not report every other year's devices/sensors as removed.
+        """
         value = self._source.categorical_value
+        clause, sparams = self._scope_clause(date_range)
+        params = [value, *sparams]
         async with self.pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 f"SELECT COUNT(*) AS n, MIN(time)::date AS min_d, "
                 f"MAX(time)::date AS max_d "
-                f"FROM readings WHERE {_COLUMN} = %s",
-                (value,),
+                f"FROM readings WHERE {_COLUMN} = %s{clause}",
+                params,
             )
             counts = await cur.fetchone()
             await cur.execute(
-                f"SELECT DISTINCT device_name FROM readings WHERE {_COLUMN} = %s",
-                (value,),
+                f"SELECT DISTINCT device_name FROM readings "
+                f"WHERE {_COLUMN} = %s{clause}",
+                params,
             )
             devices = {r["device_name"] for r in await cur.fetchall()}
             await cur.execute(
-                f"SELECT DISTINCT sensor_tag FROM readings WHERE {_COLUMN} = %s",
-                (value,),
+                f"SELECT DISTINCT sensor_tag FROM readings "
+                f"WHERE {_COLUMN} = %s{clause}",
+                params,
             )
             sensors = {r["sensor_tag"] for r in await cur.fetchall()}
 
@@ -134,11 +161,18 @@ class ManualIngestService:
         readings = self._source.parse(file_bytes)
 
         value = self._source.categorical_value
+        # Replace only the rows in this upload's scope (whole-source unless the
+        # source narrows it — see `_scope_clause`). Derived from the parsed
+        # readings so it matches exactly what is about to be inserted.
+        dates = [r.time.date() for r in readings]
+        scope_range = (min(dates), max(dates)) if dates else None
+        clause, sparams = self._scope_clause(scope_range)
         started = time.monotonic()
         async with self.pool.connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cur:
                 await cur.execute(
-                    f"DELETE FROM readings WHERE {_COLUMN} = %s", (value,),
+                    f"DELETE FROM readings WHERE {_COLUMN} = %s{clause}",
+                    [value, *sparams],
                 )
                 await cur.execute(
                     "INSERT INTO manual_uploads "
