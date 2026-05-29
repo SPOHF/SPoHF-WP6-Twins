@@ -225,10 +225,12 @@ class ManualIngestService:
             {
                 "device_name": device,
                 "sensor_tag": sensor,
+                "source": source,
                 "day": day.isoformat(),
             }
-            for device, sensor, day in {
-                (r.device_name, r.sensor_tag, r.time.date()) for r in readings
+            for device, sensor, source, day in {
+                (r.device_name, r.sensor_tag, r.source, r.time.date())
+                for r in readings
             }
         ]
         max_time = max((r.time for r in readings), default=None)

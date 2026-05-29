@@ -282,6 +282,8 @@ def build_weekly_coverage(
     records: list[dict],
     project_start: date | None = None,
     project_end: date | None = None,
+    *,
+    mode: str = "daily",
 ) -> pd.DataFrame:
     """Bucket daily coverage records into weekly blocks with a status colour.
 
@@ -289,10 +291,14 @@ def build_weekly_coverage(
         records: List of dicts with keys: device, sensor, day (date objects).
         project_start: First Monday of the timeline (default: earliest day in records).
         project_end: Last date of the timeline (default: today).
+        mode: Coverage scale. ``"daily"`` (automated sensors, the default) grades
+            on days-per-week: 7 → good, 3-6 → partial, else none. ``"presence"``
+            (sparse manual data) is binary: any measurement that week → good,
+            none → none.
 
     Returns:
-        DataFrame with columns: device, sensor, week_start, days_with_data, status
-        Status values: "none" (0 days), "partial" (1-4 days), "good" (5-7 days).
+        DataFrame with columns: device, sensor, week_start, days_with_data, status.
+        Status values: "good", "none", and (daily mode only) "partial".
     """
     from datetime import timedelta
     from itertools import groupby
@@ -331,7 +337,9 @@ def build_weekly_coverage(
             days_in_week = sum(
                 1 for d in day_set if week_start <= d <= week_end
             )
-            if days_in_week == 7:
+            if mode == "presence":
+                status = "good" if days_in_week >= 1 else "none"
+            elif days_in_week == 7:
                 status = "good"
             elif days_in_week >= 3:
                 status = "partial"
@@ -348,11 +356,29 @@ def build_weekly_coverage(
     return pd.DataFrame(rows)
 
 
-def render_coverage_grid(weekly_df: pd.DataFrame) -> str:
+# Per-scale colour + label maps. "daily" greys nothing — a no-data week is a
+# red fault for an automated sensor. "presence" is for sparse manual data: a
+# week with any measurement is green, a week without is neutral grey (an
+# expected gap, not a fault).
+_COVERAGE_SCALES: dict[str, dict[str, dict[str, str]]] = {
+    "daily": {
+        "colors": {"good": "#22c55e", "partial": "#eab308", "none": "#ef4444"},
+        "labels": {"good": "good", "partial": "some", "none": "no data"},
+    },
+    "presence": {
+        "colors": {"good": "#22c55e", "none": "#9ca3af"},
+        "labels": {"good": "measured", "none": "no measurement"},
+    },
+}
+
+
+def render_coverage_grid(weekly_df: pd.DataFrame, *, mode: str = "daily") -> str:
     """Render an uptime-status-page HTML grid from weekly coverage data.
 
     Args:
         weekly_df: DataFrame from build_weekly_coverage.
+        mode: Coverage scale ("daily" or "presence"); must match the mode passed
+            to :func:`build_weekly_coverage`.
 
     Returns:
         HTML string with one row per sensor/device, coloured weekly blocks.
@@ -360,8 +386,9 @@ def render_coverage_grid(weekly_df: pd.DataFrame) -> str:
     if weekly_df.empty:
         return "<p>No coverage data.</p>"
 
-    color_map = {"good": "#22c55e", "partial": "#eab308", "none": "#ef4444"}
-    label_map = {"good": "good", "partial": "some", "none": "no data"}
+    scale = _COVERAGE_SCALES.get(mode, _COVERAGE_SCALES["daily"])
+    color_map = scale["colors"]
+    label_map = scale["labels"]
 
     weekly_df = weekly_df.copy()
 
@@ -410,7 +437,13 @@ def render_coverage_grid(weekly_df: pd.DataFrame) -> str:
             for _, row in subset.iterrows():
                 color = color_map[row["status"]]
                 status_label = label_map[row["status"]]
-                tip = f'{row["week_start"]}: {row["days_with_data"]}/7 days ({status_label})'
+                if mode == "presence":
+                    tip = f'{row["week_start"]}: {status_label}'
+                else:
+                    tip = (
+                        f'{row["week_start"]}: '
+                        f'{row["days_with_data"]}/7 days ({status_label})'
+                    )
                 html_parts.append(
                     f'<div class="uptime-block" style="background:{color}" title="{tip}"></div>'
                 )

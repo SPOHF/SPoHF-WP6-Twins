@@ -63,7 +63,9 @@ async def upsert_daily_coverage(
 
     Args:
         conn: psycopg async connection
-        records: List of dicts with keys: device_name, sensor_tag, day (ISO date string)
+        records: List of dicts with keys: device_name, sensor_tag, source,
+            day (ISO date string). ``source`` mirrors ``readings.source`` so the
+            status page can classify manual vs automated coverage.
 
     Returns:
         Number of rows touched
@@ -72,8 +74,8 @@ async def upsert_daily_coverage(
         return 0
 
     query = """
-        INSERT INTO daily_coverage (device_name, sensor_tag, day)
-        VALUES (%(device_name)s, %(sensor_tag)s, %(day)s)
+        INSERT INTO daily_coverage (device_name, sensor_tag, source, day)
+        VALUES (%(device_name)s, %(sensor_tag)s, %(source)s, %(day)s)
         ON CONFLICT DO NOTHING
     """
     async with conn.cursor() as cur:
@@ -92,8 +94,8 @@ async def rebuild_daily_coverage(conn: AsyncConnection) -> int:
     async with conn.cursor() as cur:
         await cur.execute("DELETE FROM daily_coverage")
         await cur.execute("""
-            INSERT INTO daily_coverage (device_name, sensor_tag, day)
-            SELECT DISTINCT device_name, sensor_tag, time::date
+            INSERT INTO daily_coverage (device_name, sensor_tag, source, day)
+            SELECT DISTINCT device_name, sensor_tag, source, time::date
             FROM readings
             ON CONFLICT DO NOTHING
         """)

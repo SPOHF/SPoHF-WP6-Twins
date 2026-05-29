@@ -140,7 +140,15 @@ class TestFlushBatch:
         assert (upserted, created) == (3, 2)
         mock_upsert.assert_awaited_once_with(conn, batch)
         mock_coverage.assert_awaited_once_with(
-            conn, [{"device_name": "dev1", "sensor_tag": "temp", "day": "2024-06-15"}]
+            conn,
+            [
+                {
+                    "device_name": "dev1",
+                    "sensor_tag": "temp",
+                    "source": "unknown",
+                    "day": "2024-06-15",
+                }
+            ],
         )
 
 

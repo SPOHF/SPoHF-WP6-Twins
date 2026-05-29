@@ -123,44 +123,81 @@ async def _build_sync_table(provider: SensorDataProvider) -> str | None:
     """
 
 
-async def _build_coverage_html(provider: SensorDataProvider) -> str:
-    """Build the coverage timeline HTML section."""
-    records = await provider.fetch_daily_coverage()
-    if not records:
-        return "<p>No coverage data available.</p>"
+def _coverage_legend(mode: str) -> str:
+    """Legend swatches for a coverage scale."""
+    if mode == "presence":
+        items = [("#22c55e", "Measured"), ("#9ca3af", "No measurement")]
+    else:
+        items = [
+            ("#22c55e", "Good (7 days)"),
+            ("#eab308", "Partial (3-6 days)"),
+            ("#ef4444", "Poor (0-2 days)"),
+        ]
+    swatches = "".join(
+        f'<div class="uptime-legend-item">'
+        f'<span class="uptime-legend-swatch" style="background:{color}"></span> {label}'
+        f"</div>"
+        for color, label in items
+    )
+    return f'<div class="uptime-legend">{swatches}</div>'
 
-    weekly_df = build_weekly_coverage(records)
-    grid_html = render_coverage_grid(weekly_df)
+
+def _coverage_section(
+    records: list[dict], *, mode: str, project_start
+) -> str:
+    """One coverage grid (summary + grid + legend) for a given scale."""
+    weekly_df = build_weekly_coverage(records, project_start, mode=mode)
+    grid_html = render_coverage_grid(weekly_df, mode=mode)
 
     good_pct = (
         len(weekly_df[weekly_df["status"] == "good"]) / len(weekly_df) * 100
         if len(weekly_df) > 0
         else 0
     )
-
     devices = {r["device"] for r in records}
     sensors = {(r["device"], r["sensor"]) for r in records}
+    if mode == "presence":
+        summary = (
+            f"<p>{good_pct:.0f}% of weeks measured "
+            f"across {len(devices)} devices and {len(sensors)} sensors.</p>"
+        )
+    else:
+        summary = (
+            f"<p>{good_pct:.0f}% good coverage "
+            f"across {len(devices)} devices and {len(sensors)} sensors.</p>"
+        )
+    return summary + grid_html + _coverage_legend(mode)
 
-    legend_html = """
-    <div class="uptime-legend">
-        <div class="uptime-legend-item">
-            <span class="uptime-legend-swatch" style="background:#22c55e"></span> Good (7 days)
-        </div>
-        <div class="uptime-legend-item">
-            <span class="uptime-legend-swatch" style="background:#eab308"></span> Partial (3-6 days)
-        </div>
-        <div class="uptime-legend-item">
-            <span class="uptime-legend-swatch" style="background:#ef4444"></span> Poor (0-2 days)
-        </div>
-    </div>
-    """
 
-    summary = (
-        f"<p>{good_pct:.0f}% good coverage "
-        f"across {len(devices)} devices and {len(sensors)} sensors.</p>"
+async def _build_coverage_html(provider: SensorDataProvider) -> str:
+    """Build the coverage timeline, split into automated-sensor and manual
+    sections when the provider tags any record ``manual`` (else a single grid,
+    unchanged — e.g. twins with no manual sources)."""
+    records = await provider.fetch_daily_coverage()
+    if not records:
+        return "<p>No coverage data available.</p>"
+
+    # Shared timeline start so both grids line up week-for-week.
+    days = [r["day"] for r in records if r.get("day")]
+    project_start = min(days) if days else None
+
+    manual = [r for r in records if r.get("manual")]
+    sensor = [r for r in records if not r.get("manual")]
+
+    if not manual:
+        return _coverage_section(sensor, mode="daily", project_start=project_start)
+
+    parts: list[str] = []
+    if sensor:
+        parts.append("<h3>Sensor data</h3>")
+        parts.append(
+            _coverage_section(sensor, mode="daily", project_start=project_start)
+        )
+    parts.append("<h3>Manual data</h3>")
+    parts.append(
+        _coverage_section(manual, mode="presence", project_start=project_start)
     )
-
-    return summary + grid_html + legend_html
+    return "\n".join(parts)
 
 
 @router.get("/status", response_class=HTMLResponse)

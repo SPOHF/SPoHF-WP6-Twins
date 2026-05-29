@@ -173,8 +173,11 @@ class SyncOrchestrator:
             (r["device_name"], r["sensor_tag"], r["datetime_measure"][:10])
             for r in batch
         }
+        # Automated sync writes via upsert_readings, which never sets
+        # `source`, so these readings carry the 'unknown' DDL default — the
+        # daily_coverage source must mirror that to stay consistent.
         coverage_records = [
-            {"device_name": dn, "sensor_tag": st, "day": day}
+            {"device_name": dn, "sensor_tag": st, "source": "unknown", "day": day}
             for dn, st, day in coverage_keys
         ]
         await upsert_daily_coverage(conn, coverage_records)

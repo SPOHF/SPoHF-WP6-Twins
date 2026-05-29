@@ -57,9 +57,18 @@ CREATE TABLE IF NOT EXISTS sync_metadata (
 CREATE TABLE IF NOT EXISTS daily_coverage (
     device_name TEXT NOT NULL,
     sensor_tag  TEXT NOT NULL,
+    source      TEXT NOT NULL DEFAULT 'unknown',
     day         DATE NOT NULL,
     PRIMARY KEY (device_name, sensor_tag, day)
 );
+
+-- Idempotent migration for pre-existing tables (the CREATE above is a no-op
+-- once the table exists). `source` mirrors `readings.source`, letting the
+-- status page classify manual vs automated coverage without touching the
+-- readings hypertable. It is functionally dependent on (device, sensor), so
+-- it stays out of the primary key. Existing rows default to 'unknown' until
+-- the next `rebuild_daily_coverage` repopulates the real source.
+ALTER TABLE daily_coverage ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'unknown';
 """
 
 # Continuous aggregate template. `{project_column}` is the categorical column

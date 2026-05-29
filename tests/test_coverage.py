@@ -85,6 +85,45 @@ class TestBuildWeeklyCoverage:
         assert df.iloc[0]["week_start"] == date(2024, 3, 4)
 
 
+class TestPresenceMode:
+    """Manual data uses a binary presence scale: any measurement that week is
+    green, none is grey — no yellow/red 'fault' states."""
+
+    def test_one_day_is_good(self):
+        records = _days("d1", "shoot_length", date(2024, 4, 1), 1)
+        df = build_weekly_coverage(
+            records, date(2024, 4, 1), date(2024, 4, 7), mode="presence"
+        )
+        assert df.iloc[0]["status"] == "good"
+        assert df.iloc[0]["days_with_data"] == 1
+
+    def test_empty_week_is_none(self):
+        records = _days("d1", "shoot_length", date(2024, 4, 1), 1)
+        df = build_weekly_coverage(
+            records, date(2024, 4, 1), date(2024, 4, 14), mode="presence"
+        )
+        week2 = df[df["week_start"] == date(2024, 4, 8)]
+        assert week2.iloc[0]["status"] == "none"
+
+    def test_never_partial(self):
+        # 3 days would be "partial" in daily mode; presence mode only knows good/none.
+        records = _days("d1", "shoot_length", date(2024, 4, 1), 3)
+        df = build_weekly_coverage(
+            records, date(2024, 4, 1), date(2024, 4, 7), mode="presence"
+        )
+        assert set(df["status"]) <= {"good", "none"}
+        assert df.iloc[0]["status"] == "good"
+
+    def test_grid_uses_grey_not_red(self):
+        records = _days("d1", "shoot_length", date(2024, 4, 1), 1)
+        df = build_weekly_coverage(
+            records, date(2024, 4, 1), date(2024, 4, 14), mode="presence"
+        )
+        html = render_coverage_grid(df, mode="presence")
+        assert "#9ca3af" in html  # grey for an unmeasured week
+        assert "#ef4444" not in html  # no red faults for manual data
+
+
 class TestRenderCoverageGrid:
     def test_returns_html_string(self):
         records = _days("d1", "temp", date(2024, 4, 1), 14)

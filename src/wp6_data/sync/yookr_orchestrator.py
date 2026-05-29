@@ -252,8 +252,10 @@ class YookrSyncOrchestrator:
             (r["device_name"], r["sensor_tag"], r["datetime_measure"][:10])
             for r in batch
         }
+        # upsert_readings never sets `source`, so these automated readings
+        # carry the 'unknown' DDL default; mirror it in daily_coverage.
         coverage_records = [
-            {"device_name": dn, "sensor_tag": st, "day": day}
+            {"device_name": dn, "sensor_tag": st, "source": "unknown", "day": day}
             for dn, st, day in coverage_keys
         ]
         await upsert_daily_coverage(conn, coverage_records)
