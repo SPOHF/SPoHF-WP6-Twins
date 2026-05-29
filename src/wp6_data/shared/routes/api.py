@@ -3,6 +3,7 @@
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any
 
+import pandas as pd
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
@@ -96,6 +97,9 @@ async def get_series(
 
     truncated = len(df) >= limit
     has_count = "count" in df.columns
+    # value_min/value_max ride along only on bucketed responses; the client
+    # uses them to shade an optional min/max range band around the line.
+    has_spread = "value_min" in df.columns and "value_max" in df.columns
     records: list[dict[str, Any]] = []
     for _, row in df.iterrows():
         t: datetime = row["time"]
@@ -103,6 +107,10 @@ async def get_series(
             "time": to_local_isoformat(t),
             "value": None if row["value"] is None else float(row["value"]),
         }
+        if has_spread:
+            vmin, vmax = row["value_min"], row["value_max"]
+            rec["min"] = None if vmin is None or pd.isna(vmin) else float(vmin)
+            rec["max"] = None if vmax is None or pd.isna(vmax) else float(vmax)
         if has_count:
             rec["count"] = int(row["count"])
         records.append(rec)

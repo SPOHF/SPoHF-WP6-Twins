@@ -21,8 +21,11 @@ CHART_AGG_FUNCS: dict[str, str] = {
     "sum": "sum",
 }
 
-# Column contract for bucketed output, in order.
-BUCKETED_COLUMNS = ["device", "sensor", "time", "value", "count"]
+# Column contract for bucketed output, in order. ``value`` is the chosen
+# aggregate (avg/min/max/sum); ``value_min``/``value_max`` are always the raw
+# min/max within the bucket, so the chart can shade a min/max "range band"
+# around the line regardless of which aggregate the line itself uses.
+BUCKETED_COLUMNS = ["device", "sensor", "time", "value", "value_min", "value_max", "count"]
 
 
 def bucket_and_aggregate(
@@ -38,12 +41,13 @@ def bucket_and_aggregate(
     MUST produce the same shape so the contract is uniform:
 
         in:  columns device, sensor, time (tz-aware UTC), value
-        out: columns device, sensor, time, value, count
+        out: columns device, sensor, time, value, value_min, value_max, count
 
     ``time`` is the bucket start; ``count`` is the number of non-null raw
     values in the bucket. ``count`` is required so the client can recombine
     series that share an axis label with a count-weighted average (an
-    average-of-averages would otherwise be wrong).
+    average-of-averages would otherwise be wrong). ``value_min``/``value_max``
+    are the raw extremes within the bucket, for the chart's range band.
 
     Buckets are floored at ``tz`` wall-clock to match
     ``time_bucket(interval, time, <tz>)``. The two DST-transition buckets per
@@ -72,7 +76,9 @@ def bucket_and_aggregate(
     grouped = df.assign(time=floored).groupby(
         ["device", "sensor", "time"], sort=True,
     )["value"]
-    out = grouped.agg(value=pandas_op, count="count").reset_index()
+    out = grouped.agg(
+        value=pandas_op, value_min="min", value_max="max", count="count",
+    ).reset_index()
     return out[BUCKETED_COLUMNS]
 
 

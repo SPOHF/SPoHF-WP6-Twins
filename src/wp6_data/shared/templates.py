@@ -993,6 +993,30 @@ BASE_CSS = """
         width: 100%;
         margin: 0.2rem 0 0;
     }
+    .band-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        margin: 0.4rem 0 0;
+        cursor: pointer;
+    }
+    .band-toggle input[type="checkbox"] {
+        margin: 0;
+        width: auto;
+    }
+    .band-hint {
+        display: block;
+        font-size: 0.7rem;
+        opacity: 0.65;
+        margin: 0 0 0.3rem 1.4rem;
+    }
+    /* "Show but disable": the band only applies to a true range (an active
+       aggregation other than SUM), so grey it out when it cannot apply. */
+    .band-toggle.disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
     .axis-split-toggle {
         display: flex;
         align-items: center;
@@ -1172,7 +1196,8 @@ UNIFIED_CHART_JS = """
             labelFormat: 'smart',
             aggregateEnabled: false,
             aggregateFunc: 'avg',
-            bucketMinutes: 10
+            bucketMinutes: 10,
+            bandEnabled: false
         };
     }
     var axisCfg = { left: defaultAxisCfg(), right: defaultAxisCfg() };
@@ -1189,7 +1214,7 @@ UNIFIED_CHART_JS = """
         var v = params.get(name) || '';
         return ['smart', 'short', 'raw'].indexOf(v) !== -1 ? v : fallback;
     }
-    function readAggInto(cfg, aggName, bktName) {
+    function readAggInto(cfg, aggName, bktName, bandName) {
         var agg = params.get(aggName);
         if (agg === 'off') {
             cfg.aggregateEnabled = false;
@@ -1201,9 +1226,12 @@ UNIFIED_CHART_JS = """
         if (!isNaN(bkt) && BUCKET_STEPS.indexOf(bkt) !== -1) {
             cfg.bucketMinutes = bkt;
         }
+        var band = params.get(bandName);
+        if (band === '1') cfg.bandEnabled = true;
+        else if (band === '0') cfg.bandEnabled = false;
     }
     axisCfg.left.labelFormat = readLabelFormat('lbl', 'smart');
-    readAggInto(axisCfg.left, 'agg', 'bkt');
+    readAggInto(axisCfg.left, 'agg', 'bkt', 'band');
     if (params.get('split') === '1') {
         splitMode = true;
         // Right-axis values fall back to left for any param not explicitly set
@@ -1211,7 +1239,8 @@ UNIFIED_CHART_JS = """
         axisCfg.right.aggregateEnabled = axisCfg.left.aggregateEnabled;
         axisCfg.right.aggregateFunc = axisCfg.left.aggregateFunc;
         axisCfg.right.bucketMinutes = axisCfg.left.bucketMinutes;
-        readAggInto(axisCfg.right, 'agg_r', 'bkt_r');
+        axisCfg.right.bandEnabled = axisCfg.left.bandEnabled;
+        readAggInto(axisCfg.right, 'agg_r', 'bkt_r', 'band_r');
     }
 
     // Build initial active set from URL
@@ -1334,6 +1363,14 @@ UNIFIED_CHART_JS = """
                 '.bucket-label[data-axis="' + axis + '"]');
             if (labelEl) labelEl.textContent = formatBucket(c.bucketMinutes);
         });
+        document.querySelectorAll('.band-input').forEach(function(box) {
+            var c = axisCfg[box.dataset.axis];
+            var applies = bandAppliesTo(c);
+            box.checked = c.bandEnabled;
+            box.disabled = !applies;
+            var label = box.closest('.band-toggle');
+            if (label) label.classList.toggle('disabled', !applies);
+        });
     }
 
     function wireAxisControls(rootEl) {
@@ -1377,6 +1414,16 @@ UNIFIED_CHART_JS = """
                 if (axisCfg[axis].aggregateEnabled) {
                     refetchAll();
                 }
+            });
+        });
+        rootEl.querySelectorAll('.band-input').forEach(function(box) {
+            box.addEventListener('change', function() {
+                var axis = box.dataset.axis;
+                axisCfg[axis].bandEnabled = box.checked;
+                // min/max are already on the client whenever aggregation is
+                // on, so toggling the band is a pure re-render — no refetch.
+                rebuildTraces();
+                syncUrl();
             });
         });
     }
@@ -1642,6 +1689,21 @@ UNIFIED_CHART_JS = """
         return m;
     }
 
+    // Translucent fill for the range band, derived from the series' own
+    // palette colour (all TRACE_COLORS are #rrggbb).
+    function hexToRgba(hex, alpha) {
+        var r = parseInt(hex.slice(1, 3), 16);
+        var g = parseInt(hex.slice(3, 5), 16);
+        var b = parseInt(hex.slice(5, 7), 16);
+        return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+    }
+
+    // The band toggle is only meaningful for true ranges: it needs an active
+    // aggregation, and SUM puts the line on a different scale than min/max.
+    function bandAppliesTo(cfg) {
+        return cfg.aggregateEnabled && cfg.aggregateFunc !== 'sum';
+    }
+
     // Combine already-bucketed values from multiple series that share one
     // axis label. The server aligned every series to identical bucket
     // boundaries, so values at the same timestamp are directly combinable.
@@ -1741,18 +1803,25 @@ UNIFIED_CHART_JS = """
                     if (g.series.length === 1) {
                         // Server already bucketed+aggregated this series.
                         var s0 = g.series[0];
-                        merged = { times: s0.times, values: s0.values };
+                        merged = {
+                            times: s0.times, values: s0.values,
+                            mins: s0.mins, maxs: s0.maxs
+                        };
                     } else {
                         // Series share a label: recombine on the identical
                         // server-side bucket timestamps, count-weighting AVG.
+                        // The band spans all series, so min-of-mins/max-of-maxs.
                         var bmap = {};
                         g.series.forEach(function(sd) {
                             sd.times.forEach(function(t, i) {
                                 var v = sd.values[i];
                                 if (v === null || v === undefined) return;
-                                if (!bmap[t]) bmap[t] = { vals: [], counts: [] };
+                                if (!bmap[t]) bmap[t] = {
+                                    vals: [], counts: [], mins: [], maxs: [] };
                                 bmap[t].vals.push(v);
                                 bmap[t].counts.push(sd.counts ? sd.counts[i] : 1);
+                                if (sd.mins && sd.mins[i] != null) bmap[t].mins.push(sd.mins[i]);
+                                if (sd.maxs && sd.maxs[i] != null) bmap[t].maxs.push(sd.maxs[i]);
                             });
                         });
                         var sortedTimes = Object.keys(bmap).sort();
@@ -1760,18 +1829,49 @@ UNIFIED_CHART_JS = """
                             return combineAgg(
                                 bmap[t].vals, bmap[t].counts, cfg.aggregateFunc);
                         });
-                        merged = { times: sortedTimes, values: aggValues };
+                        var aggMins = sortedTimes.map(function(t) {
+                            return bmap[t].mins.length
+                                ? Math.min.apply(null, bmap[t].mins) : null; });
+                        var aggMaxs = sortedTimes.map(function(t) {
+                            return bmap[t].maxs.length
+                                ? Math.max.apply(null, bmap[t].maxs) : null; });
+                        merged = {
+                            times: sortedTimes, values: aggValues,
+                            mins: aggMins, maxs: aggMaxs
+                        };
                     }
 
                     var suffix = g.series.length > 1
                     ? ' [' + cfg.aggregateFunc.toUpperCase() + '\u00d7' + g.series.length + ']'
                     : '';
                 var color = colorMap[g.firstKey];
+                var yaxisName = axis === 'right' ? 'y2' : 'y';
+
+                // Range band: a translucent min->max area drawn *before* the
+                // line so the line sits on top. Two zero-width traces (lower
+                // then upper-with-fill) make Plotly shade between them.
+                if (cfg.bandEnabled && bandAppliesTo(cfg)
+                    && merged.mins && merged.maxs) {
+                    traces.push({
+                        x: merged.times, y: merged.mins,
+                        mode: 'lines', line: {width: 0},
+                        yaxis: yaxisName,
+                        hoverinfo: 'skip', showlegend: false
+                    });
+                    traces.push({
+                        x: merged.times, y: merged.maxs,
+                        mode: 'lines', line: {width: 0},
+                        fill: 'tonexty', fillcolor: hexToRgba(color, 0.18),
+                        yaxis: yaxisName,
+                        hoverinfo: 'skip', showlegend: false
+                    });
+                }
+
                 var trace = {
                     x: merged.times, y: merged.values,
                     name: g.label + suffix,
                     mode: 'lines',
-                    yaxis: axis === 'right' ? 'y2' : 'y',
+                    yaxis: yaxisName,
                     line: {color: color}
                 };
                 if (axis === 'right') { trace.line.dash = 'dash'; }
@@ -1817,8 +1917,16 @@ UNIFIED_CHART_JS = """
                 var values = data.map(function(d) { return d.value; });
                 var counts = data.map(function(d) {
                     return d.count != null ? d.count : 1; });
+                // min/max ride along only on bucketed responses (range band).
+                var mins = data.map(function(d) {
+                    return d.min != null ? d.min : null; });
+                var maxs = data.map(function(d) {
+                    return d.max != null ? d.max : null; });
 
-                seriesData[key] = { times: times, values: values, counts: counts };
+                seriesData[key] = {
+                    times: times, values: values, counts: counts,
+                    mins: mins, maxs: maxs
+                };
                 activeSeries[key] = {
                     axis: axis, traceIdx: -1, points: data.length,
                     truncated: !!resp.truncated,
@@ -1972,6 +2080,8 @@ UNIFIED_CHART_JS = """
         else p.delete('agg');
         if (L.aggregateEnabled && L.bucketMinutes !== 10) p.set('bkt', L.bucketMinutes);
         else p.delete('bkt');
+        if (L.bandEnabled) p.set('band', '1');
+        else p.delete('band');
         if (splitMode) {
             p.set('split', '1');
             var R = axisCfg.right;
@@ -1988,11 +2098,16 @@ UNIFIED_CHART_JS = """
             } else {
                 p.delete('bkt_r');
             }
+            // Right inherits left's band on load, so only emit band_r when it
+            // differs (explicit '0' overrides an inherited-on state).
+            if (R.bandEnabled !== L.bandEnabled) p.set('band_r', R.bandEnabled ? '1' : '0');
+            else p.delete('band_r');
         } else {
             p.delete('split');
             p.delete('lbl_r');
             p.delete('agg_r');
             p.delete('bkt_r');
+            p.delete('band_r');
         }
         var newUrl = window.location.pathname;
         var qs = p.toString();
@@ -2008,7 +2123,8 @@ UNIFIED_CHART_JS = """
     var dateForm = document.getElementById('dateFilter');
     if (dateForm) {
         var params = new URLSearchParams(window.location.search);
-        ['s', 'r', 'lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r'].forEach(function(name) {
+        ['s', 'r', 'lbl', 'agg', 'bkt', 'band',
+         'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r'].forEach(function(name) {
             var val = params.get(name);
             if (val) {
                 var input = document.createElement('input');
@@ -2023,7 +2139,8 @@ UNIFIED_CHART_JS = """
     // Also keep hidden fields in sync when series change
     function syncDateFormParams() {
         if (!dateForm) return;
-        ['s', 'r', 'lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r'].forEach(function(name) {
+        ['s', 'r', 'lbl', 'agg', 'bkt', 'band',
+         'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r'].forEach(function(name) {
             var existing = dateForm.querySelector(
                 'input[name="' + name + '"]');
             var p = new URLSearchParams(window.location.search);
@@ -2134,7 +2251,8 @@ DASHBOARD_JS = """
         if (chart.r) params.set('r', chart.r);
         params.set('start', dates.start);
         params.set('end', dates.end);
-        ['lbl', 'agg', 'bkt', 'split', 'lbl_r', 'agg_r', 'bkt_r'].forEach(function(k) {
+        ['lbl', 'agg', 'bkt', 'band',
+         'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r'].forEach(function(k) {
             if (chart[k]) params.set(k, chart[k]);
         });
         return '/chart?' + params.toString();
@@ -2344,10 +2462,12 @@ SAVE_TO_DASHBOARD_JS = """
             lbl: params.get('lbl') || '',
             agg: params.get('agg') || '',
             bkt: params.get('bkt') || '',
+            band: params.get('band') || '',
             split: params.get('split') || '',
             lbl_r: params.get('lbl_r') || '',
             agg_r: params.get('agg_r') || '',
             bkt_r: params.get('bkt_r') || '',
+            band_r: params.get('band_r') || '',
             createdAt: new Date().toISOString()
         };
 
@@ -2600,6 +2720,11 @@ to {end.isoformat()}</summary>
                     <input type="range" class="bucket-slider-input" data-axis="left"
                         min="0" max="13" value="3" step="1">
                 </div>
+                <label class="band-toggle">
+                    <input type="checkbox" class="band-input" data-axis="left">
+                    Range band
+                </label>
+                <small class="band-hint">shade lowest–highest in each bucket</small>
             </div>
             <div id="axis-controls-split" style="display:none;">
                 <h4>Y-Left</h4>
@@ -2625,6 +2750,11 @@ to {end.isoformat()}</summary>
                     <input type="range" class="bucket-slider-input" data-axis="left"
                         min="0" max="13" value="3" step="1">
                 </div>
+                <label class="band-toggle">
+                    <input type="checkbox" class="band-input" data-axis="left">
+                    Range band
+                </label>
+                <small class="band-hint">shade lowest–highest in each bucket</small>
                 <h4>Y-Right</h4>
                 <small>Labels</small>
                 <div class="group-toggle">
@@ -2650,6 +2780,11 @@ to {end.isoformat()}</summary>
                     <input type="range" class="bucket-slider-input" data-axis="right"
                         min="0" max="13" value="3" step="1">
                 </div>
+                <label class="band-toggle">
+                    <input type="checkbox" class="band-input" data-axis="right">
+                    Range band
+                </label>
+                <small class="band-hint">shade lowest–highest in each bucket</small>
             </div>
         </div>
         <div class="chart-main">

@@ -129,6 +129,8 @@ async def fetch_data(
             SELECT device_name AS device, sensor_tag AS sensor,
                    time_bucket(%(bucket)s, time, %(tz)s) AS time,
                    {agg}(value) AS value,
+                   min(value) AS value_min,
+                   max(value) AS value_max,
                    count(value) AS count
             FROM readings
             WHERE {where}
@@ -136,7 +138,7 @@ async def fetch_data(
             ORDER BY time_bucket(%(bucket)s, time, %(tz)s)
             LIMIT %(limit)s
         """
-        columns = ["device", "sensor", "time", "value", "count"]
+        columns = ["device", "sensor", "time", "value", "value_min", "value_max", "count"]
     else:
         query = f"""
             SELECT device_name AS device, sensor_tag AS sensor,
@@ -156,7 +158,9 @@ async def fetch_data(
     df = pd.DataFrame(records)
     if not df.empty:
         df["time"] = pd.to_datetime(df["time"], utc=True)
-        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        for col in ("value", "value_min", "value_max"):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df.sort_values("time")
     return df
 

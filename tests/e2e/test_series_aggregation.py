@@ -77,8 +77,16 @@ async def test_hourly_avg_is_aggregated_sorted_and_counted(_seeded):
     values = [d["value"] for d in data]
     assert values == pytest.approx([20.0, 150.0, 5.0])
 
+    # Range band: each bucketed point carries the raw min/max extremes.
+    # A: min(10,20,30)=10 max=30 ; B: 100/200 ; C: single 5.
+    assert [d["min"] for d in data] == pytest.approx([10.0, 100.0, 5.0])
+    assert [d["max"] for d in data] == pytest.approx([30.0, 200.0, 5.0])
+
 
 async def test_raw_path_unaggregated_regression(_seeded):
     body = await _series("")  # no bkt/agg
     assert len(body["data"]) == len(ROWS)
     assert "count" not in body["data"][0]
+    # min/max ride along only on bucketed responses.
+    assert "min" not in body["data"][0]
+    assert "max" not in body["data"][0]

@@ -149,6 +149,8 @@ async def fetch_data_tsdb(
             SELECT device_name AS device, sensor_tag AS sensor,
                    time_bucket(%(bucket)s, time, %(tz)s) AS time,
                    {agg}(value) AS value,
+                   min(value) AS value_min,
+                   max(value) AS value_max,
                    count(value) AS count
             FROM readings
             WHERE {where}
@@ -156,7 +158,7 @@ async def fetch_data_tsdb(
             ORDER BY time_bucket(%(bucket)s, time, %(tz)s)
             LIMIT %(limit)s
         """
-        columns = ["device", "sensor", "time", "value", "count"]
+        columns = ["device", "sensor", "time", "value", "value_min", "value_max", "count"]
     else:
         query = f"""
             SELECT device_name AS device, sensor_tag AS sensor, time, value
@@ -175,7 +177,9 @@ async def fetch_data_tsdb(
         return pd.DataFrame(columns=columns)
     df = pd.DataFrame(records)
     df["time"] = pd.to_datetime(df["time"], utc=True)
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    for col in ("value", "value_min", "value_max"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     return df.sort_values("time")
 
 

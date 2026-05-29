@@ -49,6 +49,8 @@ def test_raw_response_unchanged_no_count(client):
     resp = client.get(BASE).json()
     assert resp["data"]
     assert "count" not in resp["data"][0]
+    assert "min" not in resp["data"][0]  # range-band extremes are bucketed-only
+    assert "max" not in resp["data"][0]
     assert "limit" in resp  # consistent on the non-empty path
 
 
@@ -59,6 +61,14 @@ def test_aggregation_reduces_points_and_adds_count(client):
     assert day["truncated"] is False
     assert all("count" in d for d in day["data"])
     assert all(d["count"] >= 1 for d in day["data"])
+
+
+def test_aggregation_includes_range_band_extremes(client):
+    # Each bucketed point carries raw min/max for the chart's range band,
+    # and they bound the aggregated line value (min <= avg <= max).
+    day = client.get(BASE + "&bkt=1440&agg=avg").json()["data"]
+    assert all("min" in d and "max" in d for d in day)
+    assert all(d["min"] <= d["value"] <= d["max"] for d in day)
 
 
 def test_day_bucket_aligns_to_local_midnight(client):

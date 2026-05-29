@@ -48,8 +48,10 @@ class SensorDataProvider(Protocol):
 
         When ``bucket`` and ``agg`` are both given, readings are aggregated
         server-side into fixed-width time buckets (``agg`` is one of
-        :data:`~wp6_data.shared.aggregation.CHART_AGG_FUNCS`) and an extra
-        ``count`` column carries the number of non-null raw values per bucket.
+        :data:`~wp6_data.shared.aggregation.CHART_AGG_FUNCS`) and extra
+        ``count``, ``value_min`` and ``value_max`` columns carry the number of
+        non-null raw values and the raw extremes per bucket (the latter feed
+        the chart's optional min/max range band).
         The row ``limit`` then applies to *bucketed* rows, so a long range no
         longer silently truncates the underlying data. With neither set,
         behaviour and shape are unchanged (raw rows, no ``count``).

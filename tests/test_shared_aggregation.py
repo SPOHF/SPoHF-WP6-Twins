@@ -62,6 +62,15 @@ class TestAggregationFunctions:
         assert out.iloc[0]["value"] == pytest.approx(expected)
         assert out.iloc[0]["count"] == 2
 
+    @pytest.mark.parametrize("agg", list(CHART_AGG_FUNCS))
+    def test_range_band_extremes_are_raw_minmax(self, agg):
+        # value_min/value_max are always the raw bucket extremes, regardless of
+        # which aggregate the line uses — that's what the chart's range band
+        # shades. Fixture holds 10 and 20 in a single hour.
+        out = bucket_and_aggregate(self._two_in_one_hour(), HOUR, agg, AMS)
+        assert out.iloc[0]["value_min"] == pytest.approx(10.0)
+        assert out.iloc[0]["value_max"] == pytest.approx(20.0)
+
     def test_all_whitelisted_funcs_run(self):
         for agg in CHART_AGG_FUNCS:
             out = bucket_and_aggregate(self._two_in_one_hour(), HOUR, agg, AMS)
