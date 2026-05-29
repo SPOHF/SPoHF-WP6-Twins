@@ -321,44 +321,43 @@ devices:
       suzukii:
         intention: "Spotted-wing drosophila (D. suzukii) caught per round"
 
-  # long_data plant/treatment devices are data-driven (one per treatment×plant,
-  # plus a `plant 0` per treatment for samples) — far too many to list. One
-  # wildcard pattern per treatment gives them all their `position`, reusing the
-  # automated sensors' codes so manual + automated readings of a plot group
-  # together. `position` is matched most-specific-first (see MetadataRegistry).
-  "Org1 / plant *":
+  # long_data models one device per treatment (plant_nr is discarded — see
+  # ADR 0004), so the device set is this fixed list of nine. `position` reuses
+  # the automated sensors' codes so manual + automated readings of a plot group
+  # together.
+  "Org1":
     position: "Org1"
     type: "Blueberry plant (manual)"
     source: "long_data"
-  "Org2 / plant *":
+  "Org2":
     position: "Org2"
     type: "Blueberry plant (manual)"
     source: "long_data"
-  "Std / plant *":
+  "Std":
     position: "Std"
     type: "Blueberry plant (manual)"
     source: "long_data"
-  "Ca / plant *":
+  "Ca":
     position: "Ca"
     type: "Blueberry plant (manual)"
     source: "long_data"
-  "K / plant *":
+  "K":
     position: "K"
     type: "Blueberry plant (manual)"
     source: "long_data"
-  "G_K / plant *":
+  "G_K":
     position: "G_K"
     type: "Blueberry plant (manual)"
     source: "long_data"
-  "V_CA / plant *":
+  "V_CA":
     position: "V_CA"
     type: "Blueberry plant (manual)"
     source: "long_data"
-  "V_CA_G_BrPK / plant *":
+  "V_CA_G_BrPK":
     position: "V_CA_G_BrPK"
     type: "Blueberry plant (manual)"
     source: "long_data"
-  "V_K_G_CaBrP / plant *":
+  "V_K_G_CaBrP":
     position: "V_K_G_CaBrP"
     type: "Blueberry plant (manual)"
     source: "long_data"

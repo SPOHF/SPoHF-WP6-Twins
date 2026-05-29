@@ -19,7 +19,9 @@ per-device edits, keeping the YAML the small hand-written SSOT.
 ## Consequences
 
 The feature is generic (lives in shared `MetadataRegistry`), so it is available
-to every twin, not just blue. `long_data` device names are deliberately
-pattern-friendly (`"{treatment} / plant {nr}"`) so one `"{treatment} / plant *"`
-key per treatment suffices, and reuse the automated sensors' `position` codes so
-manual and automated readings of a plot group together.
+to every twin, not just blue.
+
+> **Update (ADR 0004):** `long_data` no longer mints per-plant devices — it
+> models one device per treatment and lists them literally — so this feature
+> currently has no consumer. The generic glob-matching capability is
+> intentionally retained for future data-driven device families.

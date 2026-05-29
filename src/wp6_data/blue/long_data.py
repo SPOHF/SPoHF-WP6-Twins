@@ -4,7 +4,10 @@
 in long/tidy form: ``Date, Meting, Treatment, Value`` (+ ``Plant_nr`` from 2025
 on). This module is the only ``long_data``-specific code: it harmonizes the two
 yearly vocabularies into one canonical set of measures and treatments, models
-plants/treatment-samples as devices, and preserves every sample.
+**one device per treatment**, and preserves every sample. The ``Plant_nr``
+column is tolerated on input but discarded — plants are not individually
+identified (see ADR 0004); every plant and pooled sample of a treatment coexists
+on its single device.
 
 It does **not** use the shared mean-bucketing ``bind``: because the source is
 date-only, the unused time-of-day encodes each sample's file order
@@ -82,16 +85,9 @@ IGNORE_MEASURES: frozenset[str] = frozenset({
     "Total Weight (grams)",
 })
 
-# Measures that are a pooled per-treatment sample, not per-plant: they go to
-# the treatment-level `plant 0` device even when the file carries a Plant_nr.
-POOLED_SENSORS: frozenset[str] = frozenset({
-    "sample_weight_before_storage",
-    "sample_weight_after_storage",
-})
-
-# Required and optional source columns (matched case-insensitively).
+# Required source columns (matched case-insensitively). A `Plant_nr` column may
+# also be present (2025+); it is read past and discarded — see ADR 0004.
 _REQUIRED_COLUMNS = ("date", "meting", "treatment", "value")
-_PLANT_COLUMN = "plant_nr"
 
 
 class LongDataParseError(ManualParseError):
@@ -110,7 +106,7 @@ def _column_index(header: tuple) -> dict[str, int]:
         if cell is None:
             continue
         name = str(cell).strip().lower()
-        if name in _REQUIRED_COLUMNS or name == _PLANT_COLUMN:
+        if name in _REQUIRED_COLUMNS:
             found[name] = idx
     missing = [c for c in _REQUIRED_COLUMNS if c not in found]
     if missing:
@@ -134,14 +130,6 @@ def _coerce_date(cell: object) -> date | None:
     return None
 
 
-def _device_name(code: str, sensor_tag: str, plant_nr: int | None) -> str:
-    """Build the device name. Pooled samples and rows without a plant go to the
-    treatment-level ``plant 0``; real plants get ``plant {nr}``."""
-    if plant_nr is None or sensor_tag in POOLED_SENSORS:
-        return f"{code} / plant 0"
-    return f"{code} / plant {plant_nr}"
-
-
 def _aggregate(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
     """Decode the workbook into ordinal-timestamped readings.
 
@@ -157,7 +145,6 @@ def _aggregate(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]
     except StopIteration:
         raise LongDataParseError("file is empty") from None
     cols = _column_index(tuple(header))
-    has_plant = _PLANT_COLUMN in cols
 
     # Intermediate samples in file order; ordinals assigned after the full pass
     # so each (device, date, sensor) group is numbered by entry sequence.
@@ -205,17 +192,10 @@ def _aggregate(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]
             skipped.append(SkippedRow(line_idx, f"value {raw_value!r} is not a number"))
             continue
 
-        plant_nr: int | None = None
-        if has_plant:
-            raw_plant = row[cols[_PLANT_COLUMN]]
-            if raw_plant is not None and str(raw_plant).strip() != "":
-                try:
-                    plant_nr = int(raw_plant)
-                except (TypeError, ValueError):
-                    plant_nr = None
-
+        # The treatment code is the device — every plant and pooled sample of a
+        # treatment shares one device (ADR 0004); any Plant_nr column is ignored.
         total += 1
-        samples.append((_device_name(code, sensor_tag, plant_nr), day, sensor_tag, value))
+        samples.append((code, day, sensor_tag, value))
 
     wb.close()
 

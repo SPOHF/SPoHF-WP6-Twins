@@ -8,13 +8,10 @@ implementation details.
 
 ### Treatment
 A fertilization/cultivation strategy applied to a plot of blueberry plants.
-The categorical axis every manual blue measurement is grouped by, and the
-value carried in a device's `position`. `plant_nr` is numbered **locally
-within a treatment**, so the same number under two treatments is two different
-physical plants — `(treatment, plant_nr)` is the unique plant identity. The
-same physical plant may carry a *different* treatment in a later year; keying
-on treatment means its record correctly continues only while the regime is
-unchanged.
+The categorical axis every manual blue measurement is grouped by: a treatment
+is modelled as **one device**, named by its code, with the same code carried in
+the device's `position`. Manual readings are not resolved below this level —
+individual plants are not identified (see **Plant**).
 
 Canonical treatment codes (reused from the automated sensors' `position`
 vocabulary so manual + automated readings of one plot group together):
@@ -31,23 +28,22 @@ Source-label → canonical: `Organic 1`/`Organisch-1` → `Org1`; `Organic 2`/
 `Kalium`/`K` → `K`; the four 2025 codes pass through unchanged.
 
 ### Plant
-One physical blueberry plant, identified by `(treatment, plant_nr)` and modelled
-as a device named `"{treatment} / plant {nr}"`. Perennial: the same plant keeps
-its device across years while its treatment is unchanged. When individual plants
-were not recorded (see [[long_data]] 2024) or a measure is a pooled sample (see
-**Sample**), readings are attributed to the treatment-level device
-`"{treatment} / plant 0"` instead.
+One physical blueberry plant. Plants are **not** individually modelled: a
+`Plant_nr` that some source files carry is discarded on ingest (see ADR 0004),
+because per-plant devices proved too cumbersome in the UI and were never queried
+below the treatment. A plant's measured values are kept — they live as
+**Samples** on the treatment device — but they are not labelled by plant.
 
 ### Sample
-An individual measured value (a shoot, a berry, a pooled stored-berry sample)
-not tied to a known plant. Samples are **not** given their own devices — they
-attach to the treatment-level `plant 0` device. Multiple samples on the same
-date for the same device + measure are kept individually (no averaging) by
-encoding the sample's file order in the timestamp: `date 00:00:00 UTC + i
-seconds`, `i` = 1-based file order (so `00:00:00` is reserved/unused). This
-preserves the full distribution and entry order without per-sample devices or a
-schema change. Date-only data is anchored at **UTC midnight, not localized** —
-unlike [[insects]] — so both day-bucketing paths file it under the correct date.
+An individual measured value (a shoot, a berry, a pooled stored-berry sample).
+Samples are **not** given their own devices — they attach to the **treatment**
+device. Multiple samples on the same date for the same device + measure are kept
+individually (no averaging) by encoding the sample's file order in the
+timestamp: `date 00:00:00 UTC + i seconds`, `i` = 1-based file order (so
+`00:00:00` is reserved/unused). This preserves the full distribution and entry
+order without per-sample devices or a schema change. Date-only data is anchored
+at **UTC midnight, not localized** — unlike [[insects]] — so both day-bucketing
+paths file it under the correct date.
 
 ### Measure
 A kind of manual measurement. In source files this is a free-text column
@@ -74,13 +70,11 @@ Already in long/tidy form: `Date, Meting (measure), Treatment, Value`
 vocabularies (incl. unit conversion) into one canonical set is the core of
 this source.
 
-- **2025+**: per-plant measures resolve to `"{treatment} / plant {nr}"`.
-  Pooled storage samples (per-treatment, not per-plant) go to `plant 0`.
-- **2024**: no plant ids (fixed sampling protocol — uniform sample counts
-  across treatments, not a per-plant census). All readings go to the
-  treatment-level `"{treatment} / plant 0"` device; the individual samples are
-  preserved via the timestamp-ordinal encoding (see **Sample**), not by minting
-  per-sample devices.
+Every reading — both years, including 2025's `Plant_nr`-tagged rows and the
+pooled storage samples — resolves to its treatment device `"{treatment}"`. The
+individual samples within a treatment are preserved via the timestamp-ordinal
+encoding (see **Sample**), not by minting per-plant or per-sample devices
+(see ADR 0004).
 
 ### insects
 Manual insect-trap counts delivered as CSV, ingested via CLI or admin upload.

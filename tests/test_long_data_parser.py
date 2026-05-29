@@ -44,19 +44,20 @@ def _by_device(readings: list) -> dict[str, list]:
     return out
 
 
-def test_2025_layout_maps_to_per_plant_device() -> None:
+def test_2025_layout_plant_nr_is_ignored_device_is_treatment() -> None:
+    """The 2025 Plant_nr column is read past — the device is the treatment."""
     data = _xlsx(H_2025, [(date(2025, 7, 31), "Shoot_Length", 12, "Organisch-1", 90.0)])
     (r,) = parse(data)
     assert r.source == SOURCE
-    assert r.device_name == "Org1 / plant 12"
+    assert r.device_name == "Org1"
     assert r.sensor_tag == "shoot_length"
     assert r.value == 90.0
 
 
-def test_2024_layout_has_no_plant_so_treatment_level_device() -> None:
+def test_2024_layout_device_is_treatment() -> None:
     data = _xlsx(H_2024, [(date(2024, 8, 16), "Shoot_Length", "Standard", 77.0)])
     (r,) = parse(data)
-    assert r.device_name == "Std / plant 0"
+    assert r.device_name == "Std"
     assert r.sensor_tag == "shoot_length"
 
 
@@ -74,7 +75,7 @@ def test_2024_layout_has_no_plant_so_treatment_level_device() -> None:
 def test_treatment_harmonization(treatment: str, code: str) -> None:
     data = _xlsx(H_2025, [(date(2025, 6, 12), "Score", 1, treatment, 7.0)])
     (r,) = parse(data)
-    assert r.device_name == f"{code} / plant 1"
+    assert r.device_name == code
 
 
 @pytest.mark.parametrize(
@@ -98,12 +99,13 @@ def test_measure_harmonization(meting: str, sensor_tag: str) -> None:
     assert r.sensor_tag == sensor_tag
 
 
-def test_pooled_sample_goes_to_plant0_even_with_plant_nr() -> None:
-    """Storage-sample measures are per-treatment, so they ignore Plant_nr."""
+def test_storage_sample_lands_on_treatment_device() -> None:
+    """Storage-sample measures carry a Plant_nr too; like every row it is
+    ignored and the reading lands on the treatment device."""
     data = _xlsx(H_2025, [(date(2025, 9, 3), "Weigth before storage", 16, "Ca", 580.0)])
     (r,) = parse(data)
     assert r.sensor_tag == "sample_weight_before_storage"
-    assert r.device_name == "Ca / plant 0"
+    assert r.device_name == "Ca"
 
 
 def test_samples_get_ordinal_timestamps_preserving_order() -> None:
@@ -123,16 +125,22 @@ def test_samples_get_ordinal_timestamps_preserving_order() -> None:
     assert midnight not in {r.time for r in readings}  # midnight reserved
 
 
-def test_distinct_plants_do_not_share_ordinals() -> None:
+def test_plants_of_a_treatment_merge_into_ordinal_samples() -> None:
+    """Two plants measured on the same date+measure no longer get their own
+    devices: they share the treatment device as ordinal-timestamped samples."""
     rows = [
         (date(2025, 7, 31), "Shoot_Length", 1, "Standaard", 50.0),
         (date(2025, 7, 31), "Shoot_Length", 2, "Standaard", 60.0),
     ]
     by_dev = _by_device(parse(_xlsx(H_2025, rows)))
-    assert set(by_dev) == {"Std / plant 1", "Std / plant 2"}
-    # each is the first (and only) sample in its own group → +1s
-    for readings in by_dev.values():
-        assert readings[0].time == datetime(2025, 7, 31, tzinfo=UTC) + timedelta(seconds=1)
+    assert set(by_dev) == {"Std"}
+    midnight = datetime(2025, 7, 31, tzinfo=UTC)
+    readings = by_dev["Std"]
+    assert [r.time for r in readings] == [
+        midnight + timedelta(seconds=1),
+        midnight + timedelta(seconds=2),
+    ]
+    assert [r.value for r in readings] == [50.0, 60.0]  # file order preserved
 
 
 def test_ignored_measures_are_dropped_not_skipped() -> None:
@@ -197,7 +205,7 @@ def test_validation_report_facts() -> None:
     assert report.valid_rows == 3
     assert report.emitted_row_count == 3  # one reading per kept row
     assert set(report.sensors) == {"shoot_length", "brix", "score"}
-    assert set(report.devices) == {"Std / plant 1", "Ca / plant 2"}
+    assert set(report.devices) == {"Std", "Ca"}
     assert report.date_range == (date(2025, 6, 12), date(2025, 9, 3))
 
 
