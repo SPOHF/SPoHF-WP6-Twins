@@ -1850,8 +1850,9 @@ UNIFIED_CHART_JS = """
                 // Range band: a translucent min->max area drawn *before* the
                 // line so the line sits on top. Two zero-width traces (lower
                 // then upper-with-fill) make Plotly shade between them.
-                if (cfg.bandEnabled && bandAppliesTo(cfg)
-                    && merged.mins && merged.maxs) {
+                var bandShown = cfg.bandEnabled && bandAppliesTo(cfg)
+                    && merged.mins && merged.maxs;
+                if (bandShown) {
                     traces.push({
                         x: merged.times, y: merged.mins,
                         mode: 'lines', line: {width: 0},
@@ -1875,6 +1876,19 @@ UNIFIED_CHART_JS = """
                     line: {color: color}
                 };
                 if (axis === 'right') { trace.line.dash = 'dash'; }
+                // When the band is on, surface its exact extremes in the
+                // (x-unified) tooltip so the shaded area is readable as numbers.
+                // Name goes in the template (matches the monitor charts) so it
+                // stays visible alongside <extra></extra>.
+                if (bandShown) {
+                    trace.customdata = merged.times.map(function(_, i) {
+                        return [merged.mins[i], merged.maxs[i]];
+                    });
+                    trace.hovertemplate = '<b>' + (g.label + suffix) + '</b><br>'
+                        + cfg.aggregateFunc + ' %{y:.2f}'
+                        + '  ·  range %{customdata[0]:.2f}–%{customdata[1]:.2f}'
+                        + '<extra></extra>';
+                }
                 traces.push(trace);
                 });
             }
