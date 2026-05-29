@@ -1,6 +1,7 @@
 """Shared components for WP6 dashboards."""
 
 from wp6_data.shared.charts import (
+    PRESENCE_NONE_COLOR,
     build_weekly_coverage,
     make_bar_chart,
     make_dual_axis_chart,
@@ -28,6 +29,7 @@ from wp6_data.shared.templates import (
 )
 
 __all__ = [
+    "PRESENCE_NONE_COLOR",
     "build_explore_tabs",
     "build_weekly_coverage",
     "default_date_range",

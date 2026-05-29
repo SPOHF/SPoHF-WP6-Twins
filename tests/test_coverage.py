@@ -120,8 +120,9 @@ class TestPresenceMode:
             records, date(2024, 4, 1), date(2024, 4, 14), mode="presence"
         )
         html = render_coverage_grid(df, mode="presence")
-        assert "#9ca3af" in html  # grey for an unmeasured week
-        assert "#ef4444" not in html  # no red faults for manual data
+        # faint translucent grey for an unmeasured week, never a red fault
+        assert "rgba(156, 163, 175, 0.35)" in html
+        assert "#ef4444" not in html
 
 
 class TestRenderCoverageGrid:

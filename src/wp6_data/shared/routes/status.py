@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from wp6_data.shared import (
+    PRESENCE_NONE_COLOR,
     build_weekly_coverage,
     render_card,
     render_coverage_grid,
@@ -126,7 +127,7 @@ async def _build_sync_table(provider: SensorDataProvider) -> str | None:
 def _coverage_legend(mode: str) -> str:
     """Legend swatches for a coverage scale."""
     if mode == "presence":
-        items = [("#22c55e", "Measured"), ("#9ca3af", "No measurement")]
+        items = [("#22c55e", "Measured"), (PRESENCE_NONE_COLOR, "No measurement")]
     else:
         items = [
             ("#22c55e", "Good (7 days)"),

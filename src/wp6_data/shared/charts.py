@@ -356,9 +356,14 @@ def build_weekly_coverage(
     return pd.DataFrame(rows)
 
 
+# Translucent grey for an unmeasured manual week. Alpha (not a fixed hex) so it
+# composites against the card background and stays unobtrusive in both light and
+# dark mode — the opaque green should stand out, the gap should recede.
+PRESENCE_NONE_COLOR = "rgba(156, 163, 175, 0.35)"
+
 # Per-scale colour + label maps. "daily" greys nothing — a no-data week is a
 # red fault for an automated sensor. "presence" is for sparse manual data: a
-# week with any measurement is green, a week without is neutral grey (an
+# week with any measurement is green, a week without is the faint grey above (an
 # expected gap, not a fault).
 _COVERAGE_SCALES: dict[str, dict[str, dict[str, str]]] = {
     "daily": {
@@ -366,7 +371,7 @@ _COVERAGE_SCALES: dict[str, dict[str, dict[str, str]]] = {
         "labels": {"good": "good", "partial": "some", "none": "no data"},
     },
     "presence": {
-        "colors": {"good": "#22c55e", "none": "#9ca3af"},
+        "colors": {"good": "#22c55e", "none": PRESENCE_NONE_COLOR},
         "labels": {"good": "measured", "none": "no measurement"},
     },
 }
