@@ -1061,6 +1061,32 @@ BASE_CSS = """
         opacity: 0.45;
         cursor: not-allowed;
     }
+    /* --- Ideal range section --- */
+    .ideal-range-section {
+        margin-top: 0.6rem;
+    }
+    .ideal-range-section h4 {
+        font-size: 0.82rem;
+        font-weight: 600;
+        margin: 0.2rem 0 0.25rem;
+        color: var(--dashboard-primary);
+    }
+    .ideal-range-inputs {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+    }
+    .ideal-input {
+        font-size: 0.75rem;
+        padding: 0.15rem 0.3rem;
+        flex: 1;
+        min-width: 0;
+        width: auto;
+    }
+    .ideal-range-section.disabled {
+        opacity: 0.45;
+        pointer-events: none;
+    }
     .axis-split-toggle {
         display: flex;
         align-items: center;
@@ -1235,6 +1261,8 @@ UNIFIED_CHART_JS = """
     var BUCKET_STEPS = [0, 1, 5, 10, 15, 30, 60, 120, 360, 720, 1440, 10080, 20160, 43200];
 
     var splitMode = false;
+    var idealLo = null;
+    var idealHi = null;
     function defaultAxisCfg() {
         return {
             labelFormat: 'smart',
@@ -1276,6 +1304,10 @@ UNIFIED_CHART_JS = """
     }
     axisCfg.left.labelFormat = readLabelFormat('lbl', 'smart');
     readAggInto(axisCfg.left, 'agg', 'bkt', 'band');
+    var _idealLoRaw = parseFloat(params.get('ideal_lo'));
+    var _idealHiRaw = parseFloat(params.get('ideal_hi'));
+    if (Number.isFinite(_idealLoRaw)) idealLo = _idealLoRaw;
+    if (Number.isFinite(_idealHiRaw)) idealHi = _idealHiRaw;
     if (params.get('split') === '1') {
         splitMode = true;
         // Right-axis values fall back to left for any param not explicitly set
@@ -1482,10 +1514,42 @@ UNIFIED_CHART_JS = """
         if (splitBlock)   splitBlock.style.display   = splitMode ? '' : 'none';
     }
 
+    function axisPresence() {
+        var hasLeft = false;
+        var hasRight = false;
+        Object.keys(activeSeries).forEach(function(k) {
+            if (activeSeries[k].axis === 'right') hasRight = true;
+            else hasLeft = true;
+        });
+        return { hasLeft: hasLeft, hasRight: hasRight };
+    }
+
+    function hasDualAxesActive() {
+        var presence = axisPresence();
+        return presence.hasLeft && presence.hasRight;
+    }
+
+    function idealRangeAxisRef() {
+        var presence = axisPresence();
+        return presence.hasRight && !presence.hasLeft ? 'y2' : 'y';
+    }
+
+    function applyIdealRangeAvailability() {
+        var disableIdeal = hasDualAxesActive();
+        var idealSection = document.getElementById('ideal-range-section');
+        if (idealSection) {
+            idealSection.classList.toggle('disabled', disableIdeal);
+            idealSection.querySelectorAll('input').forEach(function(inp) {
+                inp.disabled = disableIdeal;
+            });
+        }
+    }
+
     var splitToggle = document.getElementById('axis-split-toggle');
     if (splitToggle) {
         splitToggle.checked = splitMode;
         applySplitVisibility();
+        applyIdealRangeAvailability();
         splitToggle.addEventListener('change', function() {
             if (splitToggle.checked) {
                 axisCfg.right = JSON.parse(JSON.stringify(axisCfg.left));
@@ -1494,12 +1558,34 @@ UNIFIED_CHART_JS = """
                 splitMode = false;
             }
             applySplitVisibility();
+            applyIdealRangeAvailability();
             refreshControlActiveStates();
             refetchAll();
         });
     }
 
     refreshControlActiveStates();
+
+    // --- Ideal range inputs ---
+    var idealLoInput = document.getElementById('ideal-lo');
+    var idealHiInput = document.getElementById('ideal-hi');
+    if (idealLoInput && idealLo !== null) idealLoInput.value = idealLo;
+    if (idealHiInput && idealHi !== null) idealHiInput.value = idealHi;
+    function onIdealChange() {
+        var v;
+        if (idealLoInput) {
+            v = parseFloat(idealLoInput.value);
+            idealLo = Number.isFinite(v) ? v : null;
+        }
+        if (idealHiInput) {
+            v = parseFloat(idealHiInput.value);
+            idealHi = Number.isFinite(v) ? v : null;
+        }
+        updateIdealRange();
+        syncUrl();
+    }
+    if (idealLoInput) idealLoInput.addEventListener('change', onIdealChange);
+    if (idealHiInput) idealHiInput.addEventListener('change', onIdealChange);
 
     function buildTree(sensors, groupBy) {
         // Group sensors into {groupKey: [{device, sensor, ...}, ...]}
@@ -1948,6 +2034,7 @@ UNIFIED_CHART_JS = """
                 activeSeries[k].traceIdx = traceIdxMap[k] != null ? traceIdxMap[k] : -1;
             }
         });
+        updateIdealRange();
     }
 
     function fetchAndAdd(key, axis, cb) {
@@ -2078,11 +2165,47 @@ UNIFIED_CHART_JS = """
         });
         var leftKeys = Object.keys(leftUnits);
         var rightKeys = Object.keys(rightUnits);
+        applyIdealRangeAvailability();
         relayoutUpdate['yaxis.title.text'] = leftKeys.length === 1
             ? leftKeys[0] : '';
         relayoutUpdate['yaxis2.title.text'] = rightKeys.length === 1
             ? rightKeys[0] : '';
         Plotly.relayout(chartDiv, relayoutUpdate);
+    }
+
+    function updateIdealRange() {
+        // Ideal range is ambiguous with active dual Y axes; keep stored values but clear visuals.
+        if (hasDualAxesActive()) {
+            Plotly.relayout(chartDiv, { shapes: [] });
+            return;
+        }
+        var yref = idealRangeAxisRef();
+        var shapes = [];
+        var lo = idealLo;
+        var hi = idealHi;
+        if (lo !== null && hi !== null && lo < hi) {
+            shapes.push({
+                type: 'rect',
+                x0: 0, x1: 1, xref: 'paper',
+                yref: yref,
+                y0: lo, y1: hi,
+                fillcolor: 'rgba(34, 197, 94, 0.12)',
+                line: { width: 0 },
+                layer: 'below'
+            });
+        } else {
+            var lineVal = lo !== null ? lo : hi;
+            if (lineVal !== null) {
+                shapes.push({
+                    type: 'line',
+                    x0: 0, x1: 1, xref: 'paper',
+                    yref: yref,
+                    y0: lineVal, y1: lineVal,
+                    line: { color: 'rgba(34, 197, 94, 0.85)', width: 1.5, dash: 'dash' }
+                });
+            }
+        }
+        Plotly.relayout(chartDiv, { shapes: shapes });
     }
 
     function updateStats() {
@@ -2167,6 +2290,10 @@ UNIFIED_CHART_JS = """
             p.delete('bkt_r');
             p.delete('band_r');
         }
+        if (idealLo !== null) p.set('ideal_lo', idealLo);
+        else p.delete('ideal_lo');
+        if (idealHi !== null) p.set('ideal_hi', idealHi);
+        else p.delete('ideal_hi');
         var newUrl = window.location.pathname;
         var qs = p.toString();
         if (qs) newUrl += '?' + qs;
@@ -2182,7 +2309,8 @@ UNIFIED_CHART_JS = """
     if (dateForm) {
         var params = new URLSearchParams(window.location.search);
         ['s', 'r', 'lbl', 'agg', 'bkt', 'band',
-         'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r'].forEach(function(name) {
+         'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r',
+         'ideal_lo', 'ideal_hi'].forEach(function(name) {
             var val = params.get(name);
             if (val) {
                 var input = document.createElement('input');
@@ -2198,7 +2326,8 @@ UNIFIED_CHART_JS = """
     function syncDateFormParams() {
         if (!dateForm) return;
         ['s', 'r', 'lbl', 'agg', 'bkt', 'band',
-         'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r'].forEach(function(name) {
+         'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r',
+         'ideal_lo', 'ideal_hi'].forEach(function(name) {
             var existing = dateForm.querySelector(
                 'input[name="' + name + '"]');
             var p = new URLSearchParams(window.location.search);
@@ -2310,7 +2439,8 @@ DASHBOARD_JS = """
         params.set('start', dates.start);
         params.set('end', dates.end);
         ['lbl', 'agg', 'bkt', 'band',
-         'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r'].forEach(function(k) {
+         'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r',
+         'ideal_lo', 'ideal_hi'].forEach(function(k) {
             if (chart[k]) params.set(k, chart[k]);
         });
         return '/chart?' + params.toString();
@@ -2526,6 +2656,8 @@ SAVE_TO_DASHBOARD_JS = """
             agg_r: params.get('agg_r') || '',
             bkt_r: params.get('bkt_r') || '',
             band_r: params.get('band_r') || '',
+            ideal_lo: params.get('ideal_lo') || '',
+            ideal_hi: params.get('ideal_hi') || '',
             createdAt: new Date().toISOString()
         };
 
@@ -2843,6 +2975,19 @@ to {end.isoformat()}</summary>
                     Range band
                 </label>
                 <small class="band-hint">shade lowest–highest in each bucket</small>
+            </div>
+            <div class="ideal-range-section" id="ideal-range-section">
+                <h4>Ideal range</h4>
+                <div class="ideal-range-inputs">
+                    <input type="number" id="ideal-lo" class="ideal-input"
+                           aria-label="Ideal minimum"
+                           step="any" placeholder="Min">
+                    <span class="date-sep">&ndash;</span>
+                    <input type="number" id="ideal-hi" class="ideal-input"
+                           aria-label="Ideal maximum"
+                           step="any" placeholder="Max">
+                </div>
+                <small>Horizontal reference line/band (Y-axis)</small>
             </div>
         </div>
         <div class="chart-main">
