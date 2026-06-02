@@ -69,8 +69,8 @@ def _dli_card() -> str:
 
 def _multi_height_card() -> str:
     return render_card(
-        "Multi Height Profile",
-        '<a href="/multi_height" role="button">Multi Height Dashboard</a>',
+        "Multi Height",
+        '<a href="/multi_height" role="button">Multi Height Views</a>',
         description="Visual overview of sensor data at multiple heights.",
         card_class="card-bg card-bg-multi-height",
     )

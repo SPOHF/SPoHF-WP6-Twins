@@ -155,6 +155,36 @@ def render_card(
     return f"<article{cls}><h2>{title}</h2>{desc}{body}</article>"
 
 
+def render_hub_card(
+    title: str,
+    description: str = "",
+    *,
+    href: str = "",
+    label: str = "Open",
+    body: str = "",
+    card_class: str = "",
+    disabled: bool = False,
+) -> str:
+    """Render a hub navigation card: heading, description, optional body, action button.
+
+    Used by overview/hub pages that link out to detailed views (DLI dashboard,
+    Plant Monitor, Multi Height). Pass ``disabled=True`` for a non-clickable button
+    (e.g. an admin-gated action); ``body`` injects extra HTML before the button.
+    """
+    desc = f"<p>{description}</p>" if description else ""
+    if disabled:
+        action = f'<span class="btn-disabled">{label}</span>'
+    else:
+        action = f'<a href="{href}" class="btn">{label}</a>'
+    cls = f' class="{card_class}"' if card_class else ""
+    return f"<article{cls}><h3>{title}</h3>{desc}{body}{action}</article>"
+
+
+def render_hub_grid(cards: list[str]) -> str:
+    """Wrap hub navigation cards in a responsive auto-fit grid."""
+    return f'<div class="hub-grid">{"".join(cards)}</div>'
+
+
 def render_table(
     headers: list[str], rows: list[list[str]], *,
     sortable: bool = True, group_col: int | None = None,
@@ -666,6 +696,20 @@ BASE_CSS = """
         box-shadow: 0 4px 12px rgba(255,255,255,0.08), 0 2px 4px rgba(255,255,255,0.05);
     }
     .card-primary { border: 2px solid var(--pico-primary-background); }
+
+    /* --- Hub pages: responsive grid of navigation cards --- */
+    .hub-grid { display: grid; gap: 20px;
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+    .hub-grid article { margin-bottom: 0; }
+    .hub-grid article h3 { margin-top: 0; }
+    .card-disabled { opacity: 0.6; }
+    .btn { display: inline-block; padding: 8px 16px;
+           background: var(--pico-primary-background);
+           color: var(--pico-primary-inverse);
+           text-decoration: none; border-radius: 4px; margin-right: 8px; }
+    .btn:hover { opacity: 0.85; text-decoration: none; }
+    .btn-disabled { display: inline-block; padding: 8px 16px; background: #ccc;
+                    color: #666; border-radius: 4px; font-size: 0.9em; }
 
     /* Card background illustrations */
     .card-bg::after {
