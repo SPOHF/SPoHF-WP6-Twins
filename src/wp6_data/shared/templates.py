@@ -1514,24 +1514,24 @@ UNIFIED_CHART_JS = """
         if (splitBlock)   splitBlock.style.display   = splitMode ? '' : 'none';
     }
 
-    function hasDualAxesActive() {
+    function axisPresence() {
         var hasLeft = false;
         var hasRight = false;
         Object.keys(activeSeries).forEach(function(k) {
             if (activeSeries[k].axis === 'right') hasRight = true;
             else hasLeft = true;
         });
-        return hasLeft && hasRight;
+        return { hasLeft: hasLeft, hasRight: hasRight };
+    }
+
+    function hasDualAxesActive() {
+        var presence = axisPresence();
+        return presence.hasLeft && presence.hasRight;
     }
 
     function idealRangeAxisRef() {
-        var hasLeft = false;
-        var hasRight = false;
-        Object.keys(activeSeries).forEach(function(k) {
-            if (activeSeries[k].axis === 'right') hasRight = true;
-            else hasLeft = true;
-        });
-        return hasRight && !hasLeft ? 'y2' : 'y';
+        var presence = axisPresence();
+        return presence.hasRight && !presence.hasLeft ? 'y2' : 'y';
     }
 
     function applyIdealRangeAvailability() {
