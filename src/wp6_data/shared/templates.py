@@ -1524,6 +1524,16 @@ UNIFIED_CHART_JS = """
         return hasLeft && hasRight;
     }
 
+    function idealRangeAxisRef() {
+        var hasLeft = false;
+        var hasRight = false;
+        Object.keys(activeSeries).forEach(function(k) {
+            if (activeSeries[k].axis === 'right') hasRight = true;
+            else hasLeft = true;
+        });
+        return hasRight && !hasLeft ? 'y2' : 'y';
+    }
+
     function applyIdealRangeAvailability() {
         var disableIdeal = hasDualAxesActive();
         var idealSection = document.getElementById('ideal-range-section');
@@ -2169,6 +2179,7 @@ UNIFIED_CHART_JS = """
             Plotly.relayout(chartDiv, { shapes: [] });
             return;
         }
+        var yref = idealRangeAxisRef();
         var shapes = [];
         var lo = idealLo;
         var hi = idealHi;
@@ -2176,6 +2187,7 @@ UNIFIED_CHART_JS = """
             shapes.push({
                 type: 'rect',
                 x0: 0, x1: 1, xref: 'paper',
+                yref: yref,
                 y0: lo, y1: hi,
                 fillcolor: 'rgba(34, 197, 94, 0.12)',
                 line: { width: 0 },
@@ -2187,6 +2199,7 @@ UNIFIED_CHART_JS = """
                 shapes.push({
                     type: 'line',
                     x0: 0, x1: 1, xref: 'paper',
+                    yref: yref,
                     y0: lineVal, y1: lineVal,
                     line: { color: 'rgba(34, 197, 94, 0.85)', width: 1.5, dash: 'dash' }
                 });
