@@ -392,3 +392,55 @@ async def test_fetch_daily_coverage_merges_mysql_and_tsdb(
         "neurath-B-2034-strabelina", "chlorophyll", date(2025, 9, 1),
     ) in pairs
     mock_tsdb_coverage.assert_awaited_once()
+
+
+async def test_fetch_daily_coverage_tags_manual_by_source(
+    red_metadata: MetadataRegistry,
+    mock_mysql: AsyncMock,
+    mock_tsdb_coverage: AsyncMock,
+) -> None:
+    """Each record is tagged `manual`: MySQL (LoRaWAN) rows are never manual;
+    TSDB rows are manual iff their `source` is a registered manual source.
+
+    This is what lets `shared.routes.status` split red's coverage grid into
+    Sensor vs Manual sections (matching blue) instead of lumping Sijia in
+    with the automated sensors.
+    """
+    from datetime import date
+
+    from wp6_data.red.sijia.source import SIJIA
+
+    # MySQL leg: one live LoRaWAN sensor row.
+    cursor = AsyncMock()
+    cursor.execute = AsyncMock()
+    cursor.fetchall = AsyncMock(return_value=[("s2100-01-par", date(2025, 1, 1))])
+    cursor_ctx = AsyncMock()
+    cursor_ctx.__aenter__ = AsyncMock(return_value=cursor)
+    cursor_ctx.__aexit__ = AsyncMock(return_value=False)
+    conn = AsyncMock()
+    conn.cursor = lambda: cursor_ctx
+    conn_ctx = AsyncMock()
+    conn_ctx.__aenter__ = AsyncMock(return_value=conn)
+    conn_ctx.__aexit__ = AsyncMock(return_value=False)
+    pool = AsyncMock()
+    pool.acquire = lambda: conn_ctx
+    mock_mysql.pool = pool
+
+    # TSDB leg: a manual (Sijia) row and a hypothetical automated row that
+    # also carries a source (e.g. future letsgrow) — only the former is manual.
+    mock_tsdb_coverage.return_value = [
+        {"device": "neurath-B-2034-strabelina", "sensor": "chlorophyll",
+         "day": date(2025, 9, 1), "source": SIJIA.categorical_value},
+        {"device": "s2100-01-par", "sensor": "par",
+         "day": date(2025, 2, 1), "source": "letsgrow"},
+    ]
+
+    provider = RedSensorProvider(metadata=red_metadata)
+    coverage = await provider.fetch_daily_coverage()
+
+    manual = {(c["device"], c["sensor"]) for c in coverage if c["manual"]}
+    automated = {(c["device"], c["sensor"]) for c in coverage if not c["manual"]}
+
+    assert ("neurath-B-2034-strabelina", "chlorophyll") in manual
+    assert ("s2100-01-par", "par") in automated  # MySQL + non-manual TSDB source
+    assert all("source" not in c for c in coverage)  # source consumed into `manual`

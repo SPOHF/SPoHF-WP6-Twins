@@ -99,8 +99,15 @@ class RedSensorProvider:
         return result
 
     async def _fetch_daily_coverage(self) -> list[dict[str, Any]]:
-        """Distinct (device, sensor, day) triples — MySQL + TSDB merged."""
+        """Distinct (device, sensor, day) records — MySQL + TSDB merged.
+
+        Each record carries a ``manual`` flag so `shared.routes.status` can
+        split the coverage grid. The MySQL leg is the live LoRaWAN sensors —
+        always automated. The TSDB leg is manual iff its ``source`` is a
+        registered manual-upload source (see `red.manual_sources`).
+        """
         from wp6_data.red.db import SENSOR_TABLES
+        from wp6_data.red.manual_sources import MANUAL_SOURCE_VALUES
         from wp6_data.red.tsdb import fetch_daily_coverage_from_table
 
         records: list[dict[str, Any]] = []
@@ -120,9 +127,12 @@ class RedSensorProvider:
                             "device": device_id,
                             "sensor": sensor,
                             "day": day,
+                            "manual": False,
                         })
 
-        records.extend(await fetch_daily_coverage_from_table())
+        for rec in await fetch_daily_coverage_from_table():
+            rec["manual"] = rec.pop("source", None) in MANUAL_SOURCE_VALUES
+            records.append(rec)
         return records
 
     def _split_by_route(

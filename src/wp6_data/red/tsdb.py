@@ -235,17 +235,19 @@ async def fetch_manual_summary_tsdb() -> dict[str, Any]:
 
 
 async def fetch_daily_coverage_from_table() -> list[dict[str, Any]]:
-    """Distinct (device, sensor, day) triples from the `daily_coverage` table.
+    """Distinct (device, sensor, day, source) rows from the `daily_coverage` table.
 
     Replaces the previous `GROUP BY DATE(time)` scan of `readings`; rows are
-    written incrementally by ingest paths and rebuilt by the bootstrap.
+    written incrementally by ingest paths and rebuilt by the bootstrap. The
+    `source` column is carried through so the provider can tag manual-upload
+    rows (see `red.manual_sources`); this function stays source-agnostic.
     """
     from wp6_data.db.pool import get_pool
 
     pool = get_pool()
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
-            "SELECT device_name AS device, sensor_tag AS sensor, day "
+            "SELECT device_name AS device, sensor_tag AS sensor, day, source "
             "FROM daily_coverage "
             "ORDER BY device, sensor, day"
         )
