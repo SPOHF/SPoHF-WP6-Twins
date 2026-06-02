@@ -2915,19 +2915,6 @@ to {end.isoformat()}</summary>
                     Range band
                 </label>
                 <small class="band-hint">shade lowest–highest in each bucket</small>
-                <div class="ideal-range-section" id="ideal-range-section">
-                    <h4>Ideal range</h4>
-                    <div class="ideal-range-inputs">
-                           <input type="number" id="ideal-lo" class="ideal-input"
-                               aria-label="Ideal minimum"
-                               step="any" placeholder="Min">
-                        <span class="date-sep">&ndash;</span>
-                           <input type="number" id="ideal-hi" class="ideal-input"
-                               aria-label="Ideal maximum"
-                               step="any" placeholder="Max">
-                    </div>
-                    <small>Horizontal reference line/band (Y-axis)</small>
-                </div>
             </div>
             <div id="axis-controls-split" style="display:none;">
                 <h4>Y-Left</h4>
@@ -2988,6 +2975,19 @@ to {end.isoformat()}</summary>
                     Range band
                 </label>
                 <small class="band-hint">shade lowest–highest in each bucket</small>
+            </div>
+            <div class="ideal-range-section" id="ideal-range-section">
+                <h4>Ideal range</h4>
+                <div class="ideal-range-inputs">
+                    <input type="number" id="ideal-lo" class="ideal-input"
+                           aria-label="Ideal minimum"
+                           step="any" placeholder="Min">
+                    <span class="date-sep">&ndash;</span>
+                    <input type="number" id="ideal-hi" class="ideal-input"
+                           aria-label="Ideal maximum"
+                           step="any" placeholder="Max">
+                </div>
+                <small>Horizontal reference line/band (Y-axis)</small>
             </div>
         </div>
         <div class="chart-main">
