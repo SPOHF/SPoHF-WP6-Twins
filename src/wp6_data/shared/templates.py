@@ -1512,11 +1512,25 @@ UNIFIED_CHART_JS = """
     function applySplitVisibility() {
         if (unifiedBlock) unifiedBlock.style.display = splitMode ? 'none' : '';
         if (splitBlock)   splitBlock.style.display   = splitMode ? '' : 'none';
+    }
+
+    function hasDualAxesActive() {
+        var hasLeft = false;
+        var hasRight = false;
+        Object.keys(activeSeries).forEach(function(k) {
+            if (activeSeries[k].axis === 'right') hasRight = true;
+            else hasLeft = true;
+        });
+        return hasLeft && hasRight;
+    }
+
+    function applyIdealRangeAvailability() {
+        var disableIdeal = hasDualAxesActive();
         var idealSection = document.getElementById('ideal-range-section');
         if (idealSection) {
-            idealSection.classList.toggle('disabled', splitMode);
+            idealSection.classList.toggle('disabled', disableIdeal);
             idealSection.querySelectorAll('input').forEach(function(inp) {
-                inp.disabled = splitMode;
+                inp.disabled = disableIdeal;
             });
         }
     }
@@ -1525,6 +1539,7 @@ UNIFIED_CHART_JS = """
     if (splitToggle) {
         splitToggle.checked = splitMode;
         applySplitVisibility();
+        applyIdealRangeAvailability();
         splitToggle.addEventListener('change', function() {
             if (splitToggle.checked) {
                 axisCfg.right = JSON.parse(JSON.stringify(axisCfg.left));
@@ -1533,6 +1548,7 @@ UNIFIED_CHART_JS = """
                 splitMode = false;
             }
             applySplitVisibility();
+            applyIdealRangeAvailability();
             refreshControlActiveStates();
             refetchAll();
         });
@@ -2139,6 +2155,7 @@ UNIFIED_CHART_JS = """
         });
         var leftKeys = Object.keys(leftUnits);
         var rightKeys = Object.keys(rightUnits);
+        applyIdealRangeAvailability();
         relayoutUpdate['yaxis.title.text'] = leftKeys.length === 1
             ? leftKeys[0] : '';
         relayoutUpdate['yaxis2.title.text'] = rightKeys.length === 1
@@ -2147,6 +2164,11 @@ UNIFIED_CHART_JS = """
     }
 
     function updateIdealRange() {
+        // Ideal range is ambiguous with active dual Y axes; keep stored values but clear visuals.
+        if (hasDualAxesActive()) {
+            Plotly.relayout(chartDiv, { shapes: [] });
+            return;
+        }
         var shapes = [];
         var lo = idealLo;
         var hi = idealHi;
@@ -2883,10 +2905,12 @@ to {end.isoformat()}</summary>
                 <div class="ideal-range-section" id="ideal-range-section">
                     <h4>Ideal range</h4>
                     <div class="ideal-range-inputs">
-                        <input type="number" id="ideal-lo" class="ideal-input"
+                           <input type="number" id="ideal-lo" class="ideal-input"
+                               aria-label="Ideal minimum"
                                step="any" placeholder="Min">
                         <span class="date-sep">&ndash;</span>
-                        <input type="number" id="ideal-hi" class="ideal-input"
+                           <input type="number" id="ideal-hi" class="ideal-input"
+                               aria-label="Ideal maximum"
                                step="any" placeholder="Max">
                     </div>
                     <small>Horizontal reference line/band (Y-axis)</small>
