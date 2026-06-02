@@ -1306,8 +1306,8 @@ UNIFIED_CHART_JS = """
     readAggInto(axisCfg.left, 'agg', 'bkt', 'band');
     var _idealLoRaw = parseFloat(params.get('ideal_lo'));
     var _idealHiRaw = parseFloat(params.get('ideal_hi'));
-    if (!isNaN(_idealLoRaw)) idealLo = _idealLoRaw;
-    if (!isNaN(_idealHiRaw)) idealHi = _idealHiRaw;
+    if (Number.isFinite(_idealLoRaw)) idealLo = _idealLoRaw;
+    if (Number.isFinite(_idealHiRaw)) idealHi = _idealHiRaw;
     if (params.get('split') === '1') {
         splitMode = true;
         // Right-axis values fall back to left for any param not explicitly set
@@ -1575,11 +1575,11 @@ UNIFIED_CHART_JS = """
         var v;
         if (idealLoInput) {
             v = parseFloat(idealLoInput.value);
-            idealLo = isNaN(v) ? null : v;
+            idealLo = Number.isFinite(v) ? v : null;
         }
         if (idealHiInput) {
             v = parseFloat(idealHiInput.value);
-            idealHi = isNaN(v) ? null : v;
+            idealHi = Number.isFinite(v) ? v : null;
         }
         updateIdealRange();
         syncUrl();
