@@ -22,6 +22,7 @@ from ..db import (
     wire_device_id,
     wire_physical_id,
 )
+from ..risk.metrics import compute_cumulative_dli, compute_dli
 from ..utils import (
     PAR_COLORSCALE,
     svg_rect_to_plotly_rect,
@@ -751,60 +752,6 @@ def filter_for_day(
     )
 
     return df_local.loc[mask].drop(columns=["time_local"]), target_day
-
-
-### DLI ###
-def _dli_increments(sensor_df):
-    """Per-reading DLI contributions (mol/m²) via trapezoidal integration.
-
-    Returns the frame sorted by time with a ``dli_increment`` column — each
-    interval's PAR (averaged across its endpoints) times its duration. Gaps are
-    clipped to 15 min so a missing stretch can't inflate the integral. The total
-    DLI is the sum; the running ``cumsum`` is the DLI accrued up to each time.
-    Returns ``None`` when there are too few readings to integrate.
-    """
-    d = sensor_df.sort_values("time").copy()
-
-    if len(d) < 2:
-        return None
-
-    d["next_time"] = d["time"].shift(-1)
-    d["next_value"] = d["value"].shift(-1)
-
-    d["dt_seconds"] = (d["next_time"] - d["time"]).dt.total_seconds()
-    d["dt_seconds"] = d["dt_seconds"].clip(lower=0, upper=900)
-
-    d["avg_value"] = (d["value"] + d["next_value"]) / 2
-    d = d.dropna(subset=["dt_seconds", "avg_value"])
-
-    d["dli_increment"] = (d["avg_value"] * d["dt_seconds"]) / 1_000_000
-    return d
-
-
-def compute_dli(sensor_df):
-    """Total DLI (mol/m²) for a single sensor's readings over the day."""
-    d = _dli_increments(sensor_df)
-
-    if d is None:
-        return None
-
-    return float(d["dli_increment"].sum())
-
-
-def compute_cumulative_dli(sensor_df):
-    """Running DLI (mol/m²) for one sensor: time + cumulative_dli columns.
-
-    The DLI accrued from the start of the data up to each timestamp — i.e. the
-    integral of :func:`compute_dli` traced over the day. ``None`` when there are
-    too few readings.
-    """
-    d = _dli_increments(sensor_df)
-
-    if d is None:
-        return None
-
-    d["cumulative_dli"] = d["dli_increment"].cumsum()
-    return d[["time", "cumulative_dli"]]
 
 
 ### Metrics ###

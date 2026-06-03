@@ -20,6 +20,23 @@ growth_sections:
   - height: 5
     label: "Substraat/wortelzone"
 
+# ── Risk thresholds (red prescriptive view, issue 014 / ADR 0002) ──
+# PROVISIONAL values — retune against real wire data (the engine and CLI exist
+# precisely to validate these). Kept in config, not code, so a retune is a YAML
+# edit. Red-only; the shared metadata model ignores this key.
+risk_thresholds:
+  fungal:
+    rh_pct: 85           # RH (%) above which an interval counts as "wet"
+    window_hours: 24     # trailing window for the wet-hours accumulation
+    active_wet_hours: 6  # wet-hours above this opens a fungal-risk episode
+  vpd:
+    band_min_kpa: 0.4    # healthy VPD band (kPa); below = too humid
+    band_max_kpa: 1.2    # above = transpiration stress
+  canopy_dli:
+    target_mol: 22       # tomato DLI target at the canopy (H1), mol/m²/day
+  episode:
+    min_duration_minutes: 30  # shorter spans are suppressed as flapping
+
 sensor_defaults:
   temp:
     type: "temperature"
