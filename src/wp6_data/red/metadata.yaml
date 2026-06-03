@@ -12,13 +12,13 @@ growth_sections:
   - height: 1
     label: "Head"
   - height: 2
-    label: "Flowering truss"
+    label: "Flowering"
   - height: 3
     label: "Fruit set"
   - height: 4
     label: "Ripening"
   - height: 5
-    label: "Substrate / root zone"
+    label: "Substrate"
 
 # ── Risk thresholds (red prescriptive view, issue 014 / ADR 0002) ──
 # PROVISIONAL values — retune against real wire data (the engine and CLI exist

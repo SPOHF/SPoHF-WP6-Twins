@@ -29,7 +29,7 @@ One of the vertical measurement levels on the multi-height wire. Modelled as a *
 _Avoid_: treating height as a separate data axis — the platform has no height dimension; height *is* a device.
 
 **Growth section**:
-A named canopy zone the plant is divided into for the prescriptive view, mapped one-to-one onto a **Height** in fixed top-to-bottom order, identical for every wire: H1 "Head" (just above the canopy top), H2 "Flowering truss", H3 "Fruit set", H4 "Ripening", H5 "Substrate / root zone". The label and ordering are a horticultural assumption declared in config, not a measured distance. H1 sits *above* the plant, so it reads incoming light before the canopy attenuates it.
+A named canopy zone the plant is divided into for the prescriptive view, mapped one-to-one onto a **Height** in fixed top-to-bottom order, identical for every wire: H1 "Head" (just above the canopy top), H2 "Flowering", H3 "Fruit set", H4 "Ripening", H5 "Substrate" (the root zone). The label and ordering are a horticultural assumption declared in config, not a measured distance. H1 sits *above* the plant, so it reads incoming light before the canopy attenuates it.
 _Avoid_: equating a growth section with a physical distance, or assuming the order is sensor-confirmed.
 
 **Multi-height wire** (a *wire sensor* device):
