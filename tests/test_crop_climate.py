@@ -215,7 +215,7 @@ class TestSectionBadges:
         out = _section_badges(state, 0.4, 1.2)
         assert "Add light" in out
         assert "Dry the air" in out
-        assert "title=" in out  # supportive tooltip present
+        assert "cc-tip" in out  # supportive hover tooltip present
 
     def test_vpd_high_says_raise_humidity(self):
         state = {"vpd_in_band": False, "vpd_latest": 1.6}  # above 1.2 band -> too dry

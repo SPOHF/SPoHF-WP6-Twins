@@ -841,6 +841,7 @@ async def crop_climate_page(
 
     {render_card(f"Climate — {table_date}{asof_note}", table, card_class="card")}
     {admin_panel}
+    {CROP_CLIMATE_STYLE}
     {CROP_CLIMATE_JS}
     """
 
@@ -852,12 +853,30 @@ async def crop_climate_page(
 
 
 ### Risk verdict + admin build (issue 015) ###
-def _badge(text: str, color: str, title: str = "") -> str:
-    tip = f' title="{html.escape(title)}"' if title else ""
-    cursor = "cursor:help;" if title else ""
+# Instant, styled hover tooltip for badges (native `title` is slow + unstyled).
+CROP_CLIMATE_STYLE = """
+<style>
+.cc-badge{position:relative;cursor:help;}
+.cc-badge .cc-tip{visibility:hidden;opacity:0;position:absolute;left:0;
+  top:calc(100% + 6px);z-index:30;width:220px;white-space:normal;
+  background:#111827;color:#fff;font-weight:400;font-size:0.75rem;line-height:1.35;
+  padding:6px 9px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.25);
+  transition:opacity .12s ease;pointer-events:none;}
+.cc-badge:hover .cc-tip{visibility:visible;opacity:1;}
+</style>
+"""
+
+
+def _badge(text: str, color: str, tip: str = "") -> str:
+    style = (
+        f"background:{color};color:#fff;border-radius:6px;"
+        "padding:2px 8px;font-size:0.8rem;margin-right:4px;"
+    )
+    if not tip:
+        return f'<span style="{style}">{html.escape(text)}</span>'
     return (
-        f'<span{tip} style="background:{color};color:#fff;border-radius:6px;'
-        f'padding:2px 8px;font-size:0.8rem;margin-right:4px;{cursor}">{text}</span>'
+        f'<span class="cc-badge" style="{style}">{html.escape(text)}'
+        f'<span class="cc-tip">{html.escape(tip)}</span></span>'
     )
 
 
