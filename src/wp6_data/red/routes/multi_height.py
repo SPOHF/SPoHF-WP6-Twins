@@ -819,9 +819,14 @@ def _admin_build_panel(wire: str, day: date) -> str:
         f'<label>To<br><input type="date" name="end" value="{day.isoformat()}"></label>'
         '<button type="submit">Rebuild range</button></form>'
     )
+    audit_link = (
+        '<p style="margin-top:10px;">'
+        f'<a href="/multi_height/crop-climate/audit?wire={wire}">Open risk log →</a>'
+        "</p>"
+    )
     return render_card(
         "Admin — build risk log",
-        update_form + rebuild_form,
+        update_form + rebuild_form + audit_link,
         description="Update extends the log to now; Rebuild recomputes a date "
         "range from raw data. Runs on demand.",
         card_class="card",
@@ -863,6 +868,128 @@ async def crop_climate_rebuild(
     await service.build_range(wire, start_utc, end_utc)
     return RedirectResponse(
         url=f"/multi_height/crop-climate?wire={wire}", status_code=303,
+    )
+
+
+### Risk-episode audit log (issue 018) ###
+RISK_LABELS = {
+    "vpd": "VPD out of band",
+    "fungal": "Fungal risk",
+    "canopy": "Canopy light deficit",
+}
+
+
+def _fmt_duration(td) -> str:
+    """Human duration like '1d 3h' / '2h 30m' / '45m'."""
+    total = int(td.total_seconds())
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins = rem // 60
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if mins or not parts:
+        parts.append(f"{mins}m")
+    return " ".join(parts)
+
+
+def _audit_table(episodes) -> str:
+    """Render persisted risk episodes (cache dicts) as an HTML table."""
+    if not episodes:
+        return (
+            '<p style="color:#6b7280;">No risk episodes in this range — build the '
+            "log from the Crop Climate page first.</p>"
+        )
+    headers = ("Section", "Risk", "Present from", "Resolved", "Duration", "Peak",
+               "Thresholds")
+    head = "<thead><tr>" + "".join(
+        f'<th style="padding:0.4rem 0.75rem;text-align:left;">{h}</th>'
+        for h in headers
+    ) + "</tr></thead>"
+
+    rows = ""
+    for e in episodes:
+        start, end = e["start_time"], e["end_time"]
+        resolved = (
+            f"{end:%Y-%m-%d %H:%M} UTC" if end is not None
+            else '<em style="color:#b45309;">ongoing</em>'
+        )
+        duration = _fmt_duration(end - start) if end is not None else "—"
+        cells = [
+            f'H{e["height"]} {html.escape(e["label"])}',
+            html.escape(RISK_LABELS.get(e["risk"], e["risk"])),
+            f"{start:%Y-%m-%d %H:%M} UTC",
+            resolved,
+            duration,
+            f'{e["peak"]:.2f}',
+            f'<code style="font-size:0.8rem;">{html.escape(str(e["thresholds"]))}</code>',
+        ]
+        rows += (
+            "<tr style='border-top:1px solid #e5e7eb;'>"
+            + "".join(f'<td style="padding:0.4rem 0.75rem;">{c}</td>' for c in cells)
+            + "</tr>"
+        )
+    return (
+        '<table style="width:100%;border-collapse:collapse;">'
+        f"{head}<tbody>{rows}</tbody></table>"
+    )
+
+
+@router.get(
+    "/multi_height/crop-climate/audit",
+    response_class=HTMLResponse,
+    dependencies=[Depends(verify_session_admin)],
+)
+async def crop_climate_audit(
+    config: Annotated[TwinConfig, Depends(get_twin_config)],
+    provider: Annotated[SensorDataProvider, Depends(get_provider)],
+    start: Annotated[
+        date | None, Query(description="Range start (YYYY-MM-DD); default 7 days ago")
+    ] = None,
+    end: Annotated[
+        date | None, Query(description="Range end (YYYY-MM-DD); default today")
+    ] = None,
+    wire: Annotated[
+        str | None, Query(description="Which wire; default first declared")
+    ] = None,
+):
+    tz = deps.base_settings.display_timezone
+    wires = wire_ids()
+    if wire not in wires:
+        wire = wires[0] if wires else ""
+
+    end_day = end or date.today()
+    start_day = start or (end_day - timedelta(days=7))
+    start_utc = pd.Timestamp(start_day, tz=tz).tz_convert("UTC").to_pydatetime()
+    end_utc = (
+        (pd.Timestamp(end_day, tz=tz) + pd.Timedelta(days=1))
+        .tz_convert("UTC")
+        .to_pydatetime()
+    )
+
+    episodes = await store.read_episodes(get_pool(), wire, start_utc, end_utc)
+
+    wire_pills = _pill_row(
+        "/multi_height/crop-climate/audit", "wire", [(w, w) for w in wires], wire,
+        {"start": start_day.isoformat(), "end": end_day.isoformat()}, label="Device",
+    )
+    content = f"""
+    <a href="/multi_height/crop-climate?wire={wire}" class="back-link">← Crop Climate</a>
+    <h1>Risk Log — {wire}</h1>
+    <p>Persisted risk episodes for the selected range. Each row states the
+    threshold-set that produced it — a Rebuild under different thresholds
+    rewrites these.</p>
+
+    {wire_pills}
+    {_wire_range_form(start_day, end_day, wire)}
+    {render_card("Episodes", _audit_table(episodes), card_class="card")}
+    """
+    return render_page(
+        config.title,
+        content,
+        data_source=provider.data_source_label,
     )
 
 

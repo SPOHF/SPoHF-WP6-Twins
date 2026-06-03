@@ -8,7 +8,7 @@ and that the view is registered in the Multi Height hub.
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -18,6 +18,8 @@ from wp6_data.red.growth_sections import GrowthSection, load_growth_sections
 from wp6_data.red.routes.multi_height import (
     MULTI_HEIGHT_VIEWS,
     _admin_build_panel,
+    _audit_table,
+    _fmt_duration,
     _fungal_cell,
     _height_dli_cell,
     _series_for,
@@ -209,6 +211,35 @@ class TestAdminBuildPanel:
         assert "crop-climate/update" in out
         assert "crop-climate/rebuild" in out
         assert "WS_01_01" in out
+
+
+class TestAuditLog:
+    def test_empty_range_message(self):
+        assert "No risk episodes" in _audit_table([])
+
+    def test_open_episode_shows_ongoing(self):
+        ep = {
+            "height": 2, "label": "Bloeiende tros", "risk": "fungal",
+            "start_time": _T0, "end_time": None, "peak": 3.2,
+            "thresholds": {"rh_pct": 85},
+        }
+        out = _audit_table([ep])
+        assert "Fungal risk" in out
+        assert "ongoing" in out
+        assert "H2" in out
+        assert "rh_pct" in out  # threshold-set stamped
+
+    def test_closed_episode_shows_duration(self):
+        ep = {
+            "height": 1, "label": "Kop", "risk": "vpd",
+            "start_time": _T0, "end_time": _at(150), "peak": 1.0, "thresholds": {},
+        }
+        assert "2h 30m" in _audit_table([ep])
+
+    def test_fmt_duration(self):
+        assert _fmt_duration(timedelta(hours=2, minutes=30)) == "2h 30m"
+        assert _fmt_duration(timedelta(minutes=45)) == "45m"
+        assert _fmt_duration(timedelta(days=1, hours=3)) == "1d 3h"
 
 
 class TestHubRegistration:
