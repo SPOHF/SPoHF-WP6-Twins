@@ -52,6 +52,13 @@ MULTI_HEIGHT_VIEWS = [
         "description": "PAR, temperature, humidity and CO₂ over time from the "
         "multi-height wire — one line per height.",
     },
+    {
+        "href": "/multi_height/crop-climate",
+        "title": "Crop Climate by Height",
+        "label": "Open view",
+        "description": "Per growth section (canopy top to root zone): the day's "
+        "PAR, temperature, humidity and CO₂ as compact trends.",
+    },
 ]
 
 
@@ -433,6 +440,212 @@ async def wire_trends_page(
     {wire_pills}
     {_wire_range_form(start_day, end_day, wire)}
     {charts_html}
+    """
+
+    return render_page(
+        config.title,
+        content,
+        data_source=provider.data_source_label,
+    )
+
+
+### Crop Climate by Height ###
+# A per-growth-section climate table: one row per growth section (H1 top → H5
+# root, ordered from red config), one column per raw measurement type. The grid
+# is dense (5×4 trends), so cells use lightweight inline-SVG sparklines (no
+# per-cell plotly) plus the latest value.
+MEASUREMENT_COLORS = {
+    "par": "#f59e0b",
+    "temp": "#ef4444",
+    "hum": "#06b6d4",
+    "co2": "#8b5cf6",
+}
+
+# The plant rail is a single rowspanned SVG; aligning it to rows means each body
+# row is exactly CROP_ROW_HEIGHT tall and the SVG is len(sections) * that.
+CROP_ROW_HEIGHT = 72
+PLANT_SVG_PATH = Path(__file__).parent.parent / "static/crop_plant.svg"
+
+
+def _plant_rail_cell(n_sections: int) -> str:
+    """Left rail: the placeholder plant SVG, rowspanned across all sections."""
+    height = n_sections * CROP_ROW_HEIGHT
+    return (
+        f'<td rowspan="{n_sections}" '
+        'style="vertical-align:top;padding:0 0.25rem;width:88px;">'
+        f'<img src="{svg_to_data_uri(PLANT_SVG_PATH)}" width="80" height="{height}" '
+        'alt="Tomato plant growth zones" style="display:block;"></td>'
+    )
+
+
+def _sparkline_svg(values, color, width=96, height=28):
+    """Minimal inline-SVG sparkline (no JS), self-normalised to its own range."""
+    pts = [float(v) for v in values if v is not None and not pd.isna(v)]
+    if len(pts) < 2:
+        return '<span style="color:#9ca3af;">—</span>'
+    lo, hi = min(pts), max(pts)
+    span = (hi - lo) or 1.0
+    last = len(pts) - 1
+    coords = " ".join(
+        f"{(i / last) * (width - 2) + 1:.1f},"
+        f"{height - 1 - ((v - lo) / span) * (height - 2):.1f}"
+        for i, v in enumerate(pts)
+    )
+    return (
+        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+        'style="display:block;">'
+        f'<polyline points="{coords}" fill="none" stroke="{color}" '
+        'stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>'
+    )
+
+
+def _series_for(df_day, device, measurement):
+    """Time-sorted value list for one height-device + measurement on the day."""
+    if df_day.empty:
+        return []
+    d = df_day[
+        (df_day["device"] == device) & (df_day["measurement"] == measurement)
+    ].sort_values("time")
+    return d["value"].tolist()
+
+
+def _measurement_cell(series, measurement, vmin, vmax):
+    """A cell: latest value (+ unit) above a sparkline of the day's series.
+
+    Background is a relative tint — a white→measurement-colour ramp keyed to the
+    latest value's rank within this column (``vmin``/``vmax`` are the latest
+    values across the five heights), so colour means "high/low vs the other
+    heights", never an absolute threshold.
+    """
+    _, unit = WIRE_MEASUREMENT_LABELS[measurement]
+    latest = series[-1] if series else None
+    value = "—" if latest is None else f"{_format_reading(latest)} {unit}"
+    scale = [[0.0, "#ffffff"], [1.0, MEASUREMENT_COLORS[measurement]]]
+    bg = value_to_color(latest, vmin, vmax, colorscale=scale, alpha=0.5)
+    return (
+        "<td style='padding:0.5rem 0.75rem;vertical-align:middle;"
+        f"background:{bg};'>"
+        f'<div style="font-weight:600;font-size:0.9rem;">{value}</div>'
+        f'{_sparkline_svg(series, MEASUREMENT_COLORS[measurement])}'
+        "</td>"
+    )
+
+
+def _section_label_cell(section):
+    """Left rail cell for one growth section (placeholder for the plant SVG)."""
+    return (
+        '<td style="padding:0.5rem 0.75rem;font-weight:600;white-space:nowrap;">'
+        f'<span style="color:#6b7280;">H{section.height}</span> · '
+        f"{html.escape(section.label)}</td>"
+    )
+
+
+def _date_form(base_path: str, day: date, wire: str) -> str:
+    """Single-date picker that GETs back to this view (keeps the wire)."""
+    return f"""
+    <form method="get" action="{base_path}" style="display:flex;gap:12px;
+        align-items:flex-end;margin-bottom:16px;flex-wrap:wrap;">
+        <input type="hidden" name="wire" value="{wire}">
+        <label>Date<br>
+            <input type="date" name="date" value="{day.isoformat()}">
+        </label>
+        <button type="submit">Update</button>
+    </form>
+    """
+
+
+@router.get("/multi_height/crop-climate", response_class=HTMLResponse)
+async def crop_climate_page(
+    config: Annotated[TwinConfig, Depends(get_twin_config)],
+    provider: Annotated[SensorDataProvider, Depends(get_provider)],
+    day: Annotated[
+        date | None,
+        Query(alias="date", description="Day to view (YYYY-MM-DD); defaults to latest with data"),
+    ] = None,
+    wire: Annotated[
+        str | None, Query(description="Which wire to show; defaults to the first declared")
+    ] = None,
+):
+    timezone = deps.base_settings.display_timezone
+    sections = deps.growth_sections
+
+    wires = wire_ids()
+    if wire not in wires:
+        wire = wires[0] if wires else ""
+
+    df = await load_wire_readings()
+    wire_devices = [wire_device_id(wire, s.height) for s in sections]
+
+    # Default to the latest day this wire actually reported (the feed can lag).
+    if day is not None:
+        target_date = day
+    else:
+        scoped = df[df["device"].isin(wire_devices)] if not df.empty else df
+        target_date = (
+            scoped["time"].dt.tz_convert(timezone).max().date()
+            if not scoped.empty else None
+        )
+
+    df_day, target_day = filter_for_day(df, timezone, target_date=target_date)
+
+    header_cells = "".join(
+        f'<th style="padding:0.5rem 0.75rem;text-align:left;">'
+        f"{WIRE_MEASUREMENT_LABELS[m][0]}</th>"
+        for m in WIRE_SENSOR_MEASUREMENTS
+    )
+    # Day's series per (height, measurement), computed once; per-column bounds
+    # (latest value across the five heights) drive the relative cell tint.
+    series_map = {
+        (section.height, m): _series_for(df_day, wire_device_id(wire, section.height), m)
+        for section in sections
+        for m in WIRE_SENSOR_MEASUREMENTS
+    }
+    col_bounds = {}
+    for m in WIRE_SENSOR_MEASUREMENTS:
+        latests = [
+            series_map[(section.height, m)][-1]
+            for section in sections
+            if series_map[(section.height, m)]
+        ]
+        col_bounds[m] = (min(latests), max(latests)) if latests else (0.0, 1.0)
+
+    rows_html = ""
+    for i, section in enumerate(sections):
+        cells = "".join(
+            _measurement_cell(series_map[(section.height, m)], m, *col_bounds[m])
+            for m in WIRE_SENSOR_MEASUREMENTS
+        )
+        # The plant rail is a single cell on the first row, spanning all sections.
+        rail = _plant_rail_cell(len(sections)) if i == 0 else ""
+        rows_html += (
+            f"<tr style='border-top:1px solid #e5e7eb;height:{CROP_ROW_HEIGHT}px;'>"
+            f"{rail}{_section_label_cell(section)}{cells}</tr>"
+        )
+
+    table = (
+        '<table style="width:100%;border-collapse:collapse;">'
+        '<thead><tr><th style="width:88px;"></th>'
+        '<th style="padding:0.5rem 0.75rem;text-align:left;">'
+        f"Growth section</th>{header_cells}</tr></thead>"
+        f"<tbody>{rows_html}</tbody></table>"
+    )
+
+    wire_pills = _pill_row(
+        "/multi_height/crop-climate", "wire", [(w, w) for w in wires], wire,
+        {"date": day.isoformat() if day else None}, label="Device",
+    )
+    date_form = _date_form("/multi_height/crop-climate", target_day.date(), wire)
+
+    content = f"""
+    <a href="/multi_height" class="back-link">← Multi Height</a>
+    <h1>Crop Climate by Height</h1>
+    <p>Each growth section from the canopy top (H1) down to the root zone (H5),
+    for the selected wire and day.</p>
+
+    {wire_pills}
+    {date_form}
+
+    {render_card(f"Climate — {target_day.date()}", table, card_class="card")}
     """
 
     return render_page(

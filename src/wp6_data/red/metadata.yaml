@@ -1,6 +1,25 @@
 # Red twin (tomato greenhouse) — device and sensor metadata.
 # Device keys match the device_id values from the MySQL tables.
 
+# ── Growth sections (red prescriptive view) ──
+# Canopy zones mapped 1:1 onto wire heights, in fixed top-to-bottom order, the
+# same for every wire (see CONTEXT "Growth section" / red ADR 0002). H1 sits just
+# above the canopy; H5 is the root zone. The ordering is a horticultural
+# assumption, not a measured distance. List order is the display order (top→root).
+# Red-only config — the shared metadata model ignores this key on purpose, so
+# shared/ stays twin-agnostic; a red-side loader reads it.
+growth_sections:
+  - height: 1
+    label: "Kop"
+  - height: 2
+    label: "Bloeiende tros"
+  - height: 3
+    label: "Vruchtzetting"
+  - height: 4
+    label: "Afrijping"
+  - height: 5
+    label: "Substraat/wortelzone"
+
 sensor_defaults:
   temp:
     type: "temperature"

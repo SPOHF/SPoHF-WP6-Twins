@@ -1,0 +1,135 @@
+"""Tests for the red "Crop Climate by Height" view (issue 013).
+
+Covers the pure pieces that don't need a live MySQL connection: the red-only
+growth-section loader, the inline-SVG sparkline, the per-cell series extraction,
+and that the view is registered in the Multi Height hub.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pandas as pd
+
+from wp6_data.red.db import WIRE_SENSOR_HEIGHTS, wire_device_id
+from wp6_data.red.growth_sections import load_growth_sections
+from wp6_data.red.routes.multi_height import (
+    MULTI_HEIGHT_VIEWS,
+    _series_for,
+    _sparkline_svg,
+)
+
+RED_METADATA = (
+    Path(__file__).parent.parent / "src/wp6_data/red/metadata.yaml"
+)
+
+
+class TestLoadGrowthSections:
+    def test_loads_ordered_sections(self, tmp_path):
+        p = tmp_path / "m.yaml"
+        p.write_text(
+            "growth_sections:\n"
+            "  - height: 1\n    label: Top\n"
+            "  - height: 2\n    label: Bottom\n"
+        )
+        secs = load_growth_sections(p)
+        assert [(s.height, s.label) for s in secs] == [(1, "Top"), (2, "Bottom")]
+
+    def test_missing_key_returns_empty(self, tmp_path):
+        p = tmp_path / "m.yaml"
+        p.write_text("devices: {}\n")
+        assert load_growth_sections(p) == []
+
+    def test_missing_file_returns_empty(self, tmp_path):
+        assert load_growth_sections(tmp_path / "nope.yaml") == []
+
+    def test_red_config_has_one_section_per_wire_height(self):
+        """The shipped red config maps every wire height to a labelled section."""
+        secs = load_growth_sections(RED_METADATA)
+        assert [s.height for s in secs] == WIRE_SENSOR_HEIGHTS  # ordered H1->H5
+        assert all(s.label for s in secs)
+
+
+class TestSparklineSvg:
+    def test_too_few_points_renders_placeholder(self):
+        assert "polyline" not in _sparkline_svg([], "#000")
+        assert "polyline" not in _sparkline_svg([1.0], "#000")
+        assert "—" in _sparkline_svg([1.0], "#000")
+
+    def test_polyline_has_one_point_per_value(self):
+        svg = _sparkline_svg([1.0, 2.0, 3.0], "#000")
+        points = re.search(r'points="([^"]+)"', svg).group(1)
+        assert len(points.split()) == 3
+
+    def test_nan_values_are_dropped(self):
+        svg = _sparkline_svg([1.0, float("nan"), 2.0], "#000")
+        points = re.search(r'points="([^"]+)"', svg).group(1)
+        assert len(points.split()) == 2
+
+
+class TestSeriesFor:
+    @staticmethod
+    def _df():
+        rows = [
+            ("WS_01_01-h1", "par", "12:30", 2.0),
+            ("WS_01_01-h1", "par", "12:00", 1.0),  # out of order on purpose
+            ("WS_01_01-h1", "temp", "12:00", 9.0),
+            ("WS_01_01-h2", "par", "12:00", 5.0),
+        ]
+        return pd.DataFrame(
+            {
+                "device": [r[0] for r in rows],
+                "height": [1, 1, 1, 2],
+                "measurement": [r[1] for r in rows],
+                "time": [pd.Timestamp(f"2026-05-26T{r[2]}:00", tz="UTC") for r in rows],
+                "value": [r[3] for r in rows],
+            }
+        )
+
+    def test_returns_time_sorted_values_for_device_and_measurement(self):
+        assert _series_for(self._df(), wire_device_id("WS_01_01", 1), "par") == [1.0, 2.0]
+
+    def test_scopes_to_the_right_height(self):
+        assert _series_for(self._df(), wire_device_id("WS_01_01", 2), "par") == [5.0]
+
+    def test_empty_frame_returns_empty(self):
+        assert _series_for(pd.DataFrame(), "WS_01_01-h1", "par") == []
+
+
+class TestPlantRail:
+    def test_asset_exists_and_height_matches_zones(self):
+        import xml.etree.ElementTree as ET
+
+        from wp6_data.red.routes.multi_height import CROP_ROW_HEIGHT, PLANT_SVG_PATH
+
+        viewbox = ET.parse(PLANT_SVG_PATH).getroot().attrib["viewBox"].split()
+        assert int(viewbox[3]) == len(WIRE_SENSOR_HEIGHTS) * CROP_ROW_HEIGHT
+
+    def test_rail_cell_spans_all_sections_and_sizes_svg(self):
+        from wp6_data.red.routes.multi_height import CROP_ROW_HEIGHT, _plant_rail_cell
+
+        html = _plant_rail_cell(len(WIRE_SENSOR_HEIGHTS))
+        assert f'rowspan="{len(WIRE_SENSOR_HEIGHTS)}"' in html
+        assert f'height="{len(WIRE_SENSOR_HEIGHTS) * CROP_ROW_HEIGHT}"' in html
+        assert "data:image/svg+xml" in html
+
+
+class TestMeasurementCell:
+    def test_cell_has_relative_background_and_latest_value(self):
+        from wp6_data.red.routes.multi_height import _measurement_cell
+
+        html = _measurement_cell([10.0, 20.0], "temp", 0.0, 20.0)
+        assert "background:rgba(" in html
+        assert "20.0" in html  # latest value rendered
+
+    def test_empty_series_renders_placeholder(self):
+        from wp6_data.red.routes.multi_height import _measurement_cell
+
+        assert "—" in _measurement_cell([], "par", 0.0, 1.0)
+
+
+class TestHubRegistration:
+    def test_crop_climate_view_is_listed(self):
+        hrefs = {v["href"] for v in MULTI_HEIGHT_VIEWS}
+        assert "/multi_height/crop-climate" in hrefs
