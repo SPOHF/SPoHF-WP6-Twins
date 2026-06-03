@@ -8,16 +8,19 @@ and that the view is registered in the Multi Height hub.
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
 
 from wp6_data.red.db import WIRE_SENSOR_HEIGHTS, wire_device_id
-from wp6_data.red.growth_sections import load_growth_sections
+from wp6_data.red.growth_sections import GrowthSection, load_growth_sections
 from wp6_data.red.routes.multi_height import (
     MULTI_HEIGHT_VIEWS,
+    _admin_build_panel,
     _series_for,
     _sparkline_svg,
+    _verdict_panel,
 )
 
 RED_METADATA = (
@@ -127,6 +130,35 @@ class TestMeasurementCell:
         from wp6_data.red.routes.multi_height import _measurement_cell
 
         assert "—" in _measurement_cell([], "par", 0.0, 1.0)
+
+
+class TestVerdictPanel:
+    _SECTIONS = [GrowthSection(height=1, label="Kop")]
+
+    def test_empty_state_prompts_for_build(self):
+        out = _verdict_panel(self._SECTIONS, {}, None)
+        assert "No evaluation yet" in out
+
+    def test_badges_reflect_persisted_state(self):
+        state = {1: {"height": 1, "canopy_deficit": True, "fungal_active": False,
+                     "vpd_in_band": False}}
+        out = _verdict_panel(self._SECTIONS, state, None)
+        assert "Light deficit" in out
+        assert "VPD out of band" in out
+        assert "Fungal risk" not in out
+
+    def test_ok_when_no_flags(self):
+        state = {1: {"height": 1, "canopy_deficit": False, "fungal_active": False,
+                     "vpd_in_band": True}}
+        assert ">OK<" in _verdict_panel(self._SECTIONS, state, None)
+
+
+class TestAdminBuildPanel:
+    def test_has_update_and_rebuild_actions(self):
+        out = _admin_build_panel("WS_01_01", date(2026, 6, 2))
+        assert "crop-climate/update" in out
+        assert "crop-climate/rebuild" in out
+        assert "WS_01_01" in out
 
 
 class TestHubRegistration:

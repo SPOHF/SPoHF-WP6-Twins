@@ -1,17 +1,18 @@
 import html
 import re
 import xml.etree.ElementTree as ET
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
 import pandas as pd  # type: ignore[import-untyped]
 import plotly.graph_objects as go  # type: ignore[import-untyped]
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 
+from wp6_data.db.pool import get_pool
 from wp6_data.shared import render_card, render_hub_card, render_hub_grid, render_page
-from wp6_data.shared.auth import verify_session_user
+from wp6_data.shared.auth import is_admin, verify_session_admin, verify_session_user
 from wp6_data.shared.routes.deps import get_provider, get_twin_config
 from wp6_data.shared.twin import SensorDataProvider, TwinConfig
 
@@ -22,6 +23,7 @@ from ..db import (
     wire_device_id,
     wire_physical_id,
 )
+from ..risk import service, store
 from ..risk.metrics import compute_cumulative_dli, compute_dli
 from ..utils import (
     PAR_COLORSCALE,
@@ -557,6 +559,7 @@ def _date_form(base_path: str, day: date, wire: str) -> str:
 
 @router.get("/multi_height/crop-climate", response_class=HTMLResponse)
 async def crop_climate_page(
+    request: Request,
     config: Annotated[TwinConfig, Depends(get_twin_config)],
     provider: Annotated[SensorDataProvider, Depends(get_provider)],
     day: Annotated[
@@ -637,6 +640,12 @@ async def crop_climate_page(
     )
     date_form = _date_form("/multi_height/crop-climate", target_day.date(), wire)
 
+    # Persisted verdict (read-only, "as of last build") + admin build panel.
+    state_by_height = {r["height"]: r for r in await store.read_state(get_pool(), wire)}
+    as_of = max((r["built_at"] for r in state_by_height.values()), default=None)
+    verdict_panel = _verdict_panel(sections, state_by_height, as_of)
+    admin_panel = _admin_build_panel(wire, target_day.date()) if is_admin(request) else ""
+
     content = f"""
     <a href="/multi_height" class="back-link">← Multi Height</a>
     <h1>Crop Climate by Height</h1>
@@ -647,12 +656,121 @@ async def crop_climate_page(
     {date_form}
 
     {render_card(f"Climate — {target_day.date()}", table, card_class="card")}
+    {verdict_panel}
+    {admin_panel}
     """
 
     return render_page(
         config.title,
         content,
         data_source=provider.data_source_label,
+    )
+
+
+### Risk verdict + admin build (issue 015) ###
+def _badge(text: str, color: str) -> str:
+    return (
+        f'<span style="background:{color};color:#fff;border-radius:6px;'
+        f'padding:2px 8px;font-size:0.8rem;margin-right:4px;">{text}</span>'
+    )
+
+
+def _verdict_panel(sections, state_by_height, as_of) -> str:
+    """Per-section risk verdict read from the persisted cache (no recompute)."""
+    if not state_by_height:
+        body = (
+            '<p style="color:#6b7280;">No evaluation yet — an admin can press '
+            "Build below.</p>"
+        )
+    else:
+        rows = ""
+        for s in sections:
+            st = state_by_height.get(s.height)
+            badges = []
+            if st:
+                if st.get("canopy_deficit"):
+                    badges.append(_badge("Light deficit", "#b45309"))
+                if st.get("fungal_active"):
+                    badges.append(_badge("Fungal risk", "#7c3aed"))
+                if st.get("vpd_in_band") is False:
+                    badges.append(_badge("VPD out of band", "#b91c1c"))
+            status = "".join(badges) or ('—' if st is None else _badge("OK", "#16a34a"))
+            rows += (
+                '<tr><td style="padding:0.25rem 0.6rem;font-weight:600;'
+                f'white-space:nowrap;">H{s.height} {html.escape(s.label)}</td>'
+                f'<td style="padding:0.25rem 0.6rem;">{status}</td></tr>'
+            )
+        body = f'<table style="border-collapse:collapse;">{rows}</table>'
+
+    asof = (
+        f' <small style="color:#6b7280;font-weight:400;">as of '
+        f'{as_of:%Y-%m-%d %H:%M} UTC</small>'
+        if as_of is not None else ""
+    )
+    return render_card(f"Risk status{asof}", body, card_class="card")
+
+
+def _admin_build_panel(wire: str, day: date) -> str:
+    """Admin-only Update (to now) + Rebuild (date range) build controls."""
+    update_form = (
+        '<form method="post" action="/multi_height/crop-climate/update" '
+        'style="display:inline;">'
+        f'<input type="hidden" name="wire" value="{wire}">'
+        '<button type="submit">Update (to now)</button></form>'
+    )
+    rebuild_form = (
+        '<form method="post" action="/multi_height/crop-climate/rebuild" '
+        'style="display:flex;gap:8px;align-items:flex-end;margin-top:8px;'
+        'flex-wrap:wrap;">'
+        f'<input type="hidden" name="wire" value="{wire}">'
+        f'<label>From<br><input type="date" name="start" value="{day.isoformat()}"></label>'
+        f'<label>To<br><input type="date" name="end" value="{day.isoformat()}"></label>'
+        '<button type="submit">Rebuild range</button></form>'
+    )
+    return render_card(
+        "Admin — build risk log",
+        update_form + rebuild_form,
+        description="Update extends the log to now; Rebuild recomputes a date "
+        "range from raw data. Runs on demand.",
+        card_class="card",
+    )
+
+
+@router.post(
+    "/multi_height/crop-climate/update",
+    dependencies=[Depends(verify_session_admin)],
+)
+async def crop_climate_update(wire: Annotated[str, Form()]):
+    """Incrementally extend the wire's risk log up to now (cron stand-in)."""
+    now = datetime.now(UTC)
+    last = await store.last_built_at(get_pool(), wire)
+    start = last or (now - timedelta(days=7))
+    await service.build_range(wire, start, now)
+    return RedirectResponse(
+        url=f"/multi_height/crop-climate?wire={wire}", status_code=303,
+    )
+
+
+@router.post(
+    "/multi_height/crop-climate/rebuild",
+    dependencies=[Depends(verify_session_admin)],
+)
+async def crop_climate_rebuild(
+    wire: Annotated[str, Form()],
+    start: Annotated[date, Form()],
+    end: Annotated[date, Form()],
+):
+    """Recompute the wire's risk log over a selectable date range."""
+    tz = deps.base_settings.display_timezone
+    start_utc = pd.Timestamp(start, tz=tz).tz_convert("UTC").to_pydatetime()
+    end_utc = (
+        (pd.Timestamp(end, tz=tz) + pd.Timedelta(days=1))
+        .tz_convert("UTC")
+        .to_pydatetime()
+    )
+    await service.build_range(wire, start_utc, end_utc)
+    return RedirectResponse(
+        url=f"/multi_height/crop-climate?wire={wire}", status_code=303,
     )
 
 
