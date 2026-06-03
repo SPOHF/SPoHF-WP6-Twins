@@ -191,20 +191,28 @@ class TestDerivedCells:
 
 class TestSectionBadges:
     def test_no_state_is_empty(self):
-        assert _section_badges(None) == ""
+        assert _section_badges(None, 0.4, 1.2) == ""
 
-    def test_only_active_risks_render(self):
-        state = {"height": 1, "canopy_deficit": True, "fungal_active": False,
-                 "vpd_in_band": False}
-        out = _section_badges(state)
-        assert "Light" in out
-        assert "VPD" in out
-        assert "Fungal" not in out
+    def test_prescriptive_labels_and_tooltips(self):
+        state = {"canopy_deficit": True, "fungal_active": True,
+                 "vpd_in_band": True, "vpd_latest": 0.9}
+        out = _section_badges(state, 0.4, 1.2)
+        assert "Add light" in out
+        assert "Dry the air" in out
+        assert "title=" in out  # supportive tooltip present
+
+    def test_vpd_high_says_raise_humidity(self):
+        state = {"vpd_in_band": False, "vpd_latest": 1.6}  # above 1.2 band -> too dry
+        assert "Raise humidity" in _section_badges(state, 0.4, 1.2)
+
+    def test_vpd_low_says_ventilate(self):
+        state = {"vpd_in_band": False, "vpd_latest": 0.2}  # below 0.4 band -> too humid
+        assert "Ventilate" in _section_badges(state, 0.4, 1.2)
 
     def test_healthy_section_has_no_badges(self):
-        state = {"height": 1, "canopy_deficit": False, "fungal_active": False,
-                 "vpd_in_band": True}
-        assert _section_badges(state) == ""
+        state = {"canopy_deficit": False, "fungal_active": False,
+                 "vpd_in_band": True, "vpd_latest": 0.9}
+        assert _section_badges(state, 0.4, 1.2) == ""
 
 
 class TestAdminBuildPanel:

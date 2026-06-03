@@ -660,9 +660,9 @@ def _fungal_cell(hum_df, rh_pct, window_hours, height):
     )
 
 
-def _section_label_cell(section, state=None):
+def _section_label_cell(section, state, vpd_band_min, vpd_band_max):
     """Growth-section label, with any active-risk badges beneath it."""
-    badges = _section_badges(state)
+    badges = _section_badges(state, vpd_band_min, vpd_band_max)
     badge_html = f'<div style="margin-top:4px;">{badges}</div>' if badges else ""
     return (
         '<td style="padding:0.5rem 0.75rem;font-weight:600;white-space:nowrap;">'
@@ -770,9 +770,13 @@ async def crop_climate_page(
             + _vpd_cell(hdf, risk_t.vpd.band_min_kpa, risk_t.vpd.band_max_kpa, h)
             + _fungal_cell(hum_df, risk_t.fungal.rh_pct, risk_t.fungal.window_hours, h)
         )
+        label_cell = _section_label_cell(
+            section, state_by_height.get(h),
+            risk_t.vpd.band_min_kpa, risk_t.vpd.band_max_kpa,
+        )
         rows_html += (
             f"<tr style='border-top:1px solid #e5e7eb;height:{CROP_ROW_HEIGHT}px;'>"
-            f"{_section_label_cell(section, state_by_height.get(h))}{measured}"
+            f"{label_cell}{measured}"
             f"{_plant_zone_cell(i, len(sections), plant_uri)}"
             f"{derived}</tr>"
         )
@@ -823,28 +827,51 @@ async def crop_climate_page(
 
 
 ### Risk verdict + admin build (issue 015) ###
-def _badge(text: str, color: str) -> str:
+def _badge(text: str, color: str, title: str = "") -> str:
+    tip = f' title="{html.escape(title)}"' if title else ""
+    cursor = "cursor:help;" if title else ""
     return (
-        f'<span style="background:{color};color:#fff;border-radius:6px;'
-        f'padding:2px 8px;font-size:0.8rem;margin-right:4px;">{text}</span>'
+        f'<span{tip} style="background:{color};color:#fff;border-radius:6px;'
+        f'padding:2px 8px;font-size:0.8rem;margin-right:4px;{cursor}">{text}</span>'
     )
 
 
-def _section_badges(state) -> str:
-    """Active-risk badges for a section from its persisted state (no recompute).
+def _section_badges(state, vpd_band_min, vpd_band_max) -> str:
+    """Prescriptive active-risk badges for a section from its persisted state.
 
-    Only *active* risks render — no "OK" or placeholder, so a healthy section
-    stays clean. Empty string when ``state`` is absent or nothing is flagged.
+    Each badge names the *action*, with a tooltip explaining why. Only active
+    risks render (no "OK"), so a healthy section stays clean. Empty when state is
+    absent or nothing is flagged. The VPD badge is directional — the state's
+    latest VPD vs the band decides whether the air is too dry or too humid.
     """
     if not state:
         return ""
     badges = []
     if state.get("canopy_deficit"):
-        badges.append(_badge("Light", "#b45309"))
+        badges.append(_badge(
+            "Add light", "#b45309",
+            "Canopy DLI below target — add supplemental light or extend the photoperiod",
+        ))
     if state.get("fungal_active"):
-        badges.append(_badge("Fungal", "#7c3aed"))
+        badges.append(_badge(
+            "Dry the air", "#7c3aed",
+            "Humidity has stayed high too long — Botrytis/fungal pressure; "
+            "ventilate or add heat to dry the canopy",
+        ))
     if state.get("vpd_in_band") is False:
-        badges.append(_badge("VPD", "#b91c1c"))
+        vpd = state.get("vpd_latest")
+        if vpd is not None and vpd > vpd_band_max:
+            badges.append(_badge(
+                "Raise humidity", "#b91c1c",
+                "VPD above the healthy band — air too dry; raise humidity "
+                "(misting/fogging) or lower temperature",
+            ))
+        else:
+            badges.append(_badge(
+                "Ventilate", "#b91c1c",
+                "VPD below the healthy band — air too humid; ventilate or "
+                "raise temperature",
+            ))
     return "".join(badges)
 
 
