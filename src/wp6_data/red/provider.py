@@ -70,6 +70,13 @@ class RedSensorProvider:
         self.tsdb_sensors: frozenset[str] = frozenset(
             tag for tag, meta in metadata.sensor_defaults.items() if meta.source
         )
+        # Third routing leg: devices typed "wire" are served from the wide
+        # wire_sensors table (see ADR 0001). Map virtual device id -> its sensors.
+        self.wire_devices: dict[str, list[str]] = {
+            device_id: list(meta.sensors.keys())
+            for device_id, meta in metadata.devices.items()
+            if meta.type == "wire"
+        }
 
     @property
     def db(self) -> MySQLConnection:
@@ -99,14 +106,19 @@ class RedSensorProvider:
         return result
 
     async def _fetch_daily_coverage(self) -> list[dict[str, Any]]:
-        """Distinct (device, sensor, day) records — MySQL + TSDB merged.
+        """Distinct (device, sensor, day) records — MySQL + wire + TSDB merged.
 
         Each record carries a ``manual`` flag so `shared.routes.status` can
-        split the coverage grid. The MySQL leg is the live LoRaWAN sensors —
+        split the coverage grid. The MySQL and wire legs are live sensors —
         always automated. The TSDB leg is manual iff its ``source`` is a
         registered manual-upload source (see `red.manual_sources`).
         """
-        from wp6_data.red.db import SENSOR_TABLES
+        from wp6_data.red.db import (
+            SENSOR_TABLES,
+            WIRE_SENSOR_HEIGHTS,
+            WIRE_SENSORS_TABLE,
+            wire_device_id,
+        )
         from wp6_data.red.manual_sources import MANUAL_SOURCE_VALUES
         from wp6_data.red.tsdb import fetch_daily_coverage_from_table
 
@@ -129,6 +141,28 @@ class RedSensorProvider:
                             "day": day,
                             "manual": False,
                         })
+
+            # Wire leg: one virtual device per height, each with its declared
+            # sensors. Wire is a live (automated) feed, like the MySQL leg.
+            if self.wire_devices:
+                try:
+                    await cursor.execute(
+                        f"SELECT DISTINCT device_id, DATE(received_at) AS day "
+                        f"FROM {WIRE_SENSORS_TABLE}",
+                    )
+                    wire_rows = await cursor.fetchall()
+                except Exception:
+                    wire_rows = []
+                for physical_id, day in wire_rows:
+                    for height in WIRE_SENSOR_HEIGHTS:
+                        device_id = wire_device_id(physical_id, height)
+                        for sensor in self.wire_devices.get(device_id, []):
+                            records.append({
+                                "device": device_id,
+                                "sensor": sensor,
+                                "day": day,
+                                "manual": False,
+                            })
 
         for rec in await fetch_daily_coverage_from_table():
             rec["manual"] = rec.pop("source", None) in MANUAL_SOURCE_VALUES
@@ -166,6 +200,29 @@ class RedSensorProvider:
             )
         return pd.DataFrame(columns=["device", "sensor", "time", "value"])
 
+    async def _fetch_wire(
+        self,
+        sensor_tags: list[str] | None,
+        device_names: list[str],
+        start: datetime | None,
+        end: datetime | None,
+        limit: int,
+    ) -> pd.DataFrame:
+        """Wire leg of fetch_data — serve wire devices from the wide table.
+
+        Reshapes the long wire frame (device, height, measurement, time, value)
+        into the shared (device, sensor, time, value) contract; height is already
+        baked into the virtual device id, so it's dropped here.
+        """
+        df = await self.db.get_wire_sensor_readings(start=start, end=end, limit=limit)
+        if df.empty:
+            return pd.DataFrame(columns=["device", "sensor", "time", "value"])
+        out = df.rename(columns={"measurement": "sensor"})
+        out = out[out["device"].isin(device_names)]
+        if sensor_tags:
+            out = out[out["sensor"].isin(sensor_tags)]
+        return out[["device", "sensor", "time", "value"]].reset_index(drop=True)
+
     async def fetch_data(
         self,
         sensor_tags: list[str] | None = None,
@@ -177,34 +234,56 @@ class RedSensorProvider:
         bucket: timedelta | None = None,
         agg: str | None = None,
     ) -> pd.DataFrame:
-        """Fetch readings, dispatching per-sensor between MySQL and TSDB.
+        """Fetch readings, dispatching per-device/sensor across three legs.
 
-        The TSDB leg buckets server-side; the legacy MySQL leg has no
-        ``time_bucket``, so it fetches raw and is folded into the same
-        bucketed contract by the shared pandas fallback. A sensor routes to
-        exactly one leg, so the legs never produce overlapping buckets.
+        Wire devices (typed ``wire`` in metadata) are served from the wide
+        wire_sensors table; remaining sensors route per-sensor between the legacy
+        MySQL tables and TSDB. The TSDB leg buckets server-side; the MySQL and
+        wire legs fetch raw and are folded into the same bucketed contract by the
+        shared pandas fallback. Each series routes to exactly one leg, so legs
+        never produce overlapping buckets.
         """
         from wp6_data.red.tsdb import fetch_data_tsdb
 
         bucketed = bucket is not None and agg is not None
-        mysql_tags, tsdb_tags = self._split_by_route(sensor_tags)
         frames: list[pd.DataFrame] = []
-        if mysql_tags:
-            mysql_df = await self._fetch_mysql(
-                mysql_tags, device_names, start, end, limit,
-            )
+
+        # Partition the requested devices into wire vs the rest.
+        wire_names = [d for d in (device_names or []) if d in self.wire_devices]
+        other_names = (
+            [d for d in device_names if d not in self.wire_devices]
+            if device_names is not None
+            else None
+        )
+
+        if wire_names:
+            wire_df = await self._fetch_wire(sensor_tags, wire_names, start, end, limit)
             if bucketed:
-                mysql_df = bucket_and_aggregate(
-                    mysql_df, bucket, agg, display_tz(),
+                wire_df = bucket_and_aggregate(wire_df, bucket, agg, display_tz())
+            frames.append(wire_df)
+
+        # Run the legacy/TSDB legs for non-wire devices, or for an unfiltered
+        # (measurement-wide) query. A device filter naming only wire devices
+        # skips them entirely.
+        if device_names is None or other_names:
+            mysql_tags, tsdb_tags = self._split_by_route(sensor_tags)
+            if mysql_tags:
+                mysql_df = await self._fetch_mysql(
+                    mysql_tags, other_names, start, end, limit,
                 )
-            frames.append(mysql_df)
-        if tsdb_tags:
-            frames.append(await fetch_data_tsdb(
-                sensor_tags=tsdb_tags,
-                device_names=device_names,
-                start=start, end=end, limit=limit,
-                bucket=bucket, agg=agg,
-            ))
+                if bucketed:
+                    mysql_df = bucket_and_aggregate(
+                        mysql_df, bucket, agg, display_tz(),
+                    )
+                frames.append(mysql_df)
+            if tsdb_tags:
+                frames.append(await fetch_data_tsdb(
+                    sensor_tags=tsdb_tags,
+                    device_names=other_names,
+                    start=start, end=end, limit=limit,
+                    bucket=bucket, agg=agg,
+                ))
+
         if not frames:
             return pd.DataFrame(columns=["device", "sensor", "time", "value"])
         if len(frames) == 1:
@@ -269,6 +348,16 @@ class RedSensorProvider:
                 "sensor": sensor,
                 "readings": cagg_lookup.get((device, sensor), 0),
             })
+
+        wire_summary = await self.db.get_wire_device_summary()
+        for device_id, sensors in self.wire_devices.items():
+            readings = wire_summary.get(device_id, {}).get("readings", 0)
+            for sensor in sensors:
+                result.append({
+                    "device": device_id,
+                    "sensor": sensor,
+                    "readings": readings,
+                })
         return result
 
     async def fetch_device_data(self) -> dict[str, dict]:
@@ -307,6 +396,15 @@ class RedSensorProvider:
             })
             if sensor not in entry["sensors"]:
                 entry["sensors"].append(sensor)
+
+        wire_summary = await self.db.get_wire_device_summary()
+        for device_id, sensors in self.wire_devices.items():
+            info = wire_summary.get(device_id, {})
+            device_data[device_id] = {
+                "sensors": list(sensors),
+                "readings": info.get("readings", 0),
+                "last_seen": info.get("last_seen"),
+            }
         return device_data
 
     async def fetch_manual_metadata(self) -> dict[str, Any]:

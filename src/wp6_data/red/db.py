@@ -1,5 +1,6 @@
 """MySQL database connection for WP6 Red."""
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -73,6 +74,73 @@ def expand_measurement(measurement: str) -> list[str]:
     if measurement in MEASUREMENT_GROUPS:
         return MEASUREMENT_GROUPS[measurement]
     return [measurement]
+
+
+# ── Multi-height "wire sensor" table ──
+# A single physical wire device reports four measurement types at five heights.
+# The table is wide: 20 value columns named ``<measurement><height>`` — e.g.
+# ``par1``..``par5``, ``co21``..``co25``. This is the external table's schema (a
+# fixed structural fact, like SENSOR_TABLES above), not tunable config.
+WIRE_SENSORS_TABLE = "wire_sensors"
+WIRE_SENSOR_MEASUREMENTS = ["par", "temp", "hum", "co2"]
+WIRE_SENSOR_HEIGHTS = [1, 2, 3, 4, 5]
+
+
+def wire_value_columns() -> list[str]:
+    """The 20 wide value column names, e.g. ['par1', ..., 'co25']."""
+    return [
+        f"{measurement}{height}"
+        for measurement in WIRE_SENSOR_MEASUREMENTS
+        for height in WIRE_SENSOR_HEIGHTS
+    ]
+
+
+def wire_device_id(physical_device_id: str, height: int) -> str:
+    """Virtual per-height device id, e.g. ('WS_01_01', 3) -> 'WS_01_01-h3'.
+
+    Each height is surfaced as its own device (see ADR 0001), so the wide row's
+    physical id plus a height index becomes the ``(device, sensor)`` identity the
+    rest of the platform speaks.
+    """
+    return f"{physical_device_id}-h{height}"
+
+
+def wire_height_from_device(device_id: str) -> int | None:
+    """Inverse of :func:`wire_device_id` — pull the height out of a ``-hN`` id."""
+    match = re.search(r"-h(\d+)$", device_id)
+    return int(match.group(1)) if match else None
+
+
+def wire_physical_id(device_id: str) -> str:
+    """Physical wire id behind a virtual device, e.g. 'WS_01_01-h3' -> 'WS_01_01'."""
+    return re.sub(r"-h\d+$", "", device_id)
+
+
+def unpivot_wire_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Flatten wide ``wire_sensors`` rows into tidy long records.
+
+    Each input row carries up to 20 height-indexed value columns; this emits one
+    record per populated ``(measurement, height)`` cell. Empty cells (``None``)
+    are skipped, so a height that never reports simply produces no points rather
+    than a fake zero line. Each height becomes its own virtual ``device``.
+
+    Returns records with keys: device, height, measurement, time, value.
+    """
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        physical_id = row.get("device_id", "")
+        for measurement in WIRE_SENSOR_MEASUREMENTS:
+            for height in WIRE_SENSOR_HEIGHTS:
+                value = row.get(f"{measurement}{height}")
+                if value is not None:
+                    records.append({
+                        "device": wire_device_id(physical_id, height),
+                        "height": height,
+                        "measurement": measurement,
+                        "time": row["received_at"],
+                        "value": float(value),
+                    })
+    return records
 
 
 class MySQLConnection:
@@ -459,6 +527,92 @@ class MySQLConnection:
             df["time"] = pd.to_datetime(df["time"], utc=True)
             df = df.sort_values("time")
         return df
+
+    async def get_wire_sensor_readings(
+        self,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        limit: int = 500000,
+    ) -> pd.DataFrame:
+        """Fetch multi-height wire-sensor readings from the wire_sensors table.
+
+        The table is wide (the four measurement types at five heights spread
+        across 20 columns); this unpivots them into a tidy long frame so each
+        height can be drawn as its own line. Each height is surfaced as its own
+        virtual ``device`` (e.g. ``WS_01_01-h3``) per ADR 0001.
+
+        Args:
+            start: Start datetime filter (inclusive)
+            end: End datetime filter (exclusive)
+            limit: Maximum rows to fetch
+
+        Returns:
+            DataFrame with columns: device, height, measurement, time, value
+        """
+        if not self.pool:
+            raise RuntimeError("Not connected")
+
+        conditions = []
+        params: list[Any] = []
+        if start:
+            conditions.append("received_at >= %s")
+            params.append(start)
+        if end:
+            conditions.append("received_at < %s")
+            params.append(end)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        columns_sql = ", ".join(["device_id", "received_at", *wire_value_columns()])
+
+        async with self.pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cursor:
+            query = f"""
+                SELECT {columns_sql}
+                FROM {WIRE_SENSORS_TABLE}
+                {where_clause}
+                ORDER BY received_at DESC
+                LIMIT {limit}
+            """
+            await cursor.execute(query, params)
+            rows = list(reversed(await cursor.fetchall()))
+
+        columns = ["device", "height", "measurement", "time", "value"]
+        records = unpivot_wire_rows(rows)
+        df = pd.DataFrame(records, columns=columns)
+        if not df.empty:
+            df["time"] = pd.to_datetime(df["time"], utc=True)
+            df = df.sort_values("time")
+        return df
+
+    async def get_wire_device_summary(self) -> dict[str, dict[str, Any]]:
+        """Per virtual wire device: reading count and last-seen, for the explorer.
+
+        Counts are per physical row (each row carries every height), so all
+        heights of a wire share the same total — an honest approximation given
+        the wide layout. Returns ``{device_id: {"readings", "last_seen"}}`` keyed
+        by the virtual ``-hN`` ids.
+        """
+        if not self.pool:
+            raise RuntimeError("Not connected")
+
+        async with self.pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cursor:
+            try:
+                await cursor.execute(
+                    f"SELECT device_id, COUNT(*) AS readings, "
+                    f"MAX(received_at) AS last_seen "
+                    f"FROM {WIRE_SENSORS_TABLE} GROUP BY device_id"
+                )
+                rows = await cursor.fetchall()
+            except Exception:
+                return {}
+
+        summary: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            for height in WIRE_SENSOR_HEIGHTS:
+                summary[wire_device_id(row["device_id"], height)] = {
+                    "readings": int(row["readings"] or 0),
+                    "last_seen": row["last_seen"],
+                }
+        return summary
 
     async def get_weather_station_readings(
         self,

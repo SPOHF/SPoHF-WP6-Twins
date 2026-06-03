@@ -32,6 +32,9 @@ def red_metadata() -> MetadataRegistry:
 def mock_mysql(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     """Replace the global MySQL connection with an AsyncMock."""
     db = AsyncMock()
+    # Wire leg defaults to empty so explorer enumerations don't choke on a mock;
+    # tests that exercise the wire override this.
+    db.get_wire_device_summary.return_value = {}
     monkeypatch.setattr(red_deps, "db", db)
     return db
 
@@ -348,6 +351,65 @@ async def test_invalidate_caches_drops_both_cagg_and_coverage(
     devices = await provider.fetch_device_data()
     assert mock_tsdb_cagg.await_count == 2  # cache was dropped
     assert devices["neurath-B-2034-strabelina"]["readings"] == 42
+
+
+def test_init_enumerates_wire_devices_from_metadata(
+    red_metadata: MetadataRegistry,
+) -> None:
+    """Devices typed `wire` form the third routing leg, each with 4 sensors."""
+    provider = RedSensorProvider(metadata=red_metadata)
+
+    assert "WS_01_01-h1" in provider.wire_devices
+    assert "WS_01_01-h5" in provider.wire_devices
+    assert set(provider.wire_devices["WS_01_01-h3"]) == {"par", "temp", "hum", "co2"}
+    # The retired PAR-only multi-height sensors are gone.
+    assert "s2100-10-par" not in provider.wire_devices
+
+
+async def test_fetch_device_data_includes_wire_devices(
+    red_metadata: MetadataRegistry,
+    mock_mysql: AsyncMock,
+    mock_tsdb_cagg: AsyncMock,
+) -> None:
+    """Wire devices appear in the explorer with their declared sensors + counts."""
+    mock_mysql.get_all_devices.return_value = {}
+    mock_mysql.get_wire_device_summary.return_value = {
+        "WS_01_01-h1": {"readings": 1234, "last_seen": None},
+    }
+    provider = RedSensorProvider(metadata=red_metadata)
+
+    devices = await provider.fetch_device_data()
+
+    assert "WS_01_01-h1" in devices
+    assert set(devices["WS_01_01-h1"]["sensors"]) == {"par", "temp", "hum", "co2"}
+    assert devices["WS_01_01-h1"]["readings"] == 1234
+
+
+async def test_fetch_data_routes_wire_device_to_wire_table(
+    red_metadata: MetadataRegistry,
+    mock_mysql: AsyncMock,
+    mock_tsdb_fetch_data: AsyncMock,
+) -> None:
+    """A wire device request hits the wire reader, not the legacy MySQL leg."""
+    mock_mysql.get_wire_sensor_readings.return_value = pd.DataFrame([
+        {"device": "WS_01_01-h3", "height": 3, "measurement": "par",
+         "time": pd.Timestamp("2026-05-26T12:00:00", tz=UTC), "value": 7.0},
+        {"device": "WS_01_01-h3", "height": 3, "measurement": "temp",
+         "time": pd.Timestamp("2026-05-26T12:00:00", tz=UTC), "value": 26.0},
+    ])
+    provider = RedSensorProvider(metadata=red_metadata)
+
+    df = await provider.fetch_data(
+        sensor_tags=["par"], device_names=["WS_01_01-h3"],
+    )
+
+    mock_mysql.get_wire_sensor_readings.assert_awaited_once()
+    mock_mysql.get_readings_for_comparison.assert_not_awaited()
+    mock_tsdb_fetch_data.assert_not_awaited()
+    assert list(df.columns) == ["device", "sensor", "time", "value"]
+    # Only the requested sensor survives; height is folded into the device id.
+    assert set(df["sensor"]) == {"par"}
+    assert df.iloc[0]["device"] == "WS_01_01-h3"
 
 
 async def test_fetch_daily_coverage_merges_mysql_and_tsdb(

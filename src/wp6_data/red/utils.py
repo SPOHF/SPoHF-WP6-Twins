@@ -13,13 +13,9 @@ PAR_COLORSCALE = [
     [1.00, "#cc4c02"],
 ]
 
-SENSOR_TO_DEVICE = {
-    "s_10": "s2100:s2100-10-par",
-    "s_11": "s2100:s2100-11-par",
-    "s_12": "s2100:s2100-12-par",
-    "s_13": "s2100:s2100-13-par",
-    "s_14": "s2100:s2100-14-par",
-}
+# Greenhouse SVG box ids encode the height directly (``height_1`` .. ``height_5``);
+# the wire device is derived from the selected wire + height (ADR 0001), so no
+# fixed box→device map is needed here.
 
 
 def svg_to_data_uri(path: pathlib.Path) -> str:

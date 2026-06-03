@@ -168,30 +168,109 @@ devices:
       par:
         intention: "Measures PAR at plant height"
 
-  # ── Multi-height PAR sensors on a vertical wire (s2100-10..15) ──
-  "s2100-10-par":
+  # ── Multi-height wire sensor (WS_01_01): 4 measurements × 5 heights ──
+  # Each height is its own device, served from the wide wire_sensors table
+  # (see red ADR 0001). Replaces the retired PAR-only s2100-10..15 sensors.
+  "WS_01_01-h1":
+    description: "Multi-height wire — height 1"
     position: "B"
-    type: "multi-height"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
 
-  "s2100-11-par":
+  "WS_01_01-h2":
+    description: "Multi-height wire — height 2"
     position: "B"
-    type: "multi-height"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
 
-  "s2100-12-par":
+  "WS_01_01-h3":
+    description: "Multi-height wire — height 3"
     position: "B"
-    type: "multi-height"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
 
-  "s2100-13-par":
+  "WS_01_01-h4":
+    description: "Multi-height wire — height 4"
     position: "B"
-    type: "multi-height"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
 
-  "s2100-14-par":
+  "WS_01_01-h5":
+    description: "Multi-height wire — height 5"
     position: "B"
-    type: "multi-height"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
 
-  "s2100-15-par":
+  # Second multi-height wire (WS_01_02).
+  "WS_01_02-h1":
+    description: "Multi-height wire 2 — height 1"
     position: "B"
-    type: "multi-height"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
+
+  "WS_01_02-h2":
+    description: "Multi-height wire 2 — height 2"
+    position: "B"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
+
+  "WS_01_02-h3":
+    description: "Multi-height wire 2 — height 3"
+    position: "B"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
+
+  "WS_01_02-h4":
+    description: "Multi-height wire 2 — height 4"
+    position: "B"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
+
+  "WS_01_02-h5":
+    description: "Multi-height wire 2 — height 5"
+    position: "B"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
 
   "s2101-01-temp-hum":
     position: "B"
