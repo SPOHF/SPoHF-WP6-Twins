@@ -10,15 +10,15 @@
 # shared/ stays twin-agnostic; a red-side loader reads it.
 growth_sections:
   - height: 1
-    label: "Kop"
+    label: "Head"
   - height: 2
-    label: "Bloeiende tros"
+    label: "Flowering truss"
   - height: 3
-    label: "Vruchtzetting"
+    label: "Fruit set"
   - height: 4
-    label: "Afrijping"
+    label: "Ripening"
   - height: 5
-    label: "Substraat/wortelzone"
+    label: "Substrate / root zone"
 
 # ── Risk thresholds (red prescriptive view, issue 014 / ADR 0002) ──
 # PROVISIONAL values — retune against real wire data (the engine and CLI exist
