@@ -509,17 +509,15 @@ function ccChart(td){
 
 
 def _plant_zone_cell(index: int, total: int, uri: str) -> str:
-    """Center separator: this row's vertical slice of the plant SVG.
+    """Left rail: this row's vertical slice of the plant SVG.
 
     The full SVG is cropped to the row's zone via a negative offset, so the rows
-    together reconstruct the whole plant while each row stays independent — that
-    lets a detail row expand between rows without breaking a rowspan. The plant
-    sits between the measured (left) and derived (right) columns.
+    together reconstruct the whole plant while each row stays independent (a
+    detail row can expand between rows without breaking a rowspan).
     """
     return (
         '<td style="padding:0;width:90px;vertical-align:middle;">'
-        f'<div style="height:{CROP_ROW_HEIGHT}px;width:80px;overflow:hidden;'
-        'margin:auto;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;">'
+        f'<div style="height:{CROP_ROW_HEIGHT}px;width:80px;overflow:hidden;margin:auto;">'
         f'<img src="{uri}" width="80" height="{total * CROP_ROW_HEIGHT}" '
         f'style="display:block;margin-top:-{index * CROP_ROW_HEIGHT}px;"></div></td>'
     )
@@ -586,16 +584,42 @@ def _measurement_cell(series, measurement, vmin, vmax, height):
 
 
 ### Derived risk columns (issue 016) — threshold-free trends, computed on read ###
-HEIGHT_DLI_COLOR = "#16a34a"
-FUNGAL_COLOR = "#7c3aed"
+# Derived metrics share their source measurement's colour to show the lineage:
+# DLI ← PAR, Fungal ← Humidity. VPD ← Temp + Humidity, so it gets a red→cyan
+# gradient (two parents) rather than a single colour.
+HEIGHT_DLI_COLOR = MEASUREMENT_COLORS["par"]
+FUNGAL_COLOR = MEASUREMENT_COLORS["hum"]
 VPD_LINE_COLOR = "#0ea5e9"
 DERIVED_COLUMNS = ["Height DLI", "VPD", "Fungal risk"]
 
+# Vertical separator between the measured (left) and derived (right) blocks.
+SEP_BORDER = "border-left:2px solid #cbd5e1;"
+_VPD_GRADIENT = (
+    f"linear-gradient(90deg,{MEASUREMENT_COLORS['temp']},{MEASUREMENT_COLORS['hum']})"
+)
+# Inline style for a derived value's text (its lineage colour).
+DERIVED_VALUE_STYLE = {
+    "dli": f"color:{HEIGHT_DLI_COLOR};",
+    "vpd": f"background:{_VPD_GRADIENT};-webkit-background-clip:text;"
+           "background-clip:text;color:transparent;",
+    "fungal": f"color:{FUNGAL_COLOR};",
+}
+# Coloured header underlines tying each derived column to its source(s).
+DERIVED_HEADER_ACCENTS = {
+    "Height DLI": f"border-bottom:3px solid {HEIGHT_DLI_COLOR};{SEP_BORDER}",
+    "VPD": f"border-width:0 0 3px;border-style:solid;border-image:{_VPD_GRADIENT} 1;",
+    "Fungal risk": f"border-bottom:3px solid {FUNGAL_COLOR};",
+}
+
 
 def _derived_cell(value: str, spark: str, height, metric: str) -> str:
+    # The first derived column (DLI) carries the vertical separator border.
+    td = _cell_open(height, metric, SEP_BORDER if metric == "dli" else "")
+    vstyle = DERIVED_VALUE_STYLE.get(metric, "")
     return (
-        _cell_open(height, metric)
-        + f'<div style="font-weight:600;font-size:0.9rem;">{value}</div>{spark}</td>'
+        td
+        + f'<div style="font-weight:600;font-size:0.9rem;{vstyle}">{value}</div>'
+        + f"{spark}</td>"
     )
 
 
@@ -725,12 +749,14 @@ async def crop_climate_page(
     as_of = max((r["built_at"] for r in state_by_height.values()), default=None)
 
     measured_headers = "".join(
-        f'<th style="padding:0.5rem 0.75rem;text-align:left;">'
+        f'<th style="padding:0.5rem 0.75rem;text-align:left;'
+        f'border-bottom:3px solid {MEASUREMENT_COLORS[m]};">'
         f"{WIRE_MEASUREMENT_LABELS[m][0]}</th>"
         for m in WIRE_SENSOR_MEASUREMENTS
     )
     derived_headers = "".join(
-        f'<th style="padding:0.5rem 0.75rem;text-align:left;">{h}</th>'
+        f'<th style="padding:0.5rem 0.75rem;text-align:left;{DERIVED_HEADER_ACCENTS[h]}">'
+        f"{h}</th>"
         for h in DERIVED_COLUMNS
     )
 
@@ -776,9 +802,8 @@ async def crop_climate_page(
         )
         rows_html += (
             f"<tr style='border-top:1px solid #e5e7eb;height:{CROP_ROW_HEIGHT}px;'>"
-            f"{label_cell}{measured}"
             f"{_plant_zone_cell(i, len(sections), plant_uri)}"
-            f"{derived}</tr>"
+            f"{label_cell}{measured}{derived}</tr>"
         )
 
     table_date = target_day.date().isoformat()
@@ -786,9 +811,9 @@ async def crop_climate_page(
         f'<table data-wire="{wire}" data-date="{table_date}" '
         'style="width:100%;border-collapse:collapse;">'
         "<thead><tr>"
+        '<th style="width:90px;text-align:center;">Plant</th>'
         '<th style="padding:0.5rem 0.75rem;text-align:left;">Growth section</th>'
         f"{measured_headers}"
-        '<th style="width:90px;text-align:center;">Plant</th>'
         f"{derived_headers}"
         "</tr></thead>"
         f"<tbody>{rows_html}</tbody></table>"

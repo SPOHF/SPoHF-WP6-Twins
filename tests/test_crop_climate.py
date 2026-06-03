@@ -188,6 +188,22 @@ class TestDerivedCells:
     def test_vpd_sparkline_too_few_points(self):
         assert "polyline" not in _vpd_sparkline_svg([0.5], 0.4, 1.2)
 
+    def test_dli_value_uses_source_colour_and_separator(self):
+        from wp6_data.red.routes.multi_height import HEIGHT_DLI_COLOR
+
+        df = pd.DataFrame({"time": [_at(0), _at(15), _at(30)], "value": [100.0] * 3})
+        out = _height_dli_cell(df, 1)
+        assert HEIGHT_DLI_COLOR in out  # DLI value coloured like its source (PAR)
+        assert "border-left" in out     # vertical separator before the derived block
+
+    def test_vpd_value_uses_two_parent_gradient(self):
+        df = pd.DataFrame({
+            "time": [_at(0), _at(0), _at(15), _at(15)],
+            "measurement": ["temp", "hum", "temp", "hum"],
+            "value": [25.0, 60.0, 26.0, 55.0],
+        })
+        assert "background-clip:text" in _vpd_cell(df, 0.4, 1.2, 1)
+
 
 class TestSectionBadges:
     def test_no_state_is_empty(self):
