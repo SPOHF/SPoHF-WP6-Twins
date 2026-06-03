@@ -1,6 +1,6 @@
 # Derived risk trendline columns (VPD / Fungal-risk / Height DLI)
 
-**Status:** ready-for-agent
+**Status:** ✅ Completed and verified 2026-06-03
 
 ## Design source
 

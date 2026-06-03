@@ -1,6 +1,6 @@
 # Crop Climate by Height — read-only table view
 
-**Status:** ready-for-agent
+**Status:** ✅ Completed and verified 2026-06-03
 
 ## Design source
 

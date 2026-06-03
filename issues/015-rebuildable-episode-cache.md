@@ -1,6 +1,6 @@
 # Rebuildable risk-episode cache + admin Update/Rebuild
 
-**Status:** ready-for-agent
+**Status:** ✅ Completed and verified 2026-06-03 (store e2e-validated against wp6_red)
 
 ## Design source
 

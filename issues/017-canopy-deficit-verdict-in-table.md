@@ -1,6 +1,6 @@
 # Canopy-deficit verdict indicator in the table
 
-**Status:** ready-for-agent
+**Status:** ✅ Completed 2026-06-03 — satisfied by issue 015's persisted verdict, surfaced as in-table prescriptive risk badges in the growth-section column
 
 ## Design source
 

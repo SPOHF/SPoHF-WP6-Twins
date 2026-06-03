@@ -1,6 +1,6 @@
 # Risk engine + `wp6-red-eval-risk` CLI
 
-**Status:** ready-for-agent
+**Status:** ✅ Completed and verified 2026-06-03 (CLI-validated against prod wire data)
 
 ## Design source
 
