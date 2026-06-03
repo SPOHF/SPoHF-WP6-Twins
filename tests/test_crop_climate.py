@@ -22,9 +22,9 @@ from wp6_data.red.routes.multi_height import (
     _fmt_duration,
     _fungal_cell,
     _height_dli_cell,
+    _section_badges,
     _series_for,
     _sparkline_svg,
-    _status_cell,
     _vpd_cell,
     _vpd_sparkline_svg,
 )
@@ -189,22 +189,22 @@ class TestDerivedCells:
         assert "polyline" not in _vpd_sparkline_svg([0.5], 0.4, 1.2)
 
 
-class TestStatusCell:
-    def test_no_state_renders_dash(self):
-        assert "—" in _status_cell(None)
+class TestSectionBadges:
+    def test_no_state_is_empty(self):
+        assert _section_badges(None) == ""
 
-    def test_badges_reflect_persisted_state(self):
+    def test_only_active_risks_render(self):
         state = {"height": 1, "canopy_deficit": True, "fungal_active": False,
                  "vpd_in_band": False}
-        out = _status_cell(state)
+        out = _section_badges(state)
         assert "Light" in out
         assert "VPD" in out
         assert "Fungal" not in out
 
-    def test_ok_when_no_flags(self):
+    def test_healthy_section_has_no_badges(self):
         state = {"height": 1, "canopy_deficit": False, "fungal_active": False,
                  "vpd_in_band": True}
-        assert ">OK<" in _status_cell(state)
+        assert _section_badges(state) == ""
 
 
 class TestAdminBuildPanel:

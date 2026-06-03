@@ -660,12 +660,14 @@ def _fungal_cell(hum_df, rh_pct, window_hours, height):
     )
 
 
-def _section_label_cell(section):
-    """Left rail cell for one growth section (placeholder for the plant SVG)."""
+def _section_label_cell(section, state=None):
+    """Growth-section label, with any active-risk badges beneath it."""
+    badges = _section_badges(state)
+    badge_html = f'<div style="margin-top:4px;">{badges}</div>' if badges else ""
     return (
         '<td style="padding:0.5rem 0.75rem;font-weight:600;white-space:nowrap;">'
         f'<span style="color:#6b7280;">H{section.height}</span> · '
-        f"{html.escape(section.label)}</td>"
+        f"{html.escape(section.label)}{badge_html}</td>"
     )
 
 
@@ -770,9 +772,9 @@ async def crop_climate_page(
         )
         rows_html += (
             f"<tr style='border-top:1px solid #e5e7eb;height:{CROP_ROW_HEIGHT}px;'>"
-            f"{_section_label_cell(section)}{measured}"
+            f"{_section_label_cell(section, state_by_height.get(h))}{measured}"
             f"{_plant_zone_cell(i, len(sections), plant_uri)}"
-            f"{derived}{_status_cell(state_by_height.get(h))}</tr>"
+            f"{derived}</tr>"
         )
 
     table_date = target_day.date().isoformat()
@@ -784,7 +786,6 @@ async def crop_climate_page(
         f"{measured_headers}"
         '<th style="width:90px;text-align:center;">Plant</th>'
         f"{derived_headers}"
-        '<th style="padding:0.5rem 0.75rem;text-align:left;">Status</th>'
         "</tr></thead>"
         f"<tbody>{rows_html}</tbody></table>"
     )
@@ -829,14 +830,14 @@ def _badge(text: str, color: str) -> str:
     )
 
 
-def _status_cell(state) -> str:
-    """Per-row verdict badges read from the persisted cache (no recompute).
+def _section_badges(state) -> str:
+    """Active-risk badges for a section from its persisted state (no recompute).
 
-    ``state`` is the ``risk_state`` row for this height, or ``None`` if the log
-    has never been built.
+    Only *active* risks render — no "OK" or placeholder, so a healthy section
+    stays clean. Empty string when ``state`` is absent or nothing is flagged.
     """
-    if state is None:
-        return '<td style="padding:0.5rem 0.75rem;color:#9ca3af;">—</td>'
+    if not state:
+        return ""
     badges = []
     if state.get("canopy_deficit"):
         badges.append(_badge("Light", "#b45309"))
@@ -844,8 +845,7 @@ def _status_cell(state) -> str:
         badges.append(_badge("Fungal", "#7c3aed"))
     if state.get("vpd_in_band") is False:
         badges.append(_badge("VPD", "#b91c1c"))
-    inner = "".join(badges) or _badge("OK", "#16a34a")
-    return f'<td style="padding:0.5rem 0.75rem;vertical-align:middle;">{inner}</td>'
+    return "".join(badges)
 
 
 def _admin_build_panel(wire: str, day: date) -> str:
