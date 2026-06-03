@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from wp6_data.red.db import WIRE_SENSOR_HEIGHTS, wire_device_id
-from wp6_data.red.growth_sections import GrowthSection, load_growth_sections
+from wp6_data.red.growth_sections import load_growth_sections
 from wp6_data.red.routes.multi_height import (
     MULTI_HEIGHT_VIEWS,
     _admin_build_panel,
@@ -24,7 +24,7 @@ from wp6_data.red.routes.multi_height import (
     _height_dli_cell,
     _series_for,
     _sparkline_svg,
-    _verdict_panel,
+    _status_cell,
     _vpd_cell,
     _vpd_sparkline_svg,
 )
@@ -121,39 +121,44 @@ class TestPlantRail:
         viewbox = ET.parse(PLANT_SVG_PATH).getroot().attrib["viewBox"].split()
         assert int(viewbox[3]) == len(WIRE_SENSOR_HEIGHTS) * CROP_ROW_HEIGHT
 
-    def test_rail_cell_spans_all_sections_and_sizes_svg(self):
-        from wp6_data.red.routes.multi_height import CROP_ROW_HEIGHT, _plant_rail_cell
+    def test_zone_cell_crops_to_its_row(self):
+        from wp6_data.red.routes.multi_height import CROP_ROW_HEIGHT, _plant_zone_cell
 
-        html = _plant_rail_cell(len(WIRE_SENSOR_HEIGHTS))
-        assert f'rowspan="{len(WIRE_SENSOR_HEIGHTS)}"' in html
-        assert f'height="{len(WIRE_SENSOR_HEIGHTS) * CROP_ROW_HEIGHT}"' in html
+        total = len(WIRE_SENSOR_HEIGHTS)
+        html = _plant_zone_cell(2, total, "data:image/svg+xml;base64,XYZ")
+        # Full SVG sized to all rows, offset up to show this row's zone.
+        assert f'height="{total * CROP_ROW_HEIGHT}"' in html
+        assert f"margin-top:-{2 * CROP_ROW_HEIGHT}px" in html
         assert "data:image/svg+xml" in html
 
 
 class TestMeasurementCell:
-    def test_cell_has_relative_background_and_latest_value(self):
+    def test_cell_has_relative_background_value_and_is_clickable(self):
         from wp6_data.red.routes.multi_height import _measurement_cell
 
-        html = _measurement_cell([10.0, 20.0], "temp", 0.0, 20.0)
+        html = _measurement_cell([10.0, 20.0], "temp", 0.0, 20.0, 1)
         assert "background:rgba(" in html
         assert "20.0" in html  # latest value rendered
+        assert 'data-metric="temp"' in html  # clickable for chart expansion
+        assert 'data-height="1"' in html
 
     def test_empty_series_renders_placeholder(self):
         from wp6_data.red.routes.multi_height import _measurement_cell
 
-        assert "—" in _measurement_cell([], "par", 0.0, 1.0)
+        assert "—" in _measurement_cell([], "par", 0.0, 1.0, 1)
 
 
 class TestDerivedCells:
     def test_height_dli_cell_shows_total_and_sparkline(self):
         # n readings -> n-1 cumulative points; need 3+ for a drawable line.
         df = pd.DataFrame({"time": [_at(0), _at(15), _at(30)], "value": [100.0] * 3})
-        out = _height_dli_cell(df)
+        out = _height_dli_cell(df, 1)
         assert "mol" in out
         assert "polyline" in out
+        assert 'data-metric="dli"' in out  # clickable
 
     def test_height_dli_cell_empty(self):
-        assert "—" in _height_dli_cell(pd.DataFrame(columns=["time", "value"]))
+        assert "—" in _height_dli_cell(pd.DataFrame(columns=["time", "value"]), 1)
 
     def test_vpd_cell_renders_value_and_band(self):
         df = pd.DataFrame({
@@ -161,17 +166,17 @@ class TestDerivedCells:
             "measurement": ["temp", "hum", "temp", "hum"],
             "value": [25.0, 60.0, 26.0, 55.0],
         })
-        out = _vpd_cell(df, 0.4, 1.2)
+        out = _vpd_cell(df, 0.4, 1.2, 1)
         assert "kPa" in out
         assert "<rect" in out  # shaded healthy band
 
     def test_vpd_cell_empty(self):
         empty = pd.DataFrame(columns=["time", "measurement", "value"])
-        assert "—" in _vpd_cell(empty, 0.4, 1.2)
+        assert "—" in _vpd_cell(empty, 0.4, 1.2, 1)
 
     def test_fungal_cell_shows_hours(self):
         df = pd.DataFrame({"time": [_at(0), _at(15), _at(30)], "value": [90.0, 90.0, 90.0]})
-        out = _fungal_cell(df, 85.0, 24.0)
+        out = _fungal_cell(df, 85.0, 24.0, 1)
         assert " h" in out
         assert "polyline" in out
 
@@ -184,25 +189,22 @@ class TestDerivedCells:
         assert "polyline" not in _vpd_sparkline_svg([0.5], 0.4, 1.2)
 
 
-class TestVerdictPanel:
-    _SECTIONS = [GrowthSection(height=1, label="Kop")]
-
-    def test_empty_state_prompts_for_build(self):
-        out = _verdict_panel(self._SECTIONS, {}, None)
-        assert "No evaluation yet" in out
+class TestStatusCell:
+    def test_no_state_renders_dash(self):
+        assert "—" in _status_cell(None)
 
     def test_badges_reflect_persisted_state(self):
-        state = {1: {"height": 1, "canopy_deficit": True, "fungal_active": False,
-                     "vpd_in_band": False}}
-        out = _verdict_panel(self._SECTIONS, state, None)
-        assert "Light deficit" in out
-        assert "VPD out of band" in out
-        assert "Fungal risk" not in out
+        state = {"height": 1, "canopy_deficit": True, "fungal_active": False,
+                 "vpd_in_band": False}
+        out = _status_cell(state)
+        assert "Light" in out
+        assert "VPD" in out
+        assert "Fungal" not in out
 
     def test_ok_when_no_flags(self):
-        state = {1: {"height": 1, "canopy_deficit": False, "fungal_active": False,
-                     "vpd_in_band": True}}
-        assert ">OK<" in _verdict_panel(self._SECTIONS, state, None)
+        state = {"height": 1, "canopy_deficit": False, "fungal_active": False,
+                 "vpd_in_band": True}
+        assert ">OK<" in _status_cell(state)
 
 
 class TestAdminBuildPanel:
