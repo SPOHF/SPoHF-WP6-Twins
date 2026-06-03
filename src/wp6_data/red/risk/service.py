@@ -29,6 +29,7 @@ async def build_range(wire: str, start_utc: datetime, end_utc: datetime) -> Risk
         df = df[df["device"].map(wire_physical_id) == wire]
 
     thresholds = load_risk_thresholds(deps._METADATA_PATH)
-    evaluation = evaluate(df, deps.growth_sections, thresholds)
+    tz = deps.base_settings.display_timezone
+    evaluation = evaluate(df, deps.growth_sections, thresholds, tz)
     await store.persist_build(get_pool(), wire, start_utc, end_utc, evaluation)
     return evaluation

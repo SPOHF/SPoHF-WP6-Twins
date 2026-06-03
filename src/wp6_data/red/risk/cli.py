@@ -71,16 +71,19 @@ def format_evaluation(
         dli = "—" if s.height_dli is None else f"{s.height_dli:.1f}"
         vpd = "—" if s.vpd_latest is None else f"{s.vpd_latest:.2f}"
         wet = "—" if s.wet_hours_latest is None else f"{s.wet_hours_latest:.1f}"
+        co2 = "—" if s.co2_latest is None else f"{s.co2_latest:.0f}"
         flags = []
         if s.fungal_active:
             flags.append("FUNGAL")
         if s.vpd_in_band is False:
             flags.append("VPD-OOB")
+        if s.co2_depleted:
+            flags.append("CO2-LOW")
         if s.canopy_deficit:
             flags.append("LIGHT-DEFICIT")
         lines.append(
             f"  H{s.height} {s.label:<22} DLI={dli:>6} VPD={vpd:>5} "
-            f"wetH={wet:>5}  {' '.join(flags)}"
+            f"wetH={wet:>5} CO2={co2:>5}  {' '.join(flags)}"
         )
 
     lines += ["", f"Episodes ({len(result.episodes)}):"]
@@ -114,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         df = df[df["device"].map(wire_physical_id) == wire]
 
     thresholds = load_risk_thresholds(deps._METADATA_PATH)
-    result = evaluate(df, deps.growth_sections, thresholds)
+    result = evaluate(df, deps.growth_sections, thresholds, tz)
     print(format_evaluation(result, wire, start_day, end_day))
     return 0
 

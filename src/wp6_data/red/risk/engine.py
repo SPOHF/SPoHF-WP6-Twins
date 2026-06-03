@@ -1,10 +1,12 @@
 """Risk engine: tidy wire readings -> per-section state + risk episodes.
 
 Pure and side-effect-free (``evaluate`` does no I/O), so it runs identically from
-the CLI, a test, or a future background writer. Three risks per growth section:
+the CLI, a test, or a future background writer. Four risks per growth section:
 
 - **VPD** out-of-band — a time-series episode (severity = distance outside band).
 - **Fungal wet-hours** above the active level — a time-series episode.
+- **CO₂ depletion** — a time-series episode, but daylight-gated: a low level
+  matters only while PAR shows the canopy is lit and drawing CO₂ down.
 - **Canopy light deficit** — H1 only, a *daily* episode (the day's Height DLI
   below target); a daily integral has no sub-daily "active" moment.
 
@@ -24,7 +26,7 @@ import pandas as pd
 from ..growth_sections import GrowthSection
 from .config import RiskThresholds
 from .episodes import Episode, detect_episodes
-from .metrics import compute_dli, vpd_series, wet_hours_series
+from .metrics import co2_depletion_series, compute_dli, vpd_series, wet_hours_series
 
 
 @dataclass
@@ -38,6 +40,8 @@ class SectionState:
     vpd_in_band: bool | None
     wet_hours_latest: float | None
     fungal_active: bool | None
+    co2_latest: float | None
+    co2_depleted: bool | None  # daylight CO₂ below floor; None when never lit
     canopy_deficit: bool | None  # H1 only; None for the other sections
 
 
@@ -47,7 +51,7 @@ class RiskEpisodeRecord:
 
     height: int
     label: str
-    risk: str  # "vpd" | "fungal" | "canopy"
+    risk: str  # "vpd" | "fungal" | "co2" | "canopy"
     start: datetime
     end: datetime | None
     peak: float
@@ -84,19 +88,32 @@ def _vpd_snapshot(t: RiskThresholds) -> dict[str, Any]:
     }
 
 
+def _co2_snapshot(t: RiskThresholds) -> dict[str, Any]:
+    return {
+        "floor_ppm": t.co2.floor_ppm,
+        "daylight_par": t.co2.daylight_par,
+        "min_duration_minutes": t.episode.min_duration_minutes,
+    }
+
+
 def _canopy_snapshot(t: RiskThresholds) -> dict[str, Any]:
     return {"target_mol": t.canopy_dli.target_mol}
 
 
-def _latest_day_dli(height_df: pd.DataFrame) -> float | None:
-    """Height DLI for the most recent day present in this height's PAR."""
+def _latest_day_dli(height_df: pd.DataFrame, tz: str) -> float | None:
+    """Height DLI for the most recent local day present in this height's PAR.
+
+    Days are bucketed in ``tz`` (the display timezone) so the verdict matches the
+    local day the UI shows, not a UTC calendar day that can straddle midnight.
+    """
     if height_df.empty:
         return None
     par = height_df[height_df["measurement"] == "par"][["time", "value"]]
     if par.empty:
         return None
-    last_day = par["time"].dt.date.max()
-    return compute_dli(par[par["time"].dt.date == last_day])
+    local_date = par["time"].dt.tz_convert(tz).dt.date
+    last_day = local_date.max()
+    return compute_dli(par[local_date == last_day])
 
 
 def _vpd_episodes(height_df, section, t, min_dur) -> list[RiskEpisodeRecord]:
@@ -131,21 +148,39 @@ def _fungal_episodes(height_df, section, t, min_dur) -> list[RiskEpisodeRecord]:
     ]
 
 
-def _canopy_episodes(height_df, section, t) -> list[RiskEpisodeRecord]:
-    """One daily episode per day the canopy (H1) Height DLI is below target."""
+def _co2_episodes(height_df, section, t, min_dur) -> list[RiskEpisodeRecord]:
+    c = co2_depletion_series(height_df, t.co2.floor_ppm, t.co2.daylight_par)
+    if c.empty:
+        return []
+    vals = c["value"].to_numpy()
+    frame = pd.DataFrame(
+        {"time": c["time"].to_numpy(), "value": vals, "active": vals > 0}
+    )
+    return [
+        _record(section, "co2", ep, _co2_snapshot(t))
+        for ep in detect_episodes(frame, min_dur)
+    ]
+
+
+def _canopy_episodes(height_df, section, t, tz) -> list[RiskEpisodeRecord]:
+    """One daily episode per local day the canopy (H1) Height DLI is below target.
+
+    Days are bucketed in ``tz`` (and stamped at local midnight) so the daily
+    integral lines up with the local day the UI presents, not a UTC day.
+    """
     if height_df.empty:
         return []
     par = height_df[height_df["measurement"] == "par"][["time", "value"]].copy()
     if par.empty:
         return []
-    par["date"] = par["time"].dt.date
+    par["date"] = par["time"].dt.tz_convert(tz).dt.date
     days = sorted(par["date"].unique())
     out: list[RiskEpisodeRecord] = []
     for i, day in enumerate(days):
         dli = compute_dli(par[par["date"] == day][["time", "value"]])
         if dli is None or dli >= t.canopy_dli.target_mol:
             continue
-        start = pd.Timestamp(day, tz="UTC")
+        start = pd.Timestamp(day, tz=tz)
         end = None if i == len(days) - 1 else start + pd.Timedelta(days=1)
         ep = Episode(start=start, end=end, peak=float(t.canopy_dli.target_mol - dli))
         out.append(_record(section, "canopy", ep, _canopy_snapshot(t)))
@@ -156,13 +191,16 @@ def evaluate(
     df: pd.DataFrame,
     sections: list[GrowthSection],
     thresholds: RiskThresholds,
+    tz: str = "UTC",
 ) -> RiskEvaluation:
     """Evaluate all risks for every growth section over ``df`` (one wire's readings).
 
     ``df`` is tidy long with columns ``height``, ``measurement``, ``time``,
     ``value`` (as returned by ``get_wire_sensor_readings``, scoped to one wire).
     Returns the latest-known state per section plus every risk episode in the
-    window.
+    window. ``tz`` is the timezone the *daily* metrics (Height DLI, canopy
+    deficit) are bucketed in, so they align with the local day the UI shows;
+    it defaults to UTC for callers that don't care.
     """
     result = RiskEvaluation()
     if not sections:
@@ -176,6 +214,7 @@ def evaluate(
 
         result.episodes.extend(_vpd_episodes(hdf, section, thresholds, min_dur))
         result.episodes.extend(_fungal_episodes(hdf, section, thresholds, min_dur))
+        result.episodes.extend(_co2_episodes(hdf, section, thresholds, min_dur))
 
         v = vpd_series(hdf)
         vpd_latest = float(v["value"].iloc[-1]) if not v.empty else None
@@ -192,16 +231,22 @@ def evaluate(
             if wet_latest is not None else None
         )
 
-        hdli = _latest_day_dli(hdf)
+        co2 = hdf[hdf["measurement"] == "co2"][["time", "value"]].sort_values("time")
+        co2_latest = float(co2["value"].iloc[-1]) if not co2.empty else None
+        c = co2_depletion_series(hdf, thresholds.co2.floor_ppm, thresholds.co2.daylight_par)
+        co2_depleted = bool(c["value"].iloc[-1] > 0) if not c.empty else None
+
+        hdli = _latest_day_dli(hdf, tz)
         canopy_deficit = None
         if section.height == canopy.height:
             canopy_deficit = hdli is not None and hdli < thresholds.canopy_dli.target_mol
-            result.episodes.extend(_canopy_episodes(hdf, section, thresholds))
+            result.episodes.extend(_canopy_episodes(hdf, section, thresholds, tz))
 
         result.states.append(SectionState(
             height=section.height, label=section.label, height_dli=hdli,
             vpd_latest=vpd_latest, vpd_in_band=in_band,
             wet_hours_latest=wet_latest, fungal_active=fungal_active,
+            co2_latest=co2_latest, co2_depleted=co2_depleted,
             canopy_deficit=canopy_deficit,
         ))
 

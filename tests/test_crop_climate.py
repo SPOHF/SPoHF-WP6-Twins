@@ -262,6 +262,16 @@ class TestAuditLog:
         }
         assert "2h 30m" in _audit_table([ep])
 
+    def test_times_render_in_display_timezone(self):
+        # _T0 is 12:00 UTC; in Europe/Amsterdam (CEST in May) that reads 14:00.
+        ep = {
+            "height": 1, "label": "Head", "risk": "vpd",
+            "start_time": _T0, "end_time": None, "peak": 1.0, "thresholds": {},
+        }
+        out = _audit_table([ep], "Europe/Amsterdam")
+        assert "14:00 CEST" in out
+        assert "12:00 UTC" not in out
+
     def test_fmt_duration(self):
         assert _fmt_duration(timedelta(hours=2, minutes=30)) == "2h 30m"
         assert _fmt_duration(timedelta(minutes=45)) == "45m"

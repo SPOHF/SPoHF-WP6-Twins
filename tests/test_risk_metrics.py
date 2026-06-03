@@ -10,6 +10,7 @@ import pytest
 
 from wp6_data.red.risk.config import load_risk_thresholds
 from wp6_data.red.risk.metrics import (
+    co2_depletion_series,
     compute_dli,
     saturation_vapor_pressure_kpa,
     vpd_kpa,
@@ -30,6 +31,8 @@ class TestLoadRiskThresholds:
         assert t.fungal.rh_pct > 0
         assert t.vpd.band_min_kpa < t.vpd.band_max_kpa
         assert t.canopy_dli.target_mol > 0
+        assert t.co2.floor_ppm > 0
+        assert t.co2.daylight_par >= 0
         assert t.episode.min_duration_minutes > 0
 
     def test_missing_block_raises(self, tmp_path):
@@ -87,6 +90,38 @@ class TestVpd:
             "time": [_ts(h=12)], "measurement": ["temp"], "value": [20.0],
         })
         assert vpd_series(df).empty
+
+
+class TestCo2Depletion:
+    def _df(self, rows) -> pd.DataFrame:
+        """rows: list of (hour, co2, par) -> tidy long co2+par for one height."""
+        recs = []
+        for h, co2, par in rows:
+            recs.append({"time": _ts(h=h), "measurement": "co2", "value": co2})
+            recs.append({"time": _ts(h=h), "measurement": "par", "value": par})
+        return pd.DataFrame(recs)
+
+    def test_depletion_only_counts_while_lit(self):
+        # 12:00 lit + below floor -> severity; 02:00 dark + below floor -> ignored.
+        df = self._df([(2, 350.0, 0.0), (12, 350.0, 500.0)])
+        out = co2_depletion_series(df, floor_ppm=400.0, daylight_par=10.0)
+        assert list(out["time"]) == [_ts(h=12)]
+        assert out["value"].iloc[0] == pytest.approx(50.0)
+
+    def test_above_floor_is_zero_severity(self):
+        df = self._df([(12, 450.0, 500.0)])
+        out = co2_depletion_series(df, floor_ppm=400.0, daylight_par=10.0)
+        assert out["value"].tolist() == pytest.approx([0.0])
+
+    def test_empty_without_par_to_gate_on(self):
+        df = pd.DataFrame({
+            "time": [_ts(h=12)], "measurement": ["co2"], "value": [350.0],
+        })
+        assert co2_depletion_series(df, floor_ppm=400.0, daylight_par=10.0).empty
+
+    def test_empty_when_never_lit(self):
+        df = self._df([(2, 350.0, 0.0), (3, 360.0, 5.0)])
+        assert co2_depletion_series(df, floor_ppm=400.0, daylight_par=10.0).empty
 
 
 class TestWetHours:

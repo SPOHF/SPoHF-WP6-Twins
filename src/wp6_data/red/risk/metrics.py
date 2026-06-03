@@ -1,7 +1,7 @@
 """Pure metric functions for the red prescriptive view.
 
 All functions are side-effect-free and operate on tidy pandas frames so they are
-unit-testable without a database. Three families:
+unit-testable without a database. Four families:
 
 - **Height DLI** — the day's integral of per-height PAR (moved here from the
   multi-height route so the view and the risk engine share one integral; see
@@ -9,6 +9,8 @@ unit-testable without a database. Three families:
 - **VPD** — vapour-pressure deficit from temp + humidity at one height (Tetens).
 - **Fungal wet-hours** — trailing-window accumulation of time spent above a
   high-RH threshold (the Botrytis-pressure proxy).
+- **CO₂ depletion** — daylight-gated ppm below a carbon-limitation floor (PAR
+  shows the canopy is lit and therefore drawing CO₂ down).
 """
 
 from __future__ import annotations
@@ -104,6 +106,40 @@ def vpd_series(height_df: pd.DataFrame) -> pd.DataFrame:
     svp = 0.6108 * np.exp((17.27 * wide["temp"]) / (wide["temp"] + 237.3))
     vpd = svp * (1.0 - wide["hum"] / 100.0)
     return pd.DataFrame({"time": wide.index, "value": vpd.to_numpy()})
+
+
+### CO₂ depletion (daylight carbon-limitation) ###
+def co2_depletion_series(
+    height_df: pd.DataFrame, floor_ppm: float, daylight_par: float,
+) -> pd.DataFrame:
+    """Daylight CO₂-depletion severity over time for one height.
+
+    ``height_df`` is tidy long (columns ``time``, ``measurement``, ``value``)
+    for a single height. CO₂ and PAR are aligned on shared timestamps; a row is
+    only considered when PAR exceeds ``daylight_par`` (the canopy is lit by sun
+    or lamps, so it is photosynthesising and actually drawing CO₂ down). The
+    value is ``floor_ppm - co2`` clipped at 0 — i.e. how many ppm the level sits
+    below the floor while lit; 0 when above the floor or in the dark. Returns
+    ``time`` + ``value`` (ppm below floor), time-sorted. Empty when CO₂ or PAR is
+    absent, or no reading falls in daylight.
+    """
+    empty = pd.DataFrame(columns=["time", "value"])
+    if height_df.empty:
+        return empty
+
+    wide = height_df.pivot_table(
+        index="time", columns="measurement", values="value", aggfunc="last",
+    )
+    if "co2" not in wide.columns or "par" not in wide.columns:
+        return empty
+
+    lit = wide.dropna(subset=["co2", "par"]).sort_index()
+    lit = lit[lit["par"] > daylight_par]
+    if lit.empty:
+        return empty
+
+    severity = np.clip(floor_ppm - lit["co2"], 0, None)
+    return pd.DataFrame({"time": lit.index, "value": severity.to_numpy()})
 
 
 ### Fungal wet-hours ###

@@ -53,6 +53,7 @@ def _evaluation(*, with_episode: bool) -> RiskEvaluation:
         states=[SectionState(
             height=1, label="Kop", height_dli=0.5, vpd_latest=1.6,
             vpd_in_band=False, wet_hours_latest=0.0, fungal_active=False,
+            co2_latest=350.0, co2_depleted=True,
             canopy_deficit=True,
         )],
         episodes=episodes,
@@ -66,6 +67,8 @@ async def test_round_trip_state_and_episode(red_pool):
     assert len(state) == 1
     assert state[0]["canopy_deficit"] is True
     assert state[0]["vpd_in_band"] is False
+    assert state[0]["co2_depleted"] is True
+    assert state[0]["co2_latest"] == 350.0
 
     eps = await store.read_episodes(red_pool, WIRE, START, END)
     assert len(eps) == 1

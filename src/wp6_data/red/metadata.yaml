@@ -34,6 +34,9 @@ risk_thresholds:
     band_max_kpa: 1.2    # above = transpiration stress
   canopy_dli:
     target_mol: 22       # tomato DLI target at the canopy (H1), mol/m²/day
+  co2:
+    floor_ppm: 400       # daytime CO₂ (ppm) below this = carbon-limited (≈ambient)
+    daylight_par: 10     # PAR (µmol/m²/s) above which the floor applies (photoperiod)
   episode:
     min_duration_minutes: 30  # shorter spans are suppressed as flapping
 

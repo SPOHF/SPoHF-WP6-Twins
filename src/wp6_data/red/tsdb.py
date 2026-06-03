@@ -84,10 +84,18 @@ CREATE TABLE IF NOT EXISTS risk_state (
     vpd_in_band      BOOLEAN,
     wet_hours_latest DOUBLE PRECISION,
     fungal_active    BOOLEAN,
+    co2_latest       DOUBLE PRECISION,
+    co2_depleted     BOOLEAN,
     canopy_deficit   BOOLEAN,
     built_at         TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     PRIMARY KEY (wire, height)
 );
+
+-- The CO₂ columns were added after risk_state shipped; on an existing prod
+-- table the CREATE above is a no-op, so add them idempotently. risk_state is a
+-- rebuildable cache, so a one-time NULL default until the next build is fine.
+ALTER TABLE risk_state ADD COLUMN IF NOT EXISTS co2_latest   DOUBLE PRECISION;
+ALTER TABLE risk_state ADD COLUMN IF NOT EXISTS co2_depleted BOOLEAN;
 """
 
 # Shared audit table + red readings DDL + risk cache. Concatenation preserves the

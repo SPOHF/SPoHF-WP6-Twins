@@ -28,6 +28,7 @@ class TestFormatEvaluation:
             states=[SectionState(
                 height=1, label="Kop", height_dli=0.5, vpd_latest=2.0,
                 vpd_in_band=False, wet_hours_latest=3.0, fungal_active=True,
+                co2_latest=350.0, co2_depleted=True,
                 canopy_deficit=True,
             )],
             episodes=[RiskEpisodeRecord(
@@ -40,7 +41,7 @@ class TestFormatEvaluation:
     def test_renders_state_flags(self):
         out = format_evaluation(self._result(), "WS_01_01", date(2026, 5, 1), date(2026, 5, 7))
         assert "WS_01_01" in out
-        for flag in ("FUNGAL", "VPD-OOB", "LIGHT-DEFICIT"):
+        for flag in ("FUNGAL", "VPD-OOB", "CO2-LOW", "LIGHT-DEFICIT"):
             assert flag in out
 
     def test_renders_open_episode_as_ongoing(self):

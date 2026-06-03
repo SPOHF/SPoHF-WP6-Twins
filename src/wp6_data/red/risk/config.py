@@ -32,6 +32,14 @@ class CanopyDli(BaseModel):
     target_mol: float      # canopy (H1) DLI target, mol/m²/day
 
 
+class Co2Floor(BaseModel):
+    # CO₂ depletion is daylight-only: the crop draws CO₂ down while
+    # photosynthesising, so a low level matters only when PAR shows the canopy
+    # is lit (sun or lamps). Below the floor with the lights on = carbon-limited.
+    floor_ppm: float       # daytime CO₂ below this = carbon-limited (≈ambient)
+    daylight_par: float    # PAR above which the floor applies (photoperiod gate)
+
+
 class EpisodeConfig(BaseModel):
     min_duration_minutes: float
 
@@ -42,6 +50,7 @@ class RiskThresholds(BaseModel):
     fungal: FungalThresholds
     vpd: VpdBand
     canopy_dli: CanopyDli
+    co2: Co2Floor
     episode: EpisodeConfig
 
 

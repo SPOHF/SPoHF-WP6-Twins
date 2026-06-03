@@ -27,8 +27,9 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 _UPSERT_STATE = """
 INSERT INTO risk_state
     (wire, height, label, height_dli, vpd_latest, vpd_in_band,
-     wet_hours_latest, fungal_active, canopy_deficit, built_at)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+     wet_hours_latest, fungal_active, co2_latest, co2_depleted,
+     canopy_deficit, built_at)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
 ON CONFLICT (wire, height) DO UPDATE SET
     label            = EXCLUDED.label,
     height_dli       = EXCLUDED.height_dli,
@@ -36,6 +37,8 @@ ON CONFLICT (wire, height) DO UPDATE SET
     vpd_in_band      = EXCLUDED.vpd_in_band,
     wet_hours_latest = EXCLUDED.wet_hours_latest,
     fungal_active    = EXCLUDED.fungal_active,
+    co2_latest       = EXCLUDED.co2_latest,
+    co2_depleted     = EXCLUDED.co2_depleted,
     canopy_deficit   = EXCLUDED.canopy_deficit,
     built_at         = NOW()
 """
@@ -70,7 +73,8 @@ async def persist_build(
     state_rows = [
         (
             wire, s.height, s.label, s.height_dli, s.vpd_latest, s.vpd_in_band,
-            s.wet_hours_latest, s.fungal_active, s.canopy_deficit,
+            s.wet_hours_latest, s.fungal_active, s.co2_latest, s.co2_depleted,
+            s.canopy_deficit,
         )
         for s in evaluation.states
     ]
@@ -114,5 +118,22 @@ async def last_built_at(pool: AsyncConnectionPool, wire: str) -> datetime | None
     """When ``wire``'s state was last built, or ``None`` if never."""
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SELECT max(built_at) FROM risk_state WHERE wire = %s", (wire,))
+        row = await cur.fetchone()
+        return row[0] if row else None
+
+
+async def open_episode_floor(pool: AsyncConnectionPool, wire: str) -> datetime | None:
+    """Earliest start of an unresolved (``end_time IS NULL``) episode, or ``None``.
+
+    An incremental update starts no later than this so an episode still open at
+    the previous build boundary is recomputed as one whole span (and closed if it
+    has since resolved), instead of being orphaned as permanently "ongoing".
+    """
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT min(start_time) FROM risk_episodes "
+            "WHERE wire = %s AND end_time IS NULL",
+            (wire,),
+        )
         row = await cur.fetchone()
         return row[0] if row else None
