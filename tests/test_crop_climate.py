@@ -18,14 +18,24 @@ from wp6_data.red.growth_sections import GrowthSection, load_growth_sections
 from wp6_data.red.routes.multi_height import (
     MULTI_HEIGHT_VIEWS,
     _admin_build_panel,
+    _fungal_cell,
+    _height_dli_cell,
     _series_for,
     _sparkline_svg,
     _verdict_panel,
+    _vpd_cell,
+    _vpd_sparkline_svg,
 )
 
 RED_METADATA = (
     Path(__file__).parent.parent / "src/wp6_data/red/metadata.yaml"
 )
+
+_T0 = pd.Timestamp("2026-05-26T12:00:00", tz="UTC")
+
+
+def _at(minutes):
+    return _T0 + pd.Timedelta(minutes=minutes)
 
 
 class TestLoadGrowthSections:
@@ -130,6 +140,46 @@ class TestMeasurementCell:
         from wp6_data.red.routes.multi_height import _measurement_cell
 
         assert "—" in _measurement_cell([], "par", 0.0, 1.0)
+
+
+class TestDerivedCells:
+    def test_height_dli_cell_shows_total_and_sparkline(self):
+        # n readings -> n-1 cumulative points; need 3+ for a drawable line.
+        df = pd.DataFrame({"time": [_at(0), _at(15), _at(30)], "value": [100.0] * 3})
+        out = _height_dli_cell(df)
+        assert "mol" in out
+        assert "polyline" in out
+
+    def test_height_dli_cell_empty(self):
+        assert "—" in _height_dli_cell(pd.DataFrame(columns=["time", "value"]))
+
+    def test_vpd_cell_renders_value_and_band(self):
+        df = pd.DataFrame({
+            "time": [_at(0), _at(0), _at(15), _at(15)],
+            "measurement": ["temp", "hum", "temp", "hum"],
+            "value": [25.0, 60.0, 26.0, 55.0],
+        })
+        out = _vpd_cell(df, 0.4, 1.2)
+        assert "kPa" in out
+        assert "<rect" in out  # shaded healthy band
+
+    def test_vpd_cell_empty(self):
+        empty = pd.DataFrame(columns=["time", "measurement", "value"])
+        assert "—" in _vpd_cell(empty, 0.4, 1.2)
+
+    def test_fungal_cell_shows_hours(self):
+        df = pd.DataFrame({"time": [_at(0), _at(15), _at(30)], "value": [90.0, 90.0, 90.0]})
+        out = _fungal_cell(df, 85.0, 24.0)
+        assert " h" in out
+        assert "polyline" in out
+
+    def test_vpd_sparkline_has_band_and_line(self):
+        svg = _vpd_sparkline_svg([0.5, 2.0], 0.4, 1.2)
+        assert "<rect" in svg
+        assert "polyline" in svg
+
+    def test_vpd_sparkline_too_few_points(self):
+        assert "polyline" not in _vpd_sparkline_svg([0.5], 0.4, 1.2)
 
 
 class TestVerdictPanel:

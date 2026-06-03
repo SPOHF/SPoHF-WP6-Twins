@@ -24,7 +24,13 @@ from ..db import (
     wire_physical_id,
 )
 from ..risk import service, store
-from ..risk.metrics import compute_cumulative_dli, compute_dli
+from ..risk.config import load_risk_thresholds
+from ..risk.metrics import (
+    compute_cumulative_dli,
+    compute_dli,
+    vpd_series,
+    wet_hours_series,
+)
 from ..utils import (
     PAR_COLORSCALE,
     svg_rect_to_plotly_rect,
@@ -534,6 +540,76 @@ def _measurement_cell(series, measurement, vmin, vmax):
     )
 
 
+### Derived risk columns (issue 016) — threshold-free trends, computed on read ###
+HEIGHT_DLI_COLOR = "#16a34a"
+FUNGAL_COLOR = "#7c3aed"
+VPD_LINE_COLOR = "#0ea5e9"
+DERIVED_COLUMNS = ["Height DLI", "VPD", "Fungal risk"]
+
+
+def _derived_cell(value: str, spark: str) -> str:
+    return (
+        '<td style="padding:0.5rem 0.75rem;vertical-align:middle;">'
+        f'<div style="font-weight:600;font-size:0.9rem;">{value}</div>{spark}</td>'
+    )
+
+
+def _vpd_sparkline_svg(values, band_min, band_max, width=96, height=28):
+    """VPD sparkline on a fixed 0..max scale with the healthy band shaded.
+
+    Unlike the self-normalising raw sparkline, this fixes the y-domain so the
+    band rectangle is stable across cells and excursions read consistently.
+    """
+    pts = [float(v) for v in values if v is not None and not pd.isna(v)]
+    if len(pts) < 2:
+        return '<span style="color:#9ca3af;">—</span>'
+    vmax = (max(max(pts), band_max) * 1.05) or 1.0
+    last = len(pts) - 1
+
+    def _y(val):
+        return height - 1 - (val / vmax) * (height - 2)
+
+    band_top = _y(band_max)
+    band_h = max(0.0, _y(band_min) - band_top)
+    coords = " ".join(
+        f"{(i / last) * (width - 2) + 1:.1f},{_y(v):.1f}" for i, v in enumerate(pts)
+    )
+    return (
+        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+        'style="display:block;">'
+        f'<rect x="0" y="{band_top:.1f}" width="{width}" height="{band_h:.1f}" '
+        'fill="#16a34a" opacity="0.15"/>'
+        f'<polyline points="{coords}" fill="none" stroke="{VPD_LINE_COLOR}" '
+        'stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>'
+    )
+
+
+def _height_dli_cell(par_df):
+    cum = compute_cumulative_dli(par_df)
+    if cum is None or cum.empty:
+        return _derived_cell("—", _sparkline_svg([], HEIGHT_DLI_COLOR))
+    values = cum["cumulative_dli"].tolist()
+    return _derived_cell(f"{values[-1]:.1f} mol", _sparkline_svg(values, HEIGHT_DLI_COLOR))
+
+
+def _vpd_cell(height_df, band_min, band_max):
+    v = vpd_series(height_df)
+    if v.empty:
+        return _derived_cell("—", '<span style="color:#9ca3af;">—</span>')
+    values = v["value"].tolist()
+    return _derived_cell(
+        f"{values[-1]:.2f} kPa", _vpd_sparkline_svg(values, band_min, band_max)
+    )
+
+
+def _fungal_cell(hum_df, rh_pct, window_hours):
+    w = wet_hours_series(hum_df, rh_pct, window_hours)
+    if w.empty:
+        return _derived_cell("—", _sparkline_svg([], FUNGAL_COLOR))
+    values = w["value"].tolist()
+    return _derived_cell(f"{values[-1]:.1f} h", _sparkline_svg(values, FUNGAL_COLOR))
+
+
 def _section_label_cell(section):
     """Left rail cell for one growth section (placeholder for the plant SVG)."""
     return (
@@ -597,6 +673,11 @@ async def crop_climate_page(
         f"{WIRE_MEASUREMENT_LABELS[m][0]}</th>"
         for m in WIRE_SENSOR_MEASUREMENTS
     )
+    derived_headers = "".join(
+        f'<th style="padding:0.5rem 0.75rem;text-align:left;">{h}</th>'
+        for h in DERIVED_COLUMNS
+    )
+
     # Day's series per (height, measurement), computed once; per-column bounds
     # (latest value across the five heights) drive the relative cell tint.
     series_map = {
@@ -613,12 +694,23 @@ async def crop_climate_page(
         ]
         col_bounds[m] = (min(latests), max(latests)) if latests else (0.0, 1.0)
 
+    risk_t = load_risk_thresholds(deps._METADATA_PATH)
+
     rows_html = ""
     for i, section in enumerate(sections):
+        device = wire_device_id(wire, section.height)
         cells = "".join(
             _measurement_cell(series_map[(section.height, m)], m, *col_bounds[m])
             for m in WIRE_SENSOR_MEASUREMENTS
         )
+        # Derived trend columns: threshold-free, computed on read for this day.
+        hdf = df_day[df_day["device"] == device]
+        par_df = hdf[hdf["measurement"] == "par"][["time", "value"]]
+        hum_df = hdf[hdf["measurement"] == "hum"][["time", "value"]]
+        cells += _height_dli_cell(par_df)
+        cells += _vpd_cell(hdf, risk_t.vpd.band_min_kpa, risk_t.vpd.band_max_kpa)
+        cells += _fungal_cell(hum_df, risk_t.fungal.rh_pct, risk_t.fungal.window_hours)
+
         # The plant rail is a single cell on the first row, spanning all sections.
         rail = _plant_rail_cell(len(sections)) if i == 0 else ""
         rows_html += (
@@ -630,7 +722,7 @@ async def crop_climate_page(
         '<table style="width:100%;border-collapse:collapse;">'
         '<thead><tr><th style="width:88px;"></th>'
         '<th style="padding:0.5rem 0.75rem;text-align:left;">'
-        f"Growth section</th>{header_cells}</tr></thead>"
+        f"Growth section</th>{header_cells}{derived_headers}</tr></thead>"
         f"<tbody>{rows_html}</tbody></table>"
     )
 
