@@ -42,6 +42,7 @@ dev = [
 wp6-data-sync = "wp6_data.__main__:main"
 wp6-red-export = "wp6_data.red.export:main"
 wp6-red-ingest-sijia = "wp6_data.red.sijia.ingest:main"
+wp6-red-eval-risk = "wp6_data.red.risk.cli:main"
 wp6-blue-export = "wp6_data.blue.export:main"
 wp6-blue-ingest-insects = "wp6_data.blue.manual:ingest_insects"
 wp6-blue-ingest-long-data = "wp6_data.blue.manual:ingest_long_data"

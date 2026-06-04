@@ -47,3 +47,6 @@ uploads-blue/
 # Experiments with dashboards
 dev/
 .ipynb_checkpoints/
+
+# workflow issues ignore
+issues/

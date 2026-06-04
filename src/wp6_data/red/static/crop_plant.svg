@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 360" width="80" height="360">
+  <!-- Stylised tomato plant, five 72px growth zones (Head, Flowering, Fruit set,
+       Ripening, Substrate). Keep the 80x360 viewBox + five-zone layout so the
+       per-row slices stay aligned to the table rows. -->
+  <defs>
+    <radialGradient id="g-green" cx="35%" cy="30%" r="80%">
+      <stop offset="0" stop-color="#9ad36f"/><stop offset="1" stop-color="#5aa33c"/>
+    </radialGradient>
+    <radialGradient id="g-greenfruit" cx="35%" cy="30%" r="80%">
+      <stop offset="0" stop-color="#bcdd8d"/><stop offset="1" stop-color="#79b347"/>
+    </radialGradient>
+    <radialGradient id="g-orange" cx="35%" cy="30%" r="80%">
+      <stop offset="0" stop-color="#ffc16c"/><stop offset="1" stop-color="#e8730f"/>
+    </radialGradient>
+    <radialGradient id="g-red" cx="35%" cy="30%" r="80%">
+      <stop offset="0" stop-color="#ff8a6a"/><stop offset="1" stop-color="#cc2c20"/>
+    </radialGradient>
+    <linearGradient id="g-soil" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#caa472"/><stop offset="1" stop-color="#946338"/>
+    </linearGradient>
+    <path id="leaf" d="M0 0 C 9 -7 23 -7 32 0 C 23 7 9 7 0 0 Z"/>
+  </defs>
+
+  <!-- stem -->
+  <path d="M40 300 C 35 250 45 205 40 156 C 35 108 45 60 40 16"
+        fill="none" stroke="#5aa33c" stroke-width="5" stroke-linecap="round"/>
+  <path d="M40 300 C 35 250 45 205 40 156 C 35 108 45 60 40 16"
+        fill="none" stroke="#7cc25a" stroke-width="1.6" stroke-linecap="round"/>
+
+  <!-- zone 1: Head (growing tip + young leaves) -->
+  <g fill="url(#g-green)" stroke="#3f7d2f" stroke-width="0.5">
+    <use href="#leaf" transform="translate(40,30) rotate(128) scale(0.7)"/>
+    <use href="#leaf" transform="translate(40,30) rotate(52) scale(0.7)"/>
+    <use href="#leaf" transform="translate(40,18) rotate(-90) scale(0.5)"/>
+  </g>
+
+  <!-- zone 2: Flowering (leaves + yellow flower truss) -->
+  <g fill="url(#g-green)" stroke="#3f7d2f" stroke-width="0.5">
+    <use href="#leaf" transform="translate(40,104) rotate(145)"/>
+    <use href="#leaf" transform="translate(40,104) rotate(35)"/>
+  </g>
+  <g fill="#f6d33b" stroke="#e3b91f" stroke-width="0.5">
+    <circle cx="26" cy="126" r="4.5"/><circle cx="38" cy="130" r="4.5"/><circle cx="50" cy="126" r="4.5"/>
+  </g>
+  <g fill="#ef9f30">
+    <circle cx="26" cy="126" r="1.6"/><circle cx="38" cy="130" r="1.6"/><circle cx="50" cy="126" r="1.6"/>
+  </g>
+
+  <!-- zone 3: Fruit set (green tomatoes) -->
+  <use href="#leaf" fill="url(#g-green)" stroke="#3f7d2f" stroke-width="0.5"
+       transform="translate(40,176) rotate(35)"/>
+  <g stroke="#5f9a3a" stroke-width="0.5">
+    <circle cx="30" cy="197" r="8" fill="url(#g-greenfruit)"/>
+    <circle cx="47" cy="203" r="6.5" fill="url(#g-greenfruit)"/>
+  </g>
+
+  <!-- zone 4: Ripening (orange + red tomatoes) -->
+  <use href="#leaf" fill="url(#g-green)" stroke="#3f7d2f" stroke-width="0.5"
+       transform="translate(40,232) rotate(145)"/>
+  <g stroke="#b5471f" stroke-width="0.5">
+    <circle cx="30" cy="252" r="9" fill="url(#g-red)"/>
+    <circle cx="49" cy="259" r="7.5" fill="url(#g-orange)"/>
+    <circle cx="40" cy="240" r="6" fill="url(#g-orange)"/>
+  </g>
+  <g fill="#ffffff" opacity="0.5">
+    <ellipse cx="27" cy="248" rx="2.4" ry="1.5"/>
+    <ellipse cx="46" cy="256" rx="2" ry="1.2"/>
+  </g>
+
+  <!-- zone 5: Substrate (soil mound + roots) -->
+  <path d="M0 300 C 22 292 58 292 80 300 L 80 360 L 0 360 Z" fill="url(#g-soil)"/>
+  <g fill="none" stroke="#8a5a2f" stroke-width="1.8" stroke-linecap="round" opacity="0.85">
+    <path d="M40 300 C 33 320 27 334 21 351"/>
+    <path d="M40 300 C 47 320 53 334 59 351"/>
+    <path d="M40 300 C 40 322 40 338 40 352"/>
+    <path d="M31 311 C 27 324 23 332 18 343"/>
+    <path d="M49 311 C 53 324 57 332 62 343"/>
+  </g>
+</svg>

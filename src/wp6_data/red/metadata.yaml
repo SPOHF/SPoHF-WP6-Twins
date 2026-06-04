@@ -1,6 +1,45 @@
 # Red twin (tomato greenhouse) — device and sensor metadata.
 # Device keys match the device_id values from the MySQL tables.
 
+# ── Growth sections (red prescriptive view) ──
+# Canopy zones mapped 1:1 onto wire heights, in fixed top-to-bottom order, the
+# same for every wire (see CONTEXT "Growth section" / red ADR 0002). H1 sits just
+# above the canopy; H5 is the root zone. The ordering is a horticultural
+# assumption, not a measured distance. List order is the display order (top→root).
+# Red-only config — the shared metadata model ignores this key on purpose, so
+# shared/ stays twin-agnostic; a red-side loader reads it.
+growth_sections:
+  - height: 1
+    label: "Head"
+  - height: 2
+    label: "Flowering"
+  - height: 3
+    label: "Fruit set"
+  - height: 4
+    label: "Ripening"
+  - height: 5
+    label: "Substrate"
+
+# ── Risk thresholds (red prescriptive view, issue 014 / ADR 0002) ──
+# PROVISIONAL values — retune against real wire data (the engine and CLI exist
+# precisely to validate these). Kept in config, not code, so a retune is a YAML
+# edit. Red-only; the shared metadata model ignores this key.
+risk_thresholds:
+  fungal:
+    rh_pct: 85           # RH (%) above which an interval counts as "wet"
+    window_hours: 24     # trailing window for the wet-hours accumulation
+    active_wet_hours: 6  # wet-hours above this opens a fungal-risk episode
+  vpd:
+    band_min_kpa: 0.4    # healthy VPD band (kPa); below = too humid
+    band_max_kpa: 1.2    # above = transpiration stress
+  canopy_dli:
+    target_mol: 22       # tomato DLI target at the canopy (H1), mol/m²/day
+  co2:
+    floor_ppm: 400       # daytime CO₂ (ppm) below this = carbon-limited (≈ambient)
+    daylight_par: 10     # PAR (µmol/m²/s) above which the floor applies (photoperiod)
+  episode:
+    min_duration_minutes: 30  # shorter spans are suppressed as flapping
+
 sensor_defaults:
   temp:
     type: "temperature"

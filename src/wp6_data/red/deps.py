@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from wp6_data.config import RedSettings, Settings
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.dli import OpenMeteoClient
+from wp6_data.red.growth_sections import load_growth_sections
 from wp6_data.shared.export import get_export_metadata as _get_export_metadata
 from wp6_data.shared.metadata import MetadataRegistry
 
@@ -14,7 +15,11 @@ load_dotenv()
 
 base_settings = Settings()
 settings = RedSettings()
-metadata = MetadataRegistry(Path(__file__).parent / "metadata.yaml")
+_METADATA_PATH = Path(__file__).parent / "metadata.yaml"
+metadata = MetadataRegistry(_METADATA_PATH)
+# Red-only canopy zones over wire heights (CONTEXT "Growth section"); the shared
+# metadata registry ignores this key, so it is loaded separately here.
+growth_sections = load_growth_sections(_METADATA_PATH)
 
 # MySQL connection settings
 DB_HOST = settings.db_host

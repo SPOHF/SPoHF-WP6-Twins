@@ -1,11 +1,50 @@
 """MySQL database connection for WP6 Red."""
 
+import asyncio
+import functools
 import re
 from datetime import datetime
 from typing import Any
 
 import aiomysql
 import pandas as pd
+import structlog
+from pymysql.err import InterfaceError, OperationalError
+
+logger = structlog.get_logger()
+
+# MySQL "connection lost/gone" codes worth a transparent retry — idle pooled
+# connections can be dropped by the server or a proxy ("reset by peer").
+_RETRYABLE_MYSQL_CODES = frozenset({2006, 2013, 2055})
+# Recycle pooled connections older than this so we rarely hand out a stale one
+# (kept under typical server/proxy idle timeouts).
+POOL_RECYCLE_SECONDS = 280
+
+
+def _retry_on_disconnect(retries: int = 2, delay: float = 0.5):
+    """Retry an async DB read when the server drops the connection.
+
+    Retries only on connection-lost codes; the methods here are idempotent
+    SELECTs, so a re-run is safe. A dropped connection is discarded by the pool
+    on release, so the retry acquires a fresh one.
+    """
+    def decorator(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            for attempt in range(retries + 1):
+                try:
+                    return await fn(*args, **kwargs)
+                except (OperationalError, InterfaceError) as exc:
+                    code = exc.args[0] if exc.args else None
+                    if code not in _RETRYABLE_MYSQL_CODES or attempt == retries:
+                        raise
+                    logger.warning(
+                        "mysql_connection_lost_retry",
+                        attempt=attempt + 1, code=code, method=fn.__name__,
+                    )
+                    await asyncio.sleep(delay)
+        return wrapper
+    return decorator
 
 # Sensor tables and their measurement columns
 SENSOR_TABLES: dict[str, list[str]] = {
@@ -172,6 +211,7 @@ class MySQLConnection:
             autocommit=True,
             minsize=1,
             maxsize=5,
+            pool_recycle=POOL_RECYCLE_SECONDS,
         )
 
     async def close(self) -> None:
@@ -180,6 +220,7 @@ class MySQLConnection:
             self.pool.close()
             await self.pool.wait_closed()
 
+    @_retry_on_disconnect()
     async def _fetch_available_sensors(self) -> list[dict[str, Any]]:
         """Query MySQL for sensor tables with device counts and reading counts."""
         if not self.pool:
@@ -223,6 +264,7 @@ class MySQLConnection:
             did for did, info in all_devices.items() if table in info["tables"]
         )
 
+    @_retry_on_disconnect()
     async def get_readings_by_measurement(
         self,
         measurement: str,
@@ -288,6 +330,7 @@ class MySQLConnection:
             df = df.sort_values("time")
         return df
 
+    @_retry_on_disconnect()
     async def _fetch_all_devices(self) -> dict[str, dict[str, Any]]:
         """Query MySQL for all devices with measurements, counts, last-seen."""
         if not self.pool:
@@ -328,6 +371,7 @@ class MySQLConnection:
 
         return await get_sensor_summary("red:devices", self._fetch_all_devices)
 
+    @_retry_on_disconnect()
     async def get_readings_for_comparison(
         self,
         device_id: str,
@@ -389,6 +433,7 @@ class MySQLConnection:
             df = df.sort_values("time")
         return df
 
+    @_retry_on_disconnect()
     async def get_readings(
         self,
         table: str,
@@ -461,6 +506,7 @@ class MySQLConnection:
 
     # TODO: i think this can be easily refactored?
 
+    @_retry_on_disconnect()
     async def get_par_readings(
         self,
         device_ids: list[str] | None = None,
@@ -528,6 +574,7 @@ class MySQLConnection:
             df = df.sort_values("time")
         return df
 
+    @_retry_on_disconnect()
     async def get_wire_sensor_readings(
         self,
         start: datetime | None = None,
@@ -583,6 +630,7 @@ class MySQLConnection:
             df = df.sort_values("time")
         return df
 
+    @_retry_on_disconnect()
     async def get_wire_device_summary(self) -> dict[str, dict[str, Any]]:
         """Per virtual wire device: reading count and last-seen, for the explorer.
 
@@ -614,6 +662,7 @@ class MySQLConnection:
                 }
         return summary
 
+    @_retry_on_disconnect()
     async def get_weather_station_readings(
         self,
         start: datetime | None = None,

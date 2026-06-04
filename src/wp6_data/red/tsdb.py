@@ -53,9 +53,54 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_readings_dedup
     ON readings (source, device_name, sensor_tag, time);
 """
 
-# Shared audit table + red readings DDL. Concatenation preserves the exact
-# statement set red bootstrapped before promotion.
-SCHEMA_SQL = MANUAL_UPLOADS_SQL + _READINGS_RED_SQL
+# Prescriptive-risk cache (red ADR 0002, issue 015). A *rebuildable* cache, not
+# a system of record: `risk_episodes` is the recomputable log (each row stamped
+# with the threshold-set that produced it), `risk_state` is the latest per-section
+# verdict the page reads cheaply. Plain tables (not hypertables) — they are
+# rewritten wholesale per build, not time-series-ingested.
+_RISK_CACHE_SQL = """
+CREATE TABLE IF NOT EXISTS risk_episodes (
+    id          BIGSERIAL        PRIMARY KEY,
+    wire        TEXT             NOT NULL,
+    height      INTEGER          NOT NULL,
+    label       TEXT             NOT NULL,
+    risk        TEXT             NOT NULL,
+    start_time  TIMESTAMPTZ      NOT NULL,
+    end_time    TIMESTAMPTZ,
+    peak        DOUBLE PRECISION NOT NULL,
+    thresholds  JSONB            NOT NULL,
+    built_at    TIMESTAMPTZ      NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_risk_episodes_wire_time
+    ON risk_episodes (wire, start_time);
+
+CREATE TABLE IF NOT EXISTS risk_state (
+    wire             TEXT             NOT NULL,
+    height           INTEGER          NOT NULL,
+    label            TEXT             NOT NULL,
+    height_dli       DOUBLE PRECISION,
+    vpd_latest       DOUBLE PRECISION,
+    vpd_in_band      BOOLEAN,
+    wet_hours_latest DOUBLE PRECISION,
+    fungal_active    BOOLEAN,
+    co2_latest       DOUBLE PRECISION,
+    co2_depleted     BOOLEAN,
+    canopy_deficit   BOOLEAN,
+    built_at         TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (wire, height)
+);
+
+-- The CO₂ columns were added after risk_state shipped; on an existing prod
+-- table the CREATE above is a no-op, so add them idempotently. risk_state is a
+-- rebuildable cache, so a one-time NULL default until the next build is fine.
+ALTER TABLE risk_state ADD COLUMN IF NOT EXISTS co2_latest   DOUBLE PRECISION;
+ALTER TABLE risk_state ADD COLUMN IF NOT EXISTS co2_depleted BOOLEAN;
+"""
+
+# Shared audit table + red readings DDL + risk cache. Concatenation preserves the
+# exact statement set red bootstrapped before promotion.
+SCHEMA_SQL = MANUAL_UPLOADS_SQL + _READINGS_RED_SQL + _RISK_CACHE_SQL
 
 
 async def ensure_schema_red(pool: AsyncConnectionPool) -> None:
