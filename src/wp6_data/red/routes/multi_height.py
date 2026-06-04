@@ -894,6 +894,28 @@ async def crop_climate_page(
         else " · risk log not built yet"
     )
 
+    # Day's risk timeline: episodes overlapping the shown day (so a risk active
+    # at midnight shows even though it began the night before). Clamp the query
+    # to this local day; the Gantt clamps each bar to the same window.
+    ep_start_utc = target_day.tz_convert("UTC").to_pydatetime()
+    ep_end_utc = (target_day + pd.Timedelta(days=1)).tz_convert("UTC").to_pydatetime()
+    episodes = await store.read_episodes_overlapping(
+        get_pool(), wire, ep_start_utc, ep_end_utc,
+    )
+    gantt_html = _risk_gantt(episodes, timezone, target_day)
+    if as_of is None:
+        gantt_body = '<p style="color:#6b7280;margin:0;">Risk log not built yet.</p>'
+    elif gantt_html is None:
+        gantt_body = '<p style="color:#16a34a;margin:0;">No risk episodes — clear day ✓</p>'
+    else:
+        gantt_body = gantt_html
+    gantt_card = render_card(
+        f"Risk timeline — {table_date}", gantt_body,
+        description="One lane per section × risk that fired this day; each bar "
+        "spans the period the risk was present.",
+        card_class="card",
+    )
+
     content = f"""
     <a href="/multi_height" class="back-link">← Multi Height</a>
     <h1>Crop Climate by Height</h1>
@@ -904,6 +926,7 @@ async def crop_climate_page(
     {date_form}
 
     {render_card(f"Climate — {table_date}{asof_note}", table, card_class="card")}
+    {gantt_card}
     {admin_panel}
     {CROP_CLIMATE_STYLE}
     {CROP_CLIMATE_JS}
@@ -1078,6 +1101,22 @@ RISK_LABELS = {
     "canopy": "Canopy light deficit",
 }
 
+# Lane colour per risk — reuse each metric's own hue so the timeline matches the
+# detail charts and column accents (CO₂ uses the floor-marker red).
+RISK_COLORS = {
+    "vpd": VPD_LINE_COLOR,
+    "fungal": FUNGAL_COLOR,
+    "co2": CO2_FLOOR_COLOR,
+    "canopy": HEIGHT_DLI_COLOR,
+}
+# Within a section, lanes read top-down in this order (matches the table columns).
+RISK_LANE_ORDER = {"canopy": 0, "vpd": 1, "fungal": 2, "co2": 3}
+# Compact tick label per lane — the section is carried by the band, not repeated.
+RISK_SHORT = {"vpd": "VPD", "fungal": "Fungal", "co2": "CO₂", "canopy": "Canopy"}
+# Extra y-spacing between height blocks (lanes within a block step by 1.0), so a
+# section's risks hug together while sections stay visually apart.
+GANTT_GROUP_GAP = 0.7
+
 
 def _fmt_local(dt, tz: str) -> str:
     """Render a tz-aware datetime in the display timezone, e.g. '2026-06-03 20:18 CEST'.
@@ -1147,6 +1186,122 @@ def _audit_table(episodes, tz: str = "UTC") -> str:
     return (
         '<table style="width:100%;border-collapse:collapse;">'
         f"{head}<tbody>{rows}</tbody></table>"
+    )
+
+
+def _risk_gantt(episodes, timezone: str, day_start) -> str | None:
+    """Gantt-style timeline of one day's risk episodes (inline Plotly HTML).
+
+    One lane per ``(section, risk)`` that actually fired that day — empty lanes
+    are omitted, so a calm day stays short and parallel risks never collide
+    (each risk owns its own lane). Every episode is a thick horizontal bar from
+    start to end; a span that began before midnight or is still ongoing is
+    *clamped* to the day window for drawing, while the hover keeps its true
+    times. Returns ``None`` when there are no episodes (caller shows a note).
+
+    ``day_start`` is the tz-aware local midnight of the shown day.
+    """
+    if not episodes:
+        return None
+
+    day0 = day_start.tz_localize(None)  # naive local midnight (Plotly x-axis space)
+    day1 = day0 + pd.Timedelta(days=1)
+
+    def _local(dt):
+        return pd.Timestamp(dt).tz_convert(timezone).tz_localize(None)
+
+    lanes: dict[tuple, list] = {}
+    for e in episodes:
+        lanes.setdefault((e["height"], e["label"], e["risk"]), []).append(e)
+    # Top-down: by height, then the fixed risk order within a section.
+    keys = sorted(lanes, key=lambda k: (k[0], RISK_LANE_ORDER.get(k[2], 9)))
+
+    # Lanes sit at explicit y-positions (linear axis), not evenly-spaced
+    # categories: a 1.0 step within a section, a wider GANTT_GROUP_GAP between
+    # sections — so a section's lanes (e.g. H1's Canopy + VPD) hug together while
+    # the sections stay clearly apart.
+    pos, prev_h = [], None
+    y = 0.0
+    for height, _label, _risk in keys:
+        if prev_h is None:
+            y = 0.0
+        elif height != prev_h:
+            y += 1.0 + GANTT_GROUP_GAP
+        else:
+            y += 1.0
+        pos.append(y)
+        prev_h = height
+
+    fig = go.Figure()
+    legended: set[str] = set()
+    for idx, (height, label, risk) in enumerate(keys):
+        cat = f"H{height} {label} · {RISK_LABELS[risk]}"
+        color = RISK_COLORS.get(risk, "#6b7280")
+        for e in lanes[(height, label, risk)]:
+            start = max(_local(e["start_time"]), day0)
+            ongoing = e["end_time"] is None
+            end = day1 if ongoing else min(_local(e["end_time"]), day1)
+            ends = "ongoing" if ongoing else _fmt_local(e["end_time"], timezone)
+            fig.add_trace(go.Scatter(
+                x=[start, end], y=[pos[idx], pos[idx]], mode="lines",
+                line=dict(color=color, width=18),
+                legendgroup=risk, name=RISK_LABELS[risk],
+                showlegend=risk not in legended,
+                hovertemplate=(
+                    f"<b>{cat}</b><br>"
+                    f"{_fmt_local(e['start_time'], timezone)} → {ends}"
+                    f"<br>peak {e['peak']:.2f}<extra></extra>"
+                ),
+            ))
+            legended.add(risk)
+
+    # Group lanes into per-height blocks: an alternating band, a separator line
+    # between blocks, and one section label per block — so the heights read as
+    # distinct groups instead of a flat stack of look-alike lanes.
+    shapes, annotations = [], []
+    i, band = 0, 0
+    while i < len(keys):
+        h, label, _ = keys[i]
+        j = i
+        while j < len(keys) and keys[j][0] == h:
+            j += 1
+        top, bot = pos[i] - 0.5, pos[j - 1] + 0.5
+        if band % 2 == 1:  # shade every other block
+            shapes.append(dict(
+                type="rect", xref="paper", x0=0, x1=1, yref="y",
+                y0=top, y1=bot, layer="below", line_width=0,
+                fillcolor="rgba(99,102,241,0.06)",
+            ))
+        if i > 0:  # rule midway between this block and the one above
+            edge = (pos[i - 1] + pos[i]) / 2
+            shapes.append(dict(
+                type="line", xref="paper", x0=0, x1=1, yref="y",
+                y0=edge, y1=edge, line=dict(color="#d1d5db", width=1),
+            ))
+        annotations.append(dict(
+            xref="paper", x=0, xanchor="right", xshift=-54,
+            yref="y", y=(pos[i] + pos[j - 1]) / 2, text=f"<b>H{h}</b> {label}",
+            showarrow=False, font=dict(size=11, color="#374151"),
+        ))
+        i, band = j, band + 1
+
+    span = (pos[-1] - pos[0]) if pos else 0.0
+    fig.update_layout(
+        template="plotly_white",
+        height=int(26 * span + 80),
+        margin=dict(l=150, r=20, t=8, b=36),
+        xaxis=dict(range=[day0, day1], title="Time of day",
+                   tickformat="%H:%M", dtick=3 * 3600 * 1000),
+        yaxis=dict(tickmode="array", tickvals=pos,
+                   ticktext=[RISK_SHORT.get(k[2], k[2]) for k in keys],
+                   range=[pos[-1] + 0.6, pos[0] - 0.6]),  # high→low = top-down
+        shapes=shapes, annotations=annotations,
+        hovermode="closest",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+    )
+    return fig.to_html(
+        full_html=False, include_plotlyjs="cdn",
+        config={"responsive": True, "displaylogo": False},
     )
 
 
