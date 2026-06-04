@@ -114,6 +114,28 @@ async def read_episodes(
         return list(await cur.fetchall())
 
 
+async def read_episodes_overlapping(
+    pool: AsyncConnectionPool, wire: str, start: datetime, end: datetime,
+) -> list[dict[str, Any]]:
+    """Episodes for ``wire`` that *overlap* ``[start, end)`` (chronological).
+
+    Unlike :func:`read_episodes` (which filters on ``start_time``), this returns
+    every episode whose span intersects the window — including one that began
+    before ``start`` or is still ongoing (``end_time IS NULL``). That's what a
+    single-day timeline needs: a risk present at midnight belongs on the day even
+    though it started the night before.
+    """
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT * FROM risk_episodes "
+            "WHERE wire = %s AND start_time < %s "
+            "AND (end_time IS NULL OR end_time >= %s) "
+            "ORDER BY height, risk, start_time",
+            (wire, end, start),
+        )
+        return list(await cur.fetchall())
+
+
 async def last_built_at(pool: AsyncConnectionPool, wire: str) -> datetime | None:
     """When ``wire``'s state was last built, or ``None`` if never."""
     async with pool.connection() as conn, conn.cursor() as cur:
