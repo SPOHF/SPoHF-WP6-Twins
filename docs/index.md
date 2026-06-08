@@ -10,6 +10,9 @@ To the home of WP6 - Digital twin. A workpackage within
 ![Interreg](./assets/interreg.png)
 
 
+📋 **[View the monthly changelog](changelog/index.md)** — new functionality delivered each month.
+
+
 ## The twins
 
 The 'digital twin' is a concept used in different contexts, lets make them more explicit:
@@ -62,10 +65,6 @@ Pending work:
 ## Architecture
 
 see [architecture](architecture/index.md)
-
-## Changelog
-
-see the [monthly changelog](changelog/index.md) for new functionality delivered each month
 
 ## Code repository
 
