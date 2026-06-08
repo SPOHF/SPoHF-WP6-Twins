@@ -1007,7 +1007,7 @@ BASE_CSS = """
         overflow: hidden;
         border: 1px solid var(--dashboard-primary);
     }
-    .group-btn, .label-btn, .agg-btn {
+    .group-btn, .label-btn, .agg-btn, .ct-btn {
         flex: 1;
         font-size: 0.72rem;
         padding: 0.25rem 0.3rem;
@@ -1019,15 +1019,52 @@ BASE_CSS = """
         color: var(--dashboard-primary);
         transition: background 0.15s, color 0.15s;
     }
-    .group-btn:not(:last-child), .label-btn:not(:last-child), .agg-btn:not(:last-child) {
+    .group-btn:not(:last-child), .label-btn:not(:last-child),
+    .agg-btn:not(:last-child), .ct-btn:not(:last-child) {
         border-right: 1px solid var(--dashboard-primary);
     }
-    .group-btn.active, .label-btn.active, .agg-btn.active {
+    .group-btn.active, .label-btn.active, .agg-btn.active, .ct-btn.active {
         background: var(--dashboard-primary);
         color: #fff;
     }
-    .group-btn:not(.active):hover, .label-btn:not(.active):hover, .agg-btn:not(.active):hover {
+    .group-btn:not(.active):hover, .label-btn:not(.active):hover,
+    .agg-btn:not(.active):hover, .ct-btn:not(.active):hover {
         background: color-mix(in srgb, var(--dashboard-primary) 12%, transparent);
+    }
+    /* Y-Left / Y-Right axis tabs: an underline tab strip, deliberately
+       distinct from the filled segmented toggles below it. */
+    .axis-tabs {
+        display: flex;
+        gap: 0.25rem;
+        margin-bottom: 0.6rem;
+        border-bottom: 2px solid
+            color-mix(in srgb, var(--dashboard-primary) 25%, transparent);
+    }
+    .axis-tab {
+        flex: 1;
+        padding: 0.4rem 0.5rem;
+        cursor: pointer;
+        border: none;
+        background: transparent;
+        color: var(--dashboard-primary);
+        font-size: 0.8rem;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        opacity: 0.55;
+        transition: opacity 0.15s, border-color 0.15s;
+    }
+    .axis-tab.active {
+        border-bottom-color: var(--dashboard-primary);
+        font-weight: 700;
+        opacity: 1;
+    }
+    .axis-tab:not(.active):hover { opacity: 0.85; }
+    .ct-icon {
+        width: 11px;
+        height: 11px;
+        vertical-align: -1px;
+        margin-right: 4px;
+        opacity: 0.85;
     }
     .bucket-slider {
         font-size: 0.75rem;
@@ -1266,6 +1303,7 @@ UNIFIED_CHART_JS = """
     function defaultAxisCfg() {
         return {
             labelFormat: 'smart',
+            chartType: 'line',
             aggregateEnabled: false,
             aggregateFunc: 'avg',
             bucketMinutes: 10,
@@ -1286,6 +1324,10 @@ UNIFIED_CHART_JS = """
         var v = params.get(name) || '';
         return ['smart', 'short', 'raw'].indexOf(v) !== -1 ? v : fallback;
     }
+    function readChartType(name, fallback) {
+        var v = params.get(name) || '';
+        return ['line', 'scatter', 'box'].indexOf(v) !== -1 ? v : fallback;
+    }
     function readAggInto(cfg, aggName, bktName, bandName) {
         var agg = params.get(aggName);
         if (agg === 'off') {
@@ -1303,6 +1345,7 @@ UNIFIED_CHART_JS = """
         else if (band === '0') cfg.bandEnabled = false;
     }
     axisCfg.left.labelFormat = readLabelFormat('lbl', 'smart');
+    axisCfg.left.chartType = readChartType('ct', 'line');
     readAggInto(axisCfg.left, 'agg', 'bkt', 'band');
     var _idealLoRaw = parseFloat(params.get('ideal_lo'));
     var _idealHiRaw = parseFloat(params.get('ideal_hi'));
@@ -1312,6 +1355,7 @@ UNIFIED_CHART_JS = """
         splitMode = true;
         // Right-axis values fall back to left for any param not explicitly set
         axisCfg.right.labelFormat = readLabelFormat('lbl_r', axisCfg.left.labelFormat);
+        axisCfg.right.chartType = readChartType('ct_r', axisCfg.left.chartType);
         axisCfg.right.aggregateEnabled = axisCfg.left.aggregateEnabled;
         axisCfg.right.aggregateFunc = axisCfg.left.aggregateFunc;
         axisCfg.right.bucketMinutes = axisCfg.left.bucketMinutes;
@@ -1332,7 +1376,8 @@ UNIFIED_CHART_JS = """
         height: 600,
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
-        yaxis2: {overlaying: 'y', side: 'right', showgrid: false}
+        yaxis2: {overlaying: 'y', side: 'right', showgrid: false},
+        boxmode: 'group'
     };
     Plotly.newPlot(chartDiv, [], layout, {responsive: true});
 
@@ -1418,6 +1463,11 @@ UNIFIED_CHART_JS = """
     }
 
     function refreshControlActiveStates() {
+        document.querySelectorAll('.ct-btn').forEach(function(btn) {
+            var axis = btn.dataset.axis;
+            btn.classList.toggle('active',
+                btn.dataset.ct === axisCfg[axis].chartType);
+        });
         document.querySelectorAll('.label-btn').forEach(function(btn) {
             var axis = btn.dataset.axis;
             btn.classList.toggle('active',
@@ -1425,23 +1475,34 @@ UNIFIED_CHART_JS = """
         });
         document.querySelectorAll('.agg-btn').forEach(function(btn) {
             var axis = btn.dataset.axis;
+            var isBox = axisCfg[axis].chartType === 'box';
             btn.classList.toggle('active',
                 btn.dataset.agg === activeAggValueFor(axis));
+            // Boxplots ignore the aggregate func — only the slider matters.
+            btn.disabled = isBox;
+            btn.title = isBox ? 'Ignored for boxplots — the slider sets box width' : '';
         });
         document.querySelectorAll('.bucket-slider-input').forEach(function(slider) {
             var axis = slider.dataset.axis;
             var c = axisCfg[axis];
+            var isBox = c.chartType === 'box';
             var idx = BUCKET_STEPS.indexOf(c.bucketMinutes);
             if (idx < 0) idx = 3;
             slider.value = idx;
-            slider.disabled = !c.aggregateEnabled;
+            // Box keeps the slider live (it sets box width); otherwise the
+            // slider only applies when aggregation is on.
+            slider.disabled = isBox ? false : !c.aggregateEnabled;
             var labelEl = slider.parentElement.querySelector(
                 '.bucket-label[data-axis="' + axis + '"]');
             if (labelEl) labelEl.textContent = formatBucket(c.bucketMinutes);
+            var prefixEl = slider.parentElement.querySelector(
+                '.bucket-prefix[data-axis="' + axis + '"]');
+            if (prefixEl) prefixEl.textContent = isBox ? 'Box width:' : 'Bucket:';
         });
         document.querySelectorAll('.band-input').forEach(function(box) {
             var c = axisCfg[box.dataset.axis];
-            var applies = bandAppliesTo(c);
+            // The range band is a line concept; a box already shows spread.
+            var applies = bandAppliesTo(c) && c.chartType !== 'box';
             box.checked = c.bandEnabled;
             box.disabled = !applies;
             var label = box.closest('.band-toggle');
@@ -1450,6 +1511,25 @@ UNIFIED_CHART_JS = """
     }
 
     function wireAxisControls(rootEl) {
+        rootEl.querySelectorAll('.ct-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var axis = btn.dataset.axis;
+                var ct = btn.dataset.ct;
+                if (ct === axisCfg[axis].chartType) return;
+                var wasBox = axisCfg[axis].chartType === 'box';
+                axisCfg[axis].chartType = ct;
+                refreshControlActiveStates();
+                // Box fetches raw while non-box-with-agg fetches bucketed, so
+                // crossing the box boundary changes the data shape and needs a
+                // refetch. line<->scatter share the same data — re-render only.
+                if (wasBox !== (ct === 'box')) {
+                    refetchAll();
+                } else {
+                    rebuildTraces();
+                    syncUrl();
+                }
+            });
+        });
         rootEl.querySelectorAll('.label-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 var axis = btn.dataset.axis;
@@ -1487,7 +1567,11 @@ UNIFIED_CHART_JS = """
             slider.addEventListener('change', function() {
                 var axis = slider.dataset.axis;
                 axisCfg[axis].bucketMinutes = BUCKET_STEPS[parseInt(slider.value)];
-                if (axisCfg[axis].aggregateEnabled) {
+                if (axisCfg[axis].chartType === 'box') {
+                    // Box width is a pure client-side regroup of raw points.
+                    rebuildTraces();
+                    syncUrl();
+                } else if (axisCfg[axis].aggregateEnabled) {
                     refetchAll();
                 }
             });
@@ -1563,6 +1647,23 @@ UNIFIED_CHART_JS = """
             refetchAll();
         });
     }
+
+    // Y-Left / Y-Right tabs: show one axis's controls at a time in split mode
+    // so the panel stays compact. Pure UI state — every control stays wired and
+    // in the DOM whether or not its panel is visible.
+    var axisTabs = document.querySelectorAll('.axis-tab');
+    var axisPanels = document.querySelectorAll('.axis-tab-panel');
+    axisTabs.forEach(function(tab) {
+        tab.addEventListener('click', function() {
+            var which = tab.dataset.axistab;
+            axisTabs.forEach(function(t) {
+                t.classList.toggle('active', t === tab);
+            });
+            axisPanels.forEach(function(p) {
+                p.hidden = p.dataset.axispanel !== which;
+            });
+        });
+    });
 
     refreshControlActiveStates();
 
@@ -1869,6 +1970,32 @@ UNIFIED_CHART_JS = """
         return (mins / 1440) + ' days';
     }
 
+    // Floor a local-ISO timestamp to its box-grouping bucket start. Boxes are
+    // grouped entirely on the client (the server never buckets a box), so this
+    // only needs to land on sensible local boundaries: sub-day widths floor
+    // within the local day from midnight; day+ widths floor to whole local days.
+    function floorBoxTime(iso, minutes) {
+        if (!minutes || minutes <= 0) return iso;
+        var m = iso.match(
+            /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})([+-]\\d{2}:\\d{2}|Z)?/);
+        if (!m) return iso;
+        var Y = +m[1], Mo = +m[2], D = +m[3], H = +m[4], Mi = +m[5];
+        var offset = m[7] && m[7] !== 'Z' ? m[7] : (m[7] === 'Z' ? 'Z' : '');
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        if (minutes < 1440) {
+            var since = H * 60 + Mi;
+            var fl = Math.floor(since / minutes) * minutes;
+            return Y + '-' + pad(Mo) + '-' + pad(D) + 'T'
+                + pad(Math.floor(fl / 60)) + ':' + pad(fl % 60) + ':00' + offset;
+        }
+        var dayMs = 86400000;
+        var stepDays = Math.round(minutes / 1440);
+        var dayNum = Math.floor(Date.UTC(Y, Mo - 1, D) / dayMs);
+        var dt = new Date(Math.floor(dayNum / stepDays) * stepDays * dayMs);
+        return dt.getUTCFullYear() + '-' + pad(dt.getUTCMonth() + 1) + '-'
+            + pad(dt.getUTCDate()) + 'T00:00:00' + offset;
+    }
+
     function rebuildTraces() {
         // Clear all Plotly traces
         var traceCount = chartDiv.data ? chartDiv.data.length : 0;
@@ -1898,6 +2025,34 @@ UNIFIED_CHART_JS = """
             if (axisKeys.length === 0) return;
             var cfg = cfgFor(axis);
 
+            if (cfg.chartType === 'box') {
+                // One box-series per sensor (no same-label pooling). Each raw
+                // point is floored to its box-width bucket so Plotly groups the
+                // distribution and computes the quartiles; boxmode:'group' sits
+                // same-bucket sensors side-by-side on the shared time axis.
+                axisKeys.forEach(function(k) {
+                    var sd = seriesData[k];
+                    if (!sd) return;
+                    var color = colorMap[k];
+                    var bx = sd.times.map(function(t) {
+                        return floorBoxTime(t, cfg.bucketMinutes);
+                    });
+                    traceIdxMap[k] = traces.length;
+                    traces.push({
+                        type: 'box',
+                        x: bx, y: sd.values,
+                        name: sensorLabel(k, axis),
+                        yaxis: axis === 'right' ? 'y2' : 'y',
+                        marker: {color: color},
+                        line: {color: color}
+                    });
+                });
+                return;
+            }
+
+            // Render-mode seam: scatter draws the same points as markers.
+            var traceMode = cfg.chartType === 'scatter' ? 'markers' : 'lines';
+
             if (!cfg.aggregateEnabled) {
                 axisKeys.forEach(function(k) {
                     var sd = seriesData[k];
@@ -1906,9 +2061,10 @@ UNIFIED_CHART_JS = """
                     var trace = {
                         x: sd.times, y: sd.values,
                         name: sensorLabel(k, axis),
-                        mode: 'lines',
+                        mode: traceMode,
                         yaxis: axis === 'right' ? 'y2' : 'y',
-                        line: {color: color}
+                        line: {color: color},
+                        marker: {color: color}
                     };
                     if (axis === 'right') { trace.line.dash = 'dash'; }
                     traceIdxMap[k] = traces.length;
@@ -2001,9 +2157,10 @@ UNIFIED_CHART_JS = """
                 var trace = {
                     x: merged.times, y: merged.values,
                     name: g.label + suffix,
-                    mode: 'lines',
+                    mode: traceMode,
                     yaxis: yaxisName,
-                    line: {color: color}
+                    line: {color: color},
+                    marker: {color: color}
                 };
                 if (axis === 'right') { trace.line.dash = 'dash'; }
                 // When the band is on, surface its exact extremes in the
@@ -2028,12 +2185,22 @@ UNIFIED_CHART_JS = """
 
         keys.forEach(function(k) {
             var axis = activeSeries[k].axis;
-            if (cfgFor(axis).aggregateEnabled) {
+            var acfg = cfgFor(axis);
+            // Box draws one trace per key (like the non-aggregated path), so it
+            // keeps a real trace index even though aggregation may be enabled.
+            if (acfg.chartType !== 'box' && acfg.aggregateEnabled) {
                 activeSeries[k].traceIdx = -1;
             } else {
                 activeSeries[k].traceIdx = traceIdxMap[k] != null ? traceIdxMap[k] : -1;
             }
         });
+        // 'x unified' hover collects every trace at an x, which on grouped
+        // boxplots pulls neighbouring boxes into one tooltip. Switch to
+        // 'closest' so each box hovers alone; keep unified for line/scatter.
+        var anyBox = ['left', 'right'].some(function(axis) {
+            return keysByAxis[axis].length && cfgFor(axis).chartType === 'box';
+        });
+        Plotly.relayout(chartDiv, {hovermode: anyBox ? 'closest' : 'x unified'});
         updateIdealRange();
     }
 
@@ -2047,7 +2214,11 @@ UNIFIED_CHART_JS = """
         if (startDate) url += '&start=' + startDate;
         if (endDate) url += '&end=' + endDate;
         var acfg = cfgFor(axis);
-        if (acfg.aggregateEnabled && acfg.bucketMinutes > 0) {
+        // Boxplots build their distribution from raw points on the client, so
+        // they always fetch raw (the agg func is ignored — the slider only
+        // sets the client-side box-grouping width).
+        if (acfg.chartType !== 'box'
+            && acfg.aggregateEnabled && acfg.bucketMinutes > 0) {
             url += '&bkt=' + acfg.bucketMinutes
                  + '&agg=' + encodeURIComponent(acfg.aggregateFunc);
         }
@@ -2257,10 +2428,13 @@ UNIFIED_CHART_JS = """
         var L = axisCfg.left;
         if (L.labelFormat !== 'smart') p.set('lbl', L.labelFormat);
         else p.delete('lbl');
+        if (L.chartType !== 'line') p.set('ct', L.chartType);
+        else p.delete('ct');
         if (L.aggregateEnabled) p.set('agg', L.aggregateFunc);
         else p.delete('agg');
-        if (L.aggregateEnabled && L.bucketMinutes !== 10) p.set('bkt', L.bucketMinutes);
-        else p.delete('bkt');
+        if ((L.aggregateEnabled || L.chartType === 'box') && L.bucketMinutes !== 10) {
+            p.set('bkt', L.bucketMinutes);
+        } else p.delete('bkt');
         if (L.bandEnabled) p.set('band', '1');
         else p.delete('band');
         if (splitMode) {
@@ -2268,13 +2442,16 @@ UNIFIED_CHART_JS = """
             var R = axisCfg.right;
             if (R.labelFormat !== L.labelFormat) p.set('lbl_r', R.labelFormat);
             else p.delete('lbl_r');
+            if (R.chartType !== L.chartType) p.set('ct_r', R.chartType);
+            else p.delete('ct_r');
             if (R.aggregateEnabled !== L.aggregateEnabled
                 || (R.aggregateEnabled && R.aggregateFunc !== L.aggregateFunc)) {
                 p.set('agg_r', R.aggregateEnabled ? R.aggregateFunc : 'off');
             } else {
                 p.delete('agg_r');
             }
-            if (R.aggregateEnabled && R.bucketMinutes !== L.bucketMinutes) {
+            if ((R.aggregateEnabled || R.chartType === 'box')
+                && R.bucketMinutes !== L.bucketMinutes) {
                 p.set('bkt_r', R.bucketMinutes);
             } else {
                 p.delete('bkt_r');
@@ -2286,6 +2463,7 @@ UNIFIED_CHART_JS = """
         } else {
             p.delete('split');
             p.delete('lbl_r');
+            p.delete('ct_r');
             p.delete('agg_r');
             p.delete('bkt_r');
             p.delete('band_r');
@@ -2308,8 +2486,8 @@ UNIFIED_CHART_JS = """
     var dateForm = document.getElementById('dateFilter');
     if (dateForm) {
         var params = new URLSearchParams(window.location.search);
-        ['s', 'r', 'lbl', 'agg', 'bkt', 'band',
-         'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r',
+        ['s', 'r', 'lbl', 'ct', 'agg', 'bkt', 'band',
+         'split', 'lbl_r', 'ct_r', 'agg_r', 'bkt_r', 'band_r',
          'ideal_lo', 'ideal_hi'].forEach(function(name) {
             var val = params.get(name);
             if (val) {
@@ -2325,8 +2503,8 @@ UNIFIED_CHART_JS = """
     // Also keep hidden fields in sync when series change
     function syncDateFormParams() {
         if (!dateForm) return;
-        ['s', 'r', 'lbl', 'agg', 'bkt', 'band',
-         'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r',
+        ['s', 'r', 'lbl', 'ct', 'agg', 'bkt', 'band',
+         'split', 'lbl_r', 'ct_r', 'agg_r', 'bkt_r', 'band_r',
          'ideal_lo', 'ideal_hi'].forEach(function(name) {
             var existing = dateForm.querySelector(
                 'input[name="' + name + '"]');
@@ -2863,6 +3041,28 @@ def render_unified_chart_page(
     """
     filter_html = render_date_filter(start, end)
 
+    # Subtle inline glyphs for the chart-type toggle. ``currentColor`` lets each
+    # icon track the button's text colour (incl. the white active state).
+    ct_icon_line = (
+        '<svg class="ct-icon" viewBox="0 0 12 12" aria-hidden="true">'
+        '<polyline points="1,9 4,5 7,7 11,2" fill="none" stroke="currentColor" '
+        'stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/></svg>'
+    )
+    ct_icon_scatter = (
+        '<svg class="ct-icon" viewBox="0 0 12 12" aria-hidden="true">'
+        '<circle cx="2.5" cy="8.5" r="1.1" fill="currentColor"/>'
+        '<circle cx="6" cy="5" r="1.1" fill="currentColor"/>'
+        '<circle cx="9.5" cy="6.5" r="1.1" fill="currentColor"/>'
+        '<circle cx="8" cy="2.5" r="1.1" fill="currentColor"/></svg>'
+    )
+    ct_icon_box = (
+        '<svg class="ct-icon" viewBox="0 0 12 12" aria-hidden="true">'
+        '<line x1="6" y1="1" x2="6" y2="11" stroke="currentColor" stroke-width="1.1"/>'
+        '<rect x="3" y="4" width="6" height="4.5" fill="none" stroke="currentColor" '
+        'stroke-width="1.1"/>'
+        '<line x1="3" y1="6.2" x2="9" y2="6.2" stroke="currentColor" stroke-width="1.1"/></svg>'
+    )
+
     content = f"""
     <div class="chart-layout">
         <div class="sensor-panel" id="sensor-panel-wrapper">
@@ -2888,6 +3088,15 @@ to {end.isoformat()}</summary>
                 Configure axes separately
             </label>
             <div id="axis-controls-unified">
+                <small>Chart type</small>
+                <div class="group-toggle">
+                    <button class="ct-btn" data-ct="line" data-axis="left"
+                        >{ct_icon_line}Line</button>
+                    <button class="ct-btn" data-ct="scatter" data-axis="left"
+                        >{ct_icon_scatter}Scatter</button>
+                    <button class="ct-btn" data-ct="box" data-axis="left"
+                        >{ct_icon_box}Box</button>
+                </div>
                 <h4>Labels</h4>
                 <div class="group-toggle">
                     <button class="label-btn" data-label="smart" data-axis="left"
@@ -2906,7 +3115,8 @@ to {end.isoformat()}</summary>
                     <button class="agg-btn" data-agg="sum" data-axis="left">SUM</button>
                 </div>
                 <div class="bucket-slider">
-                    <label>Bucket: <span class="bucket-label" data-axis="left">10 min</span></label>
+                    <label><span class="bucket-prefix" data-axis="left">Bucket:</span>
+                        <span class="bucket-label" data-axis="left">10 min</span></label>
                     <input type="range" class="bucket-slider-input" data-axis="left"
                         min="0" max="13" value="3" step="1">
                 </div>
@@ -2917,7 +3127,22 @@ to {end.isoformat()}</summary>
                 <small class="band-hint">shade lowest–highest in each bucket</small>
             </div>
             <div id="axis-controls-split" style="display:none;">
-                <h4>Y-Left</h4>
+                <div class="axis-tabs" role="tablist">
+                    <button class="axis-tab active" data-axistab="left"
+                        role="tab">Y-Left</button>
+                    <button class="axis-tab" data-axistab="right"
+                        role="tab">Y-Right</button>
+                </div>
+                <div class="axis-tab-panel" data-axispanel="left">
+                <small>Chart type</small>
+                <div class="group-toggle">
+                    <button class="ct-btn" data-ct="line" data-axis="left"
+                        >{ct_icon_line}Line</button>
+                    <button class="ct-btn" data-ct="scatter" data-axis="left"
+                        >{ct_icon_scatter}Scatter</button>
+                    <button class="ct-btn" data-ct="box" data-axis="left"
+                        >{ct_icon_box}Box</button>
+                </div>
                 <small>Labels</small>
                 <div class="group-toggle">
                     <button class="label-btn" data-label="smart" data-axis="left"
@@ -2936,7 +3161,8 @@ to {end.isoformat()}</summary>
                     <button class="agg-btn" data-agg="sum" data-axis="left">SUM</button>
                 </div>
                 <div class="bucket-slider">
-                    <label>Bucket: <span class="bucket-label" data-axis="left">10 min</span></label>
+                    <label><span class="bucket-prefix" data-axis="left">Bucket:</span>
+                        <span class="bucket-label" data-axis="left">10 min</span></label>
                     <input type="range" class="bucket-slider-input" data-axis="left"
                         min="0" max="13" value="3" step="1">
                 </div>
@@ -2945,7 +3171,17 @@ to {end.isoformat()}</summary>
                     Range band
                 </label>
                 <small class="band-hint">shade lowest–highest in each bucket</small>
-                <h4>Y-Right</h4>
+                </div>
+                <div class="axis-tab-panel" data-axispanel="right" hidden>
+                <small>Chart type</small>
+                <div class="group-toggle">
+                    <button class="ct-btn" data-ct="line" data-axis="right"
+                        >{ct_icon_line}Line</button>
+                    <button class="ct-btn" data-ct="scatter" data-axis="right"
+                        >{ct_icon_scatter}Scatter</button>
+                    <button class="ct-btn" data-ct="box" data-axis="right"
+                        >{ct_icon_box}Box</button>
+                </div>
                 <small>Labels</small>
                 <div class="group-toggle">
                     <button class="label-btn" data-label="smart" data-axis="right"
@@ -2964,7 +3200,7 @@ to {end.isoformat()}</summary>
                     <button class="agg-btn" data-agg="sum" data-axis="right">SUM</button>
                 </div>
                 <div class="bucket-slider">
-                    <label>Bucket:
+                    <label><span class="bucket-prefix" data-axis="right">Bucket:</span>
                         <span class="bucket-label" data-axis="right">10 min</span>
                     </label>
                     <input type="range" class="bucket-slider-input" data-axis="right"
@@ -2975,6 +3211,7 @@ to {end.isoformat()}</summary>
                     Range band
                 </label>
                 <small class="band-hint">shade lowest–highest in each bucket</small>
+                </div>
             </div>
             <div class="ideal-range-section" id="ideal-range-section">
                 <h4>Ideal range</h4>
