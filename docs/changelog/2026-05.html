@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WP6 Digital Twins — Changelog (May → Jun 2026)</title>
+<style>
+  :root {
+    --red: #c0392b;   --red-bg: #fdecea;
+    --blue: #2471a3;  --blue-bg: #eaf2fa;
+    --grey: #566573;  --grey-bg: #eef1f3;
+    --shared:#7d3c98; --shared-bg:#f4ecf7;
+    --ink: #1c2833;   --muted: #5d6d7e;
+    --line:#d5dbdb;   --bg:#f7f9f9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink); background: var(--bg); margin: 0; line-height: 1.55;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 24px 80px; }
+  header.page {
+    border-bottom: 3px solid var(--ink); padding-bottom: 18px; margin-bottom: 8px;
+  }
+  header.page h1 { margin: 0 0 4px; font-size: 30px; letter-spacing: -0.5px; }
+  header.page .sub { color: var(--muted); font-size: 15px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 28px; }
+  .pill {
+    font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid transparent;
+  }
+  .pill.red   { background: var(--red-bg);   color: var(--red);   border-color: var(--red); }
+  .pill.blue  { background: var(--blue-bg);  color: var(--blue);  border-color: var(--blue); }
+  .pill.grey  { background: var(--grey-bg);  color: var(--grey);  border-color: var(--grey); }
+  .pill.shared{ background: var(--shared-bg);color: var(--shared);border-color: var(--shared); }
+
+  .tldr {
+    background: #fff; border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 22px; margin-bottom: 36px;
+  }
+  .tldr h2 { margin: 0 0 10px; font-size: 16px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .tldr ul { margin: 0; padding-left: 20px; }
+  .tldr li { margin: 6px 0; }
+
+  section.theme { margin-bottom: 44px; }
+  section.theme > h2 {
+    font-size: 22px; margin: 0 0 4px; display: flex; align-items: center; gap: 10px;
+  }
+  section.theme > .theme-sub { color: var(--muted); margin: 0 0 20px; font-size: 15px; }
+
+  .hero { border-left: 5px solid var(--line); padding-left: 18px; }
+  .hero.blue   { border-color: var(--blue); }
+  .hero.red    { border-color: var(--red); }
+
+  .card {
+    background: #fff; border: 1px solid var(--line); border-radius: 12px;
+    padding: 20px 22px; margin-bottom: 18px;
+  }
+  .card h3 { margin: 0 0 6px; font-size: 18px; }
+  .card .tags { margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .card p { margin: 0 0 12px; }
+  .card ul { margin: 0 0 12px; padding-left: 20px; }
+  .card ul li { margin: 3px 0; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 4px; }
+  a.btn {
+    display: inline-block; text-decoration: none; font-weight: 600; font-size: 14px;
+    padding: 8px 14px; border-radius: 8px; color: #fff; background: var(--ink);
+  }
+  a.btn.blue { background: var(--blue); }
+  a.btn.red  { background: var(--red); }
+  a.btn.grey { background: var(--grey); }
+  a.btn.shared { background: var(--shared); }
+  a.btn::after { content: " ↗"; font-weight: 400; }
+  .route { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+
+  details.more { margin-top: 6px; }
+  details.more summary { cursor: pointer; font-weight: 600; color: var(--muted); font-size: 14px; }
+  .commitlist { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .commitlist code { color: var(--ink); }
+
+  footer.page { border-top: 1px solid var(--line); margin-top: 40px; padding-top: 20px; color: var(--muted); font-size: 13.5px; }
+  footer.page code { background: #eef1f3; padding: 1px 5px; border-radius: 4px; }
+
+  @media print {
+    body { background: #fff; }
+    .card, .tldr { break-inside: avoid; }
+    a.btn { color: #000; background: none; border: 1px solid #999; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <p style="margin:0 0 8px;"><a href="./" style="color:var(--muted); text-decoration:none; font-size:14px;">← All changelogs</a></p>
+    <h1>WP6 Digital Twins — What shipped this month</h1>
+    <div class="sub">Changelog · 8 May → 8 June 2026 · branch <code>main</code> · 59 commits · 7 merged PRs · 3 contributors</div>
+  </header>
+
+  <div class="legend">
+    <span class="pill blue">Blue — blueberry farm · wp6-blue.spohf.fontysvenlo.dev</span>
+    <span class="pill red">Red — tomato greenhouse · wp6-red.spohf.fontysvenlo.dev</span>
+    <span class="pill grey">Grey — public platform demo · wp6-grey.spohf.fontysvenlo.dev</span>
+    <span class="pill shared">Shared — twin-agnostic platform</span>
+  </div>
+
+  <div class="tldr">
+    <h2>Headlines</h2>
+    <ul>
+      <li><strong>Manual data sources for Blue.</strong> The blueberry twin can now ingest data that no sensor captures — <em>insect-trap counts</em> and <em>yearly lab/field measurements</em> — through upload → preview → audit, with no redeploy. Built on a new <strong>shared, twin-agnostic upload capability</strong> extracted from Red's existing flow.</li>
+      <li><strong>Multi-height sensor views for Red.</strong> A new <em>Multi Height</em> section maps PAR &amp; Daily Light Integral across sensor heights and trends each metric per wire — now modelled as multi-wire, per-height devices.</li>
+      <li><strong>Plus:</strong> server-side chart aggregation, min/max range bands on charts, status pages that split coverage by manual vs. sensor source, and TimescaleDB performance tuning.</li>
+    </ul>
+  </div>
+
+  <p style="color:var(--muted); font-size:13.5px; margin:-18px 0 30px;">
+    🔗 The <strong>Open live</strong> buttons (↗) deep-link into the deployed dashboards. Blue and Red require a login on first open; Grey is a public demo (no login).
+  </p>
+
+  <!-- ===================== THEME 1: MANUAL DATA SOURCES ===================== -->
+  <section class="theme">
+    <h2>🪲 Manual data sources for the Blue twin</h2>
+    <p class="theme-sub">The blueberry farm receives data by hand — trap counts and annual plant measurements — that no automated pipeline collects. This month it became first-class data.</p>
+
+    <div class="hero blue">
+
+      <div class="card">
+        <h3>A shared, reusable manual-upload capability</h3>
+        <div class="tags"><span class="pill shared">Shared</span><span class="pill red">Red</span><span class="pill blue">Blue</span></div>
+        <p>Red's "Sijia" Excel-ingest flow was <strong>extracted into a twin-agnostic <span class="route">shared/manual_ingest/</span> capability</strong>: content-addressed file storage, transactional all-or-nothing apply, a shared <span class="route">manual_uploads</span> audit trail, file pruning, and the preview/apply/history UI. Red now runs on it unchanged; Blue gained the whole pipeline it never had.</p>
+        <p>Onboarding a new manual source is now "write one parser + descriptor and wire it into a twin" — everything else is shared. Blue's insect feed was the second consumer; <span class="route">long_data</span> the third.</p>
+        <div class="actions">
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/status">Open live — Blue /status (admin)</a>
+          <span class="route">Upload cards + coverage split live here</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Insect-trap CSV upload — Blue's first manual source</h3>
+        <div class="tags"><span class="pill blue">Blue</span></div>
+        <p>Admins upload a trap-counts CSV (total insects + <em>Drosophila suzukii</em>, a primary blueberry pest), see a validation preview (parsed rows, devices, date range, regressions vs. existing data, skipped rows), then apply atomically. Counts then plot on the dashboard like any other sensor, and "last insect upload" freshness shows on the home page.</p>
+        <ul>
+          <li>CSV parser + <span class="route">ManualSource</span> descriptor + metadata + test fixture</li>
+          <li><span class="route">wp6-blue-ingest-insects</span> CLI — validates &amp; ingests locally <em>or</em> against the remote/prod TSDB (earliest end-to-end check, before any UI)</li>
+          <li>Blue switched to <strong>OIDC auth</strong> so uploads can be admin-gated like Red</li>
+          <li>Helm: dedicated blue manual-uploads PVC + volume mount</li>
+        </ul>
+        <div class="actions">
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/status">Upload card → /status</a>
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/sources/insects/history">Insect audit history</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Yearly <span class="route">long_data</span> plant measurements — second manual source</h3>
+        <div class="tags"><span class="pill blue">Blue</span></div>
+        <p>Annual lab/field measurements (shoot length, Brix, firmness, berry weights, per-plant yield, phenology scores) arrive once a year as <span class="route">Long_Data &lt;year&gt;.xlsx</span> — 2024 (English labels) and 2025 (Dutch labels, finer treatment codes) exist today. Modelled as <strong>one device per treatment</strong>, harmonising the differing yearly vocabularies, and ingestible per-year without disturbing prior years.</p>
+        <ul>
+          <li><span class="route">wp6-blue-ingest-long-data</span> CLI as the primary path</li>
+          <li>Three small <em>generic</em> extensions to the shared capability (sample preservation, per-year replace) rather than a copy of the flow</li>
+        </ul>
+        <div class="actions">
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/sources/long_data/history">long_data audit history</a>
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/">Home — manual freshness</a>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================== THEME 2: MULTI-HEIGHT SENSOR ===================== -->
+  <section class="theme">
+    <h2>📏 Multi-height sensor views for the Red twin</h2>
+    <p class="theme-sub">Light in the greenhouse varies sharply with height (the natural-light sensor above the lamps vs. total-light below). A new section makes that vertical structure visible.</p>
+
+    <div class="hero red">
+
+      <div class="card">
+        <h3>Multi Height section hub</h3>
+        <div class="tags"><span class="pill red">Red</span></div>
+        <p>A landing hub under <span class="route">/multi_height</span> gathers height-based views as cards — new views slot in by adding one entry. Cumulative DLI charting and a date parameter landed alongside it.</p>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/multi_height">Open the hub → Red /multi_height</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Simple Greenhouse View &amp; Wire Sensor Trends</h3>
+        <div class="tags"><span class="pill red">Red</span></div>
+        <ul>
+          <li><strong>Simple Greenhouse View</strong> — latest PAR and Daily Light Integral mapped onto the greenhouse layout at each sensor height (SVG layout).</li>
+          <li><strong>Wire Sensor Trends</strong> — PAR, temperature, humidity and CO₂ over time from the multi-height wire, <em>one line per height</em>.</li>
+        </ul>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/multi_height/single-simple">Simple Greenhouse View</a>
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/multi_height/wire-trends">Wire Sensor Trends</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Data model: multi-wire, per-height devices</h3>
+        <div class="tags"><span class="pill red">Red</span></div>
+        <p>The underlying model switched to <span class="route">wire_sensors</span> — each height on the wire is its own device, supporting multiple wires. Directional reference images of the physical twin were added to the docs.</p>
+        <p class="route" style="color:var(--red)">⚠︎ Note for the meeting: the wire sensors are physically deployed outside for testing (~June 2026), so current values are not representative — risk-threshold tuning is intentionally deferred.</p>
+        <details class="more">
+          <summary>Commits</summary>
+          <div class="commitlist">
+            <code>2dbc43c</code> feat(multi-height): switch to wire_sensors, multi-wire per-height devices<br>
+            <code>f131630</code> feat(multi-height): add section hub, cumulative DLI chart, and date param<br>
+            <code>c580f37</code> docs: add red twin directional images
+          </div>
+        </details>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================== THEME 3: CHARTS & VISUALIZATION ===================== -->
+  <section class="theme">
+    <h2>📊 Charts &amp; visualization</h2>
+    <p class="theme-sub">Faster charts that scale to long date ranges, and richer reading of the data.</p>
+
+    <div class="card">
+      <h3>Server-side aggregation + min/max range bands</h3>
+      <div class="tags"><span class="pill shared">Shared</span><span class="pill blue">Blue</span><span class="pill red">Red</span></div>
+      <ul>
+        <li><strong>Server-side chart aggregation</strong> via TimescaleDB <span class="route">time_bucket</span>, with a count-weighted merge on the client — long ranges render without shipping every raw point.</li>
+        <li><strong>Min/max range band</strong> drawn on line charts, with the band's min &amp; max surfaced in the hover tooltip.</li>
+        <li>Unique line colours via a sorted-index palette (no more clashing series).</li>
+      </ul>
+      <div class="actions">
+        <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/dli/history">Red DLI history charts</a>
+        <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/dashboard">Blue dashboard</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Home &amp; dashboard UI refresh</h3>
+      <div class="tags"><span class="pill blue">Blue</span><span class="pill grey">Grey</span></div>
+      <p>Explore was consolidated into 3 source-aware tabs; a hero card and template card were added to the home page; PAR dashboard, dark-theme fixes and stronger, de-duplicated colours landed. These generic platform capabilities are best seen on the public Grey demo (no login needed).</p>
+      <div class="actions">
+        <a class="btn grey" href="https://wp6-grey.spohf.fontysvenlo.dev/">Grey home (public demo)</a>
+        <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/">Blue home</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== THEME 4: STATUS & COVERAGE ===================== -->
+  <section class="theme">
+    <h2>🟢 Status &amp; coverage</h2>
+    <p class="theme-sub">The /status pages now distinguish where data comes from.</p>
+
+    <div class="card">
+      <h3>Coverage split by manual vs. sensor source</h3>
+      <div class="tags"><span class="pill blue">Blue</span><span class="pill red">Red</span></div>
+      <p>Both twins' status pages now split coverage into <strong>manual</strong> and <strong>sensor</strong> sources, so a manual upload's freshness reads separately from live sensor feeds. Unmeasured weeks were softened from solid to translucent grey for clarity.</p>
+      <div class="actions">
+        <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/status">Blue /status</a>
+        <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/status">Red /status</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== THEME 5: PLATFORM & ARCHITECTURE ===================== -->
+  <section class="theme">
+    <h2>⚙️ Platform &amp; architecture (under the hood)</h2>
+    <p class="theme-sub">Less visible, but it's what keeps the twins fast and the codebase maintainable.</p>
+
+    <div class="card">
+      <h3>TimescaleDB performance &amp; Red parity</h3>
+      <div class="tags"><span class="pill shared">Shared</span><span class="pill red">Red</span></div>
+      <ul>
+        <li>Background continuous-aggregate refresh policy + mode-aware in-band refresh; scoped incremental cagg refresh.</li>
+        <li>Postgres tuning and resource bumps for analytical reads.</li>
+        <li>Red gained TSDB-cached aggregates, reaching status-data parity with Blue.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>Clean layering &amp; CI</h3>
+      <div class="tags"><span class="pill shared">Shared</span></div>
+      <ul>
+        <li>Twin-agnostic OpenMeteo client moved to <span class="route">shared/weather.py</span>; Blue owns its readings DDL while <span class="route">db/schema</span> stays twin-agnostic — upholding the rule that <em>shared/ must not know red/blue specifics</em>.</li>
+        <li>E2E tests run in a single CI check with a dev-auth mode so the Blue app starts without OIDC secrets.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="page">
+    <p>Live dashboards: <code>wp6-blue.spohf.fontysvenlo.dev</code> · <code>wp6-red.spohf.fontysvenlo.dev</code> (login required) · <code>wp6-grey.spohf.fontysvenlo.dev</code> (public demo, synthetic data).</p>
+    <p>Generated from <code>git log --since=2026-05-08</code> on <code>main</code>, plus <code>issues/</code> PRDs. All deep links verified against the live environment.</p>
+  </footer>
+
+</div>
+</body>
+</html>

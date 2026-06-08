@@ -63,6 +63,10 @@ Pending work:
 
 see [architecture](architecture/index.md)
 
+## Changelog
+
+see the [monthly changelog](changelog/index.md) for new functionality delivered each month
+
 ## Code repository
 
 github [SPoHF-WP6-Twins repository](https://github.com/SPoHF/SPoHF-WP6-Twins/)
