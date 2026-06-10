@@ -7,6 +7,7 @@ from wp6_data.blue import manual as blue_manual
 from wp6_data.blue.provider import BlueSensorProvider
 from wp6_data.blue.routes import charts as blue_charts
 from wp6_data.blue.routes import ops
+from wp6_data.blue.routes.monitor import manual as manual_monitor
 from wp6_data.blue.routes.monitor import router as monitor_router
 from wp6_data.config import Settings
 from wp6_data.shared import render_card
@@ -18,9 +19,16 @@ settings = Settings()
 
 def _monitor_card() -> str:
     return render_card(
-        "Plant Monitor",
-        '<a href="/monitor" role="button">Plant Monitor</a>',
-        description="GDD, soil conditions, light, and microclimate analytics.",
+        "Monitors",
+        (
+            '<a href="/sensor-monitor" role="button">Sensor Monitor</a>'
+            ' <a href="/manual-monitor" role="button" class="outline">'
+            'Manual Dashboards</a>'
+        ),
+        description=(
+            "Sensor monitor (GDD, soil, light, microclimate) and manual "
+            "measurement dashboards for uploaded long_data files."
+        ),
     )
 
 YOOKR_PROJECT = "yookr-direct"
@@ -60,6 +68,7 @@ config = TwinConfig(
     ),
     extra_routers=[
         ops.router, blue_charts.router, monitor_router,
+        manual_monitor.router,
         *blue_manual.manual_routers(),
     ],
     hero_cards=[_monitor_card],

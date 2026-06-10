@@ -17,6 +17,10 @@ TREATMENT_COLORS: dict[str, str] = {
     "Org1":            "#15803d",  # dark green    — organic
     "Org2":            "#84cc16",  # lime green
     "Ca":              "#dc2626",  # red           — calcium
+    "G_K":             "#0f766e",  # deep teal     — generative-K regime
+    "V_CA":            "#fb7185",  # rose          — vegetative-Ca regime
+    "V_CA_G_BrPK":     "#7c2d12",  # brown         — staged mixed regime
+    "V_K_G_CaBrP":     "#4c1d95",  # indigo        — staged mixed regime
     "Ca1":             "#f97316",  # orange
     "Weather Station": "#111827",  # near-black    — outdoor reference
 }

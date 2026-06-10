@@ -43,7 +43,7 @@ async def light_chart(
     except Exception as e:
         return render_page(
             PAGE_TITLE, f"<p>Error fetching data: {e}</p>",
-            show_back_link=True, back_url="/monitor",
+            show_back_link=True, back_url="/sensor-monitor",
             data_source=provider.data_source_label,
         )
 
@@ -54,7 +54,7 @@ async def light_chart(
             PAGE_TITLE,
             f"<h1>Light</h1>{date_filter}"
             "<p>No light sensor data for the selected period.</p>",
-            show_back_link=True, back_url="/monitor",
+            show_back_link=True, back_url="/sensor-monitor",
             data_source=provider.data_source_label,
         )
 
@@ -67,7 +67,7 @@ async def light_chart(
     """
     return render_page(
         PAGE_TITLE, content,
-        show_back_link=True, back_url="/monitor",
+        show_back_link=True, back_url="/sensor-monitor",
         data_source=provider.data_source_label,
     )
 

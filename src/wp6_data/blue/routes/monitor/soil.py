@@ -49,7 +49,7 @@ async def soil_conditions(
     except Exception as e:
         return render_page(
             PAGE_TITLE, f"<p>Error fetching data: {e}</p>",
-            show_back_link=True, back_url="/monitor",
+            show_back_link=True, back_url="/sensor-monitor",
             data_source=provider.data_source_label,
         )
 
@@ -60,7 +60,7 @@ async def soil_conditions(
             PAGE_TITLE,
             f"<h1>Soil Conditions</h1>{date_filter}"
             "<p>No soil sensor data for the selected period.</p>",
-            show_back_link=True, back_url="/monitor",
+            show_back_link=True, back_url="/sensor-monitor",
             data_source=provider.data_source_label,
         )
 
@@ -73,7 +73,7 @@ async def soil_conditions(
     """
     return render_page(
         PAGE_TITLE, content,
-        show_back_link=True, back_url="/monitor",
+        show_back_link=True, back_url="/sensor-monitor",
         data_source=provider.data_source_label,
     )
 
