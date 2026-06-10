@@ -1365,6 +1365,8 @@ UNIFIED_CHART_JS = """
     var rightSpecs = (params.get('r') || '').split(',').filter(Boolean);
     var startDate = params.get('start') || '';
     var endDate = params.get('end') || '';
+    var isBlueDashboard =
+        (document.documentElement.dataset.dashboard || 'blue') === 'blue';
 
     function readLabelFormat(name, fallback) {
         var v = params.get(name) || '';
@@ -1397,7 +1399,7 @@ UNIFIED_CHART_JS = """
     var _idealHiRaw = parseFloat(params.get('ideal_hi'));
     if (Number.isFinite(_idealLoRaw)) idealLo = _idealLoRaw;
     if (Number.isFinite(_idealHiRaw)) idealHi = _idealHiRaw;
-    fertigationOverlay = params.get('fert_events') === '1';
+    fertigationOverlay = isBlueDashboard && params.get('fert_events') === '1';
     if (params.get('split') === '1') {
         splitMode = true;
         // Right-axis values fall back to left for any param not explicitly set
@@ -3278,6 +3280,18 @@ def render_unified_chart_page(
         'stroke-width="1.1"/>'
         '<line x1="3" y1="6.2" x2="9" y2="6.2" stroke="currentColor" stroke-width="1.1"/></svg>'
     )
+    fertigation_toggle_html = ""
+    fertigation_warning_html = ""
+    if _dashboard_id == "blue":
+        fertigation_toggle_html = """
+                    <label class="advanced-toggle">
+                        <input type="checkbox" id="fertigation-overlay">
+                        Event overlay (fertigation)
+                    </label>
+        """
+        fertigation_warning_html = (
+            '<div class="chart-warning" id="fertigation-warning" style="display:none"></div>'
+        )
 
     content = f"""
     <div class="chart-layout">
@@ -3445,10 +3459,7 @@ to {end.isoformat()}</summary>
                         </div>
                         <small>Horizontal reference line/band (Y-axis)</small>
                     </div>
-                    <label class="advanced-toggle">
-                        <input type="checkbox" id="fertigation-overlay">
-                        Event overlay (fertigation)
-                    </label>
+                    {fertigation_toggle_html}
                 </div>
             </details>
         </div>
@@ -3458,7 +3469,7 @@ to {end.isoformat()}</summary>
             <button class="panel-toggle outline" id="save-to-dashboard"
                 title="Save current chart view to dashboard">&#9734; Save</button>
             <div class="chart-stats" id="chart-stats"></div>
-            <div class="chart-warning" id="fertigation-warning" style="display:none"></div>
+            {fertigation_warning_html}
             <div class="chart-empty" id="chart-empty">
                 Select sensors from the panel to start charting</div>
             <div id="chart-area"></div>

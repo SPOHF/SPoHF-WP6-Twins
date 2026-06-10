@@ -43,8 +43,9 @@ class Settings(BaseSettings):
     blue_export_dir: str = "/data/exports"
 
     # Optional CSV path for farm-wide fertigation events overlay in /chart.
-    # If empty, blue routes fall back to uploads-blue/fertigation/
-    # fertigation_events.csv relative to the workspace.
+    # If empty, blue routes use the newest manual upload under
+    # {blue_upload_dir}/fertigation_events/*.csv, then fall back to a
+    # workspace-relative dev path uploads-blue/fertigation/fertigation_events.csv.
     blue_fertigation_events_csv: str = ""
 
     # PVC mount for blue manual uploads (insect CSV, future sources). Mirrors

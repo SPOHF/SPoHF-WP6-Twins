@@ -5,12 +5,32 @@ from datetime import date
 from pathlib import Path
 
 
-def resolve_fertigation_csv_path(configured_path: str | None) -> Path:
-    """Resolve fertigation events CSV path from optional configured value."""
+def resolve_fertigation_csv_path(
+    configured_path: str | None,
+    upload_dir: str | None = None,
+) -> Path:
+    """Resolve fertigation events CSV path.
+
+    Priority:
+    1) Explicit configured path.
+    2) Most recent manual upload under {upload_dir}/fertigation_events/*.csv.
+    3) Workspace fallback uploads-blue/fertigation/fertigation_events.csv.
+    """
     configured = (configured_path or "").strip()
     if configured:
         p = Path(configured)
         return p if p.is_absolute() else Path.cwd() / p
+
+    if upload_dir:
+        source_dir = Path(upload_dir) / "fertigation_events"
+        latest_csv = max(
+            source_dir.glob("*.csv"),
+            key=lambda p: p.stat().st_mtime,
+            default=None,
+        )
+        if latest_csv is not None:
+            return latest_csv
+
     return Path.cwd() / "uploads-blue" / "fertigation" / "fertigation_events.csv"
 
 

@@ -39,7 +39,10 @@ _settings = Settings()
 
 
 def _fertigation_csv_path():
-    return resolve_fertigation_csv_path(_settings.blue_fertigation_events_csv)
+    return resolve_fertigation_csv_path(
+        _settings.blue_fertigation_events_csv,
+        _settings.blue_upload_dir,
+    )
 
 
 def _load_fertigation_event_days() -> tuple[list[date], tuple[date, date] | None]:

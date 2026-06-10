@@ -22,7 +22,10 @@ router = APIRouter(prefix="/api", dependencies=[Depends(verify_session_user)])
 
 def _fertigation_csv_path():
     """Resolve fertigation events CSV path for blue."""
-    return resolve_fertigation_csv_path(_settings.blue_fertigation_events_csv)
+    return resolve_fertigation_csv_path(
+        _settings.blue_fertigation_events_csv,
+        _settings.blue_upload_dir,
+    )
 
 
 @router.get("/fertigation-events")
