@@ -1124,6 +1124,46 @@ BASE_CSS = """
         opacity: 0.45;
         pointer-events: none;
     }
+    .advanced-options {
+        margin-top: 0.6rem;
+    }
+    .advanced-options > summary {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--dashboard-primary);
+        cursor: pointer;
+    }
+    .advanced-options .advanced-inner {
+        margin-top: 0.4rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    .advanced-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        margin: 0;
+        cursor: pointer;
+    }
+    .advanced-toggle input[type="checkbox"] {
+        margin: 0;
+        width: auto;
+        appearance: auto;
+        -webkit-appearance: checkbox;
+        accent-color: var(--dashboard-primary);
+        transform: scale(1.05);
+        transform-origin: center;
+    }
+    .chart-warning {
+        margin: 0.35rem 0 0.5rem;
+        padding: 0.45rem 0.65rem;
+        border: 1px solid rgba(245, 158, 11, 0.45);
+        background: rgba(245, 158, 11, 0.08);
+        border-radius: 8px;
+        font-size: 0.82rem;
+    }
     .axis-split-toggle {
         display: flex;
         align-items: center;
@@ -1300,6 +1340,11 @@ UNIFIED_CHART_JS = """
     var splitMode = false;
     var idealLo = null;
     var idealHi = null;
+    var fertigationOverlay = false;
+    var fertigationEvents = [];
+    var fertigationFirstDate = null;
+    var fertigationLastDate = null;
+    var fertigationTotalEvents = 0;
     function defaultAxisCfg() {
         return {
             labelFormat: 'smart',
@@ -1351,6 +1396,7 @@ UNIFIED_CHART_JS = """
     var _idealHiRaw = parseFloat(params.get('ideal_hi'));
     if (Number.isFinite(_idealLoRaw)) idealLo = _idealLoRaw;
     if (Number.isFinite(_idealHiRaw)) idealHi = _idealHiRaw;
+    fertigationOverlay = params.get('fert_events') === '1';
     if (params.get('split') === '1') {
         splitMode = true;
         // Right-axis values fall back to left for any param not explicitly set
@@ -1380,6 +1426,9 @@ UNIFIED_CHART_JS = """
         boxmode: 'group'
     };
     Plotly.newPlot(chartDiv, [], layout, {responsive: true});
+    chartDiv.on('plotly_relayout', function() {
+        updateFertigationWarning();
+    });
 
     // Toggle panel
     if (toggleBtn) {
@@ -1417,6 +1466,7 @@ UNIFIED_CHART_JS = """
             syncUrl();
             updateStats();
             updateY2();
+            updateFertigationWarning();
             updateAllBadges();
         });
     }
@@ -1670,8 +1720,11 @@ UNIFIED_CHART_JS = """
     // --- Ideal range inputs ---
     var idealLoInput = document.getElementById('ideal-lo');
     var idealHiInput = document.getElementById('ideal-hi');
+    var fertigationInput = document.getElementById('fertigation-overlay');
+    var fertigationWarning = document.getElementById('fertigation-warning');
     if (idealLoInput && idealLo !== null) idealLoInput.value = idealLo;
     if (idealHiInput && idealHi !== null) idealHiInput.value = idealHi;
+    if (fertigationInput) fertigationInput.checked = fertigationOverlay;
     function onIdealChange() {
         var v;
         if (idealLoInput) {
@@ -1687,6 +1740,122 @@ UNIFIED_CHART_JS = """
     }
     if (idealLoInput) idealLoInput.addEventListener('change', onIdealChange);
     if (idealHiInput) idealHiInput.addEventListener('change', onIdealChange);
+    if (fertigationInput) {
+        fertigationInput.addEventListener('change', function() {
+            fertigationOverlay = fertigationInput.checked;
+            updateIdealRange();
+            updateFertigationWarning();
+            syncUrl();
+        });
+    }
+
+    function updateFertigationWarning() {
+        if (!fertigationWarning) return;
+        if (!fertigationOverlay) {
+            fertigationWarning.style.display = 'none';
+            fertigationWarning.textContent = '';
+            return;
+        }
+        if (Object.keys(activeSeries).length === 0) {
+            fertigationWarning.style.display = 'none';
+            fertigationWarning.textContent = '';
+            return;
+        }
+        function toMillis(iso) {
+            var ms = Date.parse(iso);
+            return Number.isFinite(ms) ? ms : null;
+        }
+        function currentWindow() {
+            var lx = chartDiv.layout && chartDiv.layout.xaxis;
+            var r = lx && lx.range;
+            if (r && r.length === 2) {
+                var a = toMillis(r[0]);
+                var b = toMillis(r[1]);
+                if (a !== null && b !== null) {
+                    return { start: Math.min(a, b), end: Math.max(a, b) };
+                }
+            }
+            var s = startDate ? toMillis(startDate + 'T00:00:00') : null;
+            var e = endDate ? toMillis(endDate + 'T23:59:59') : null;
+            if (s !== null && e !== null) {
+                return { start: Math.min(s, e), end: Math.max(s, e) };
+            }
+            var minT = null;
+            var maxT = null;
+            Object.keys(activeSeries).forEach(function(k) {
+                var sd = seriesData[k];
+                if (!sd || !sd.times || !sd.times.length) return;
+                var first = toMillis(sd.times[0]);
+                var last = toMillis(sd.times[sd.times.length - 1]);
+                if (first === null || last === null) return;
+                var lo = Math.min(first, last);
+                var hi = Math.max(first, last);
+                minT = minT === null ? lo : Math.min(minT, lo);
+                maxT = maxT === null ? hi : Math.max(maxT, hi);
+            });
+            if (minT !== null && maxT !== null) {
+                return { start: minT, end: maxT };
+            }
+            return null;
+        }
+        var window = currentWindow();
+        var inView = 0;
+        if (window) {
+            fertigationEvents.forEach(function(t) {
+                var ms = toMillis(t);
+                if (ms !== null && ms >= window.start && ms <= window.end) {
+                    inView += 1;
+                }
+            });
+        }
+        if (fertigationTotalEvents > 0 && inView === 0) {
+            var rangeTxt = (fertigationFirstDate && fertigationLastDate)
+                ? (fertigationFirstDate + ' to ' + fertigationLastDate)
+                : 'unknown range';
+            fertigationWarning.textContent =
+                'No fertigation events for the current view. '
+                + 'Available fertigation dates: ' + rangeTxt + '.';
+            fertigationWarning.style.display = 'block';
+            return;
+        }
+        if (fertigationTotalEvents === 0) {
+            fertigationWarning.textContent =
+                'No fertigation events are available yet (CSV missing or empty).';
+            fertigationWarning.style.display = 'block';
+            return;
+        }
+        fertigationWarning.style.display = 'none';
+        fertigationWarning.textContent = '';
+    }
+
+    function fetchFertigationEvents() {
+        var url = '/api/fertigation-events';
+        var qp = [];
+        if (startDate) qp.push('start=' + encodeURIComponent(startDate));
+        if (endDate) qp.push('end=' + encodeURIComponent(endDate));
+        if (qp.length) url += '?' + qp.join('&');
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(resp) {
+                fertigationEvents = (resp.events || []).map(function(e) {
+                    return e.time;
+                });
+                fertigationFirstDate = resp.first_date || null;
+                fertigationLastDate = resp.last_date || null;
+                fertigationTotalEvents = resp.total_events || 0;
+                updateIdealRange();
+                updateFertigationWarning();
+            })
+            .catch(function() {
+                fertigationEvents = [];
+                fertigationFirstDate = null;
+                fertigationLastDate = null;
+                fertigationTotalEvents = 0;
+                updateIdealRange();
+                updateFertigationWarning();
+            });
+    }
+    fetchFertigationEvents();
 
     function buildTree(sensors, groupBy) {
         // Group sensors into {groupKey: [{device, sensor, ...}, ...]}
@@ -2345,37 +2514,53 @@ UNIFIED_CHART_JS = """
     }
 
     function updateIdealRange() {
-        // Ideal range is ambiguous with active dual Y axes; keep stored values but clear visuals.
-        if (hasDualAxesActive()) {
-            Plotly.relayout(chartDiv, { shapes: [] });
-            return;
-        }
-        var yref = idealRangeAxisRef();
         var shapes = [];
-        var lo = idealLo;
-        var hi = idealHi;
-        if (lo !== null && hi !== null && lo < hi) {
-            shapes.push({
-                type: 'rect',
-                x0: 0, x1: 1, xref: 'paper',
-                yref: yref,
-                y0: lo, y1: hi,
-                fillcolor: 'rgba(34, 197, 94, 0.12)',
-                line: { width: 0 },
-                layer: 'below'
-            });
-        } else {
-            var lineVal = lo !== null ? lo : hi;
-            if (lineVal !== null) {
+        // Ideal range is ambiguous with active dual Y axes; keep stored values but
+        // suppress only ideal-range visuals, not other overlays.
+        if (!hasDualAxesActive()) {
+            var yref = idealRangeAxisRef();
+            var lo = idealLo;
+            var hi = idealHi;
+            if (lo !== null && hi !== null && lo < hi) {
                 shapes.push({
-                    type: 'line',
+                    type: 'rect',
                     x0: 0, x1: 1, xref: 'paper',
                     yref: yref,
-                    y0: lineVal, y1: lineVal,
-                    line: { color: 'rgba(34, 197, 94, 0.85)', width: 1.5, dash: 'dash' }
+                    y0: lo, y1: hi,
+                    fillcolor: 'rgba(34, 197, 94, 0.12)',
+                    line: { width: 0 },
+                    layer: 'below'
                 });
+            } else {
+                var lineVal = lo !== null ? lo : hi;
+                if (lineVal !== null) {
+                    shapes.push({
+                        type: 'line',
+                        x0: 0, x1: 1, xref: 'paper',
+                        yref: yref,
+                        y0: lineVal, y1: lineVal,
+                        line: { color: 'rgba(34, 197, 94, 0.85)', width: 1.5, dash: 'dash' }
+                    });
+                }
             }
         }
+
+        if (fertigationOverlay && fertigationEvents.length) {
+            fertigationEvents.forEach(function(t) {
+                shapes.push({
+                    type: 'line',
+                    xref: 'x',
+                    x0: t,
+                    x1: t,
+                    yref: 'paper',
+                    y0: 0,
+                    y1: 1,
+                    line: { color: 'rgba(14, 165, 233, 0.9)', width: 1, dash: 'dot' },
+                    layer: 'above'
+                });
+            });
+        }
+
         Plotly.relayout(chartDiv, { shapes: shapes });
     }
 
@@ -2472,6 +2657,8 @@ UNIFIED_CHART_JS = """
         else p.delete('ideal_lo');
         if (idealHi !== null) p.set('ideal_hi', idealHi);
         else p.delete('ideal_hi');
+        if (fertigationOverlay) p.set('fert_events', '1');
+        else p.delete('fert_events');
         var newUrl = window.location.pathname;
         var qs = p.toString();
         if (qs) newUrl += '?' + qs;
@@ -2488,7 +2675,7 @@ UNIFIED_CHART_JS = """
         var params = new URLSearchParams(window.location.search);
         ['s', 'r', 'lbl', 'ct', 'agg', 'bkt', 'band',
          'split', 'lbl_r', 'ct_r', 'agg_r', 'bkt_r', 'band_r',
-         'ideal_lo', 'ideal_hi'].forEach(function(name) {
+            'ideal_lo', 'ideal_hi', 'fert_events'].forEach(function(name) {
             var val = params.get(name);
             if (val) {
                 var input = document.createElement('input');
@@ -2505,7 +2692,7 @@ UNIFIED_CHART_JS = """
         if (!dateForm) return;
         ['s', 'r', 'lbl', 'ct', 'agg', 'bkt', 'band',
          'split', 'lbl_r', 'ct_r', 'agg_r', 'bkt_r', 'band_r',
-         'ideal_lo', 'ideal_hi'].forEach(function(name) {
+         'ideal_lo', 'ideal_hi', 'fert_events'].forEach(function(name) {
             var existing = dateForm.querySelector(
                 'input[name="' + name + '"]');
             var p = new URLSearchParams(window.location.search);
@@ -2618,7 +2805,7 @@ DASHBOARD_JS = """
         params.set('end', dates.end);
         ['lbl', 'agg', 'bkt', 'band',
          'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r',
-         'ideal_lo', 'ideal_hi'].forEach(function(k) {
+         'ideal_lo', 'ideal_hi', 'fert_events'].forEach(function(k) {
             if (chart[k]) params.set(k, chart[k]);
         });
         return '/chart?' + params.toString();
@@ -2836,6 +3023,7 @@ SAVE_TO_DASHBOARD_JS = """
             band_r: params.get('band_r') || '',
             ideal_lo: params.get('ideal_lo') || '',
             ideal_hi: params.get('ideal_hi') || '',
+            fert_events: params.get('fert_events') || '',
             createdAt: new Date().toISOString()
         };
 
@@ -3213,19 +3401,28 @@ to {end.isoformat()}</summary>
                 <small class="band-hint">shade lowest–highest in each bucket</small>
                 </div>
             </div>
-            <div class="ideal-range-section" id="ideal-range-section">
-                <h4>Ideal range</h4>
-                <div class="ideal-range-inputs">
-                    <input type="number" id="ideal-lo" class="ideal-input"
-                           aria-label="Ideal minimum"
-                           step="any" placeholder="Min">
-                    <span class="date-sep">&ndash;</span>
-                    <input type="number" id="ideal-hi" class="ideal-input"
-                           aria-label="Ideal maximum"
-                           step="any" placeholder="Max">
+            <details class="advanced-options" id="advanced-options">
+                <summary>Advanced options</summary>
+                <div class="advanced-inner">
+                    <div class="ideal-range-section" id="ideal-range-section">
+                        <h4>Ideal range</h4>
+                        <div class="ideal-range-inputs">
+                            <input type="number" id="ideal-lo" class="ideal-input"
+                                   aria-label="Ideal minimum"
+                                   step="any" placeholder="Min">
+                            <span class="date-sep">&ndash;</span>
+                            <input type="number" id="ideal-hi" class="ideal-input"
+                                   aria-label="Ideal maximum"
+                                   step="any" placeholder="Max">
+                        </div>
+                        <small>Horizontal reference line/band (Y-axis)</small>
+                    </div>
+                    <label class="advanced-toggle">
+                        <input type="checkbox" id="fertigation-overlay">
+                        Event overlay (fertigation)
+                    </label>
                 </div>
-                <small>Horizontal reference line/band (Y-axis)</small>
-            </div>
+            </details>
         </div>
         <div class="chart-main">
             <button class="panel-toggle outline" id="panel-toggle">
@@ -3233,6 +3430,7 @@ to {end.isoformat()}</summary>
             <button class="panel-toggle outline" id="save-to-dashboard"
                 title="Save current chart view to dashboard">&#9734; Save</button>
             <div class="chart-stats" id="chart-stats"></div>
+            <div class="chart-warning" id="fertigation-warning" style="display:none"></div>
             <div class="chart-empty" id="chart-empty">
                 Select sensors from the panel to start charting</div>
             <div id="chart-area"></div>

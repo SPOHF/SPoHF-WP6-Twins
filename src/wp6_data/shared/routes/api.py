@@ -1,6 +1,8 @@
 """Shared JSON API endpoints for the unified chart page."""
 
+import csv
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Annotated, Any
 
 import pandas as pd
@@ -19,6 +21,22 @@ from wp6_data.shared.twin import SensorDataProvider
 _settings = Settings()
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_session_user)])
+
+
+def _fertigation_csv_path() -> Path:
+    """Resolve fertigation events CSV path.
+
+    Priority:
+    1) ``WP6_BLUE_FERTIGATION_EVENTS_CSV`` / ``Settings.blue_fertigation_events_csv``
+    2) Workspace-relative fallback: uploads-blue/fertigation/fertigation_events.csv
+    """
+    configured = (_settings.blue_fertigation_events_csv or "").strip()
+    if configured:
+        p = Path(configured)
+        if p.is_absolute():
+            return p
+        return Path.cwd() / p
+    return Path.cwd() / "uploads-blue" / "fertigation" / "fertigation_events.csv"
 
 
 @router.get("/sensors")
@@ -115,3 +133,72 @@ async def get_series(
             rec["count"] = int(row["count"])
         records.append(rec)
     return {"data": records, "truncated": truncated, "limit": limit}
+
+
+@router.get("/fertigation-events")
+async def fertigation_events(
+    start: Annotated[date | None, Query()] = None,
+    end: Annotated[date | None, Query()] = None,
+) -> dict[str, Any]:
+    """List farm-wide fertigation event starts from CSV.
+
+    The source file has one row per treatment per day; this endpoint returns
+    unique event starts per date. Rows with ``volume_ml_per_plant <= 0`` are
+    ignored by design.
+    """
+    path = _fertigation_csv_path()
+    if not path.exists():
+        return {
+            "events": [],
+            "source": str(path),
+            "first_date": None,
+            "last_date": None,
+            "total_events": 0,
+            "in_view_events": 0,
+        }
+
+    all_days: set[date] = set()
+    try:
+        with path.open("r", encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                day_raw = (row.get("date") or "").strip()
+                if not day_raw:
+                    continue
+                try:
+                    day = date.fromisoformat(day_raw)
+                except ValueError:
+                    continue
+
+                vol_raw = (row.get("volume_ml_per_plant") or "").strip()
+                try:
+                    volume = float(vol_raw)
+                except ValueError:
+                    volume = 0.0
+                if volume <= 0:
+                    continue
+                all_days.add(day)
+    except OSError:
+        return JSONResponse(
+            content={"error": "Failed to read fertigation events CSV"},
+            status_code=500,
+        )
+
+    in_view_days = [
+        d for d in all_days
+        if (start is None or d >= start) and (end is None or d <= end)
+    ]
+    sorted_all = sorted(all_days)
+
+    events = [
+        {"time": f"{d.isoformat()}T00:00:00", "date": d.isoformat()}
+        for d in sorted(in_view_days)
+    ]
+    return {
+        "events": events,
+        "source": str(path),
+        "first_date": sorted_all[0].isoformat() if sorted_all else None,
+        "last_date": sorted_all[-1].isoformat() if sorted_all else None,
+        "total_events": len(sorted_all),
+        "in_view_events": len(in_view_days),
+    }
