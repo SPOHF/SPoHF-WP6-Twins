@@ -216,7 +216,7 @@ async def _load_long_data(
     try:
         df = await provider.fetch_data(
             sensor_tags=_ALL_LONG_DATA_SENSORS,
-            device_names=_LONG_DATA_DEVICES,
+            device_names=sorted(_LONG_DATA_DEVICES),
             start=YEAR_START,
             end=YEAR_END,
         )

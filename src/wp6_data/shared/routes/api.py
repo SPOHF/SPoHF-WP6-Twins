@@ -154,7 +154,7 @@ async def fertigation_events(
 
     try:
         sorted_all = load_fertigation_event_days(path)
-    except OSError:
+    except (OSError, UnicodeError):
         return JSONResponse(
             content={"error": "Failed to read fertigation events CSV"},
             status_code=500,
