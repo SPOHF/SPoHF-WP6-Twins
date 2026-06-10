@@ -223,7 +223,7 @@ def _build_chart(df, *, fertigation_days: list[date]) -> str:
     # Farm-wide fertigation starts as vertical lines across all panels.
     for d in fertigation_days:
         fig.add_vline(
-            x=d.isoformat(),
+            x=f"{d.isoformat()}T00:00:00+00:00",
             line_width=1,
             line_dash="dot",
             line_color="rgba(14, 165, 233, 0.9)",
