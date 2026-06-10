@@ -1772,7 +1772,8 @@ UNIFIED_CHART_JS = """
             if (!iso) return null;
             // JS Date.parse is reliably supported up to milliseconds; trim microseconds.
             var normalized = iso.replace(/\.(\d{3})\d+$/, '.$1');
-            // Plotly is fed timezone-less strings that are intended to be UTC; make parsing explicit.
+            // Plotly gets timezone-less strings intended as UTC.
+            // Make parsing explicit.
             if (!/[zZ]$|[+-]\d\d:\d\d$/.test(normalized)) normalized += 'Z';
             var ms = Date.parse(normalized);
             return Number.isFinite(ms) ? ms : null;
