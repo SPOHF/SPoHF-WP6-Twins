@@ -47,7 +47,7 @@ def _load_fertigation_event_days() -> tuple[list[date], tuple[date, date] | None
     path = _fertigation_csv_path()
     try:
         sorted_days = load_fertigation_event_days(path)
-    except OSError:
+    except (OSError, UnicodeError):
         return [], None
 
     if not sorted_days:
