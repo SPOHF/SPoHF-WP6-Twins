@@ -2,16 +2,19 @@
 
 import os
 
-os.environ.setdefault("WP6_OIDC_DEV_AUTH", "true")
-os.environ.setdefault("WP6_OIDC_CLIENT_SECRET", "dev")
-os.environ.setdefault("WP6_OIDC_SESSION_SECRET", "dev-session-secret-dev-session-secret")
-
 import pytest
 from fastapi.testclient import TestClient
 
 
 @pytest.fixture(scope="module")
 def client():
+    os.environ.setdefault("WP6_OIDC_DEV_AUTH", "true")
+    os.environ.setdefault("WP6_OIDC_CLIENT_SECRET", "dev")
+    os.environ.setdefault(
+        "WP6_OIDC_SESSION_SECRET",
+        "dev-session-secret-dev-session-secret",
+    )
+
     # Keep shared dashboard identity globals isolated from other test modules.
     import wp6_data.shared.templates as tmpl
 
