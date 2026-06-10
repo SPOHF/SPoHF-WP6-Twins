@@ -44,10 +44,12 @@ def _fertigation_csv_path():
 
 def _load_fertigation_event_days() -> tuple[list[date], tuple[date, date] | None]:
     """Load global fertigation event dates from CSV (volume > 0 only)."""
+    import csv
+
     path = _fertigation_csv_path()
     try:
         sorted_days = load_fertigation_event_days(path)
-    except (OSError, UnicodeError):
+    except (OSError, UnicodeError, csv.Error):
         return [], None
 
     if not sorted_days:
