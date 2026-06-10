@@ -1,6 +1,7 @@
 """Shared JSON API endpoints for the unified chart page."""
 
 import csv
+import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
@@ -21,6 +22,7 @@ from wp6_data.shared.time import to_local_isoformat
 from wp6_data.shared.twin import SensorDataProvider
 
 _settings = Settings()
+_logger = logging.getLogger(__name__)
 _FERT_SOURCE = "fertigation_events"
 _FERT_SENSOR = "volume_ml_per_plant"
 
@@ -190,6 +192,7 @@ async def fertigation_events(
             )
             in_view_days = [r["day"] for r in await cur.fetchall() if r["day"] is not None]
     except Exception:
+        _logger.exception("Fertigation events DB lookup failed; falling back to CSV")
         in_view_days = []
         first_day = None
         last_day = None
@@ -197,7 +200,7 @@ async def fertigation_events(
 
     if total_events > 0:
         events = [
-            {"time": f"{d.isoformat()}T00:00:00", "date": d.isoformat()}
+            {"time": f"{d.isoformat()}T00:00:00+00:00", "date": d.isoformat()}
             for d in in_view_days
         ]
         return {
@@ -255,7 +258,7 @@ async def fertigation_events(
     sorted_all = sorted(all_days)
 
     events = [
-        {"time": f"{d.isoformat()}T00:00:00", "date": d.isoformat()}
+        {"time": f"{d.isoformat()}T00:00:00+00:00", "date": d.isoformat()}
         for d in sorted(in_view_days)
     ]
     return {
