@@ -50,11 +50,6 @@ def test_fertigation_events_csv_fallback_contract(client, monkeypatch, tmp_path)
     )
 
     import wp6_data.shared.routes.api as api_routes
-
-    def _raise_pool_error():
-        raise RuntimeError("pool not initialized")
-
-    monkeypatch.setattr(api_routes, "get_pool", _raise_pool_error)
     monkeypatch.setattr(api_routes, "_fertigation_csv_path", lambda: csv_path)
 
     resp = client.get("/api/fertigation-events?start=2026-06-02&end=2026-06-03")

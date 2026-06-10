@@ -1,6 +1,6 @@
 """Shared JSON API endpoints for the unified chart page."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Annotated, Any
 
 import pandas as pd
@@ -17,7 +17,6 @@ from wp6_data.shared.fertigation import (
 from wp6_data.shared.metadata import MetadataRegistry
 from wp6_data.shared.routes.deps import get_metadata, get_provider
 from wp6_data.shared.templates import resolve_date_range
-from wp6_data.shared.time import to_local_isoformat
 from wp6_data.shared.twin import SensorDataProvider
 
 _settings = Settings()
@@ -167,9 +166,7 @@ async def fertigation_events(
 
     events = [
         {
-            "time": to_local_isoformat(
-                datetime.fromisoformat(f"{d.isoformat()}T00:00:00+00:00")
-            ),
+            "time": f"{d.isoformat()}T00:00:00.000000",
             "date": d.isoformat(),
         }
         for d in in_view_days
