@@ -1,38 +1,20 @@
 """Contract test for GET /api/fertigation-events CSV fallback behavior."""
 
-import os
-
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from wp6_data.blue.routes import api as blue_api
+from wp6_data.shared.auth import verify_session_user
 
 
 @pytest.fixture(scope="module")
 def client():
-    os.environ["WP6_OIDC_DEV_AUTH"] = "true"
-    os.environ["WP6_OIDC_CLIENT_SECRET"] = "dev"
-    os.environ["WP6_OIDC_SESSION_SECRET"] = "dev-session-secret-dev-session-secret"
-
-    # Keep shared dashboard identity globals isolated from other test modules.
-    import wp6_data.shared.templates as tmpl
-
-    saved = (
-        tmpl._dashboard_id,
-        tmpl._dashboard_title,
-        tmpl._twin_theme_css,
-        tmpl._data_sources,
-    )
-    from wp6_data.grey.dashboard import app
-
-    try:
-        with TestClient(app) as c:
-            yield c
-    finally:
-        (
-            tmpl._dashboard_id,
-            tmpl._dashboard_title,
-            tmpl._twin_theme_css,
-            tmpl._data_sources,
-        ) = saved
+    app = FastAPI()
+    app.include_router(blue_api.router)
+    app.dependency_overrides[verify_session_user] = lambda: None
+    with TestClient(app) as c:
+        yield c
 
 
 def test_fertigation_events_csv_fallback_contract(client, monkeypatch, tmp_path):
@@ -46,8 +28,7 @@ def test_fertigation_events_csv_fallback_contract(client, monkeypatch, tmp_path)
         encoding="utf-8",
     )
 
-    import wp6_data.shared.routes.api as api_routes
-    monkeypatch.setattr(api_routes, "_fertigation_csv_path", lambda: csv_path)
+    monkeypatch.setattr(blue_api, "_fertigation_csv_path", lambda: csv_path)
 
     resp = client.get("/api/fertigation-events?start=2026-06-02&end=2026-06-03")
 

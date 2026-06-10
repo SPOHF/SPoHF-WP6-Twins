@@ -1,6 +1,5 @@
 """Shared JSON API endpoints for the unified chart page."""
 
-import csv
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any
 
@@ -11,10 +10,6 @@ from fastapi.responses import JSONResponse
 from wp6_data.config import Settings
 from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.auth import verify_session_user
-from wp6_data.shared.fertigation import (
-    load_fertigation_event_days,
-    resolve_fertigation_csv_path,
-)
 from wp6_data.shared.metadata import MetadataRegistry
 from wp6_data.shared.routes.deps import get_metadata, get_provider
 from wp6_data.shared.templates import resolve_date_range
@@ -22,20 +17,8 @@ from wp6_data.shared.time import to_local_isoformat
 from wp6_data.shared.twin import SensorDataProvider
 
 _settings = Settings()
-_FERT_CSV_SOURCE = "csv:fertigation_events"
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_session_user)])
-
-
-def _fertigation_csv_path():
-    """Resolve fertigation events CSV path.
-
-    Priority:
-    1) ``WP6_BLUE_FERTIGATION_EVENTS_CSV`` / ``Settings.blue_fertigation_events_csv``
-    2) Workspace-relative fallback: uploads-blue/fertigation/fertigation_events.csv
-    """
-    return resolve_fertigation_csv_path(_settings.blue_fertigation_events_csv)
-
 
 @router.get("/sensors")
 async def list_sensors(
@@ -133,51 +116,3 @@ async def get_series(
     return {"data": records, "truncated": truncated, "limit": limit}
 
 
-@router.get("/fertigation-events")
-async def fertigation_events(
-    start: Annotated[date | None, Query()] = None,
-    end: Annotated[date | None, Query()] = None,
-) -> dict[str, Any]:
-    """List farm-wide fertigation event starts.
-
-    Source is the fertigation-events CSV (volume > 0 rows).
-    """
-    path = _fertigation_csv_path()
-    if not path.exists():
-        return {
-            "events": [],
-            "source": _FERT_CSV_SOURCE,
-            "first_date": None,
-            "last_date": None,
-            "total_events": 0,
-            "in_view_events": 0,
-        }
-
-    try:
-        sorted_all = load_fertigation_event_days(path)
-    except (OSError, UnicodeError, csv.Error):
-        return JSONResponse(
-            content={"error": "Failed to read fertigation events CSV"},
-            status_code=500,
-        )
-
-    in_view_days = [
-        d for d in sorted_all
-        if (start is None or d >= start) and (end is None or d <= end)
-    ]
-
-    events = [
-        {
-            "time": f"{d.isoformat()}T00:00:00.000000",
-            "date": d.isoformat(),
-        }
-        for d in in_view_days
-    ]
-    return {
-        "events": events,
-        "source": _FERT_CSV_SOURCE,
-        "first_date": sorted_all[0].isoformat() if sorted_all else None,
-        "last_date": sorted_all[-1].isoformat() if sorted_all else None,
-        "total_events": len(sorted_all),
-        "in_view_events": len(in_view_days),
-    }

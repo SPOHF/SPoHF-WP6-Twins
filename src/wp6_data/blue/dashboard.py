@@ -5,6 +5,7 @@ from pathlib import Path
 from wp6_data.blue import deps
 from wp6_data.blue import manual as blue_manual
 from wp6_data.blue.provider import BlueSensorProvider
+from wp6_data.blue.routes import api as blue_api
 from wp6_data.blue.routes import charts as blue_charts
 from wp6_data.blue.routes import ops
 from wp6_data.blue.routes.monitor import legacy_router as legacy_monitor_router
@@ -68,7 +69,11 @@ config = TwinConfig(
         accent="#0ea5e9", surface_rgb="37, 99, 235",
     ),
     extra_routers=[
-        ops.router, blue_charts.router, monitor_router, legacy_monitor_router,
+        ops.router,
+        blue_api.router,
+        blue_charts.router,
+        monitor_router,
+        legacy_monitor_router,
         manual_monitor.router,
         *blue_manual.manual_routers(),
     ],

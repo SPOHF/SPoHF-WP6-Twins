@@ -134,50 +134,52 @@ async def test_incremental_sync_and_dashboard_display(tsdb_conn):
     assert stats["errors"] == [], f"Sync errors: {stats['errors']}"
 
     # ── 3. Assert TimescaleDB state ──────────────────────────────────
-    async with await psycopg.AsyncConnection.connect(TSDB_DSN) as conn:
-        async with conn.cursor(row_factory=dict_row) as cur:
-            # Device names in readings
-            await cur.execute(
-                "SELECT DISTINCT device_name FROM readings "
-                "WHERE device_name LIKE 'e2e-%' ORDER BY device_name"
-            )
-            devices = [r["device_name"] for r in await cur.fetchall()]
-            assert "e2e-device-alpha" in devices
-            assert "e2e-device-beta" in devices
+    async with (
+        await psycopg.AsyncConnection.connect(TSDB_DSN) as conn,
+        conn.cursor(row_factory=dict_row) as cur,
+    ):
+        # Device names in readings
+        await cur.execute(
+            "SELECT DISTINCT device_name FROM readings "
+            "WHERE device_name LIKE 'e2e-%' ORDER BY device_name"
+        )
+        devices = [r["device_name"] for r in await cur.fetchall()]
+        assert "e2e-device-alpha" in devices
+        assert "e2e-device-beta" in devices
 
-            # Sensor tags
-            await cur.execute(
-                "SELECT DISTINCT sensor_tag FROM readings "
-                "WHERE sensor_tag LIKE 'e2e-%' ORDER BY sensor_tag"
-            )
-            tags = [r["sensor_tag"] for r in await cur.fetchall()]
-            assert "e2e-temperature" in tags
-            assert "e2e-humidity" in tags
+        # Sensor tags
+        await cur.execute(
+            "SELECT DISTINCT sensor_tag FROM readings "
+            "WHERE sensor_tag LIKE 'e2e-%' ORDER BY sensor_tag"
+        )
+        tags = [r["sensor_tag"] for r in await cur.fetchall()]
+        assert "e2e-temperature" in tags
+        assert "e2e-humidity" in tags
 
-            # Reading values
-            await cur.execute(
-                "SELECT raw_value FROM readings "
-                "WHERE sensor_tag = 'e2e-temperature'"
-            )
-            values = [r["raw_value"] for r in await cur.fetchall()]
-            assert "21.5" in values
+        # Reading values
+        await cur.execute(
+            "SELECT raw_value FROM readings "
+            "WHERE sensor_tag = 'e2e-temperature'"
+        )
+        values = [r["raw_value"] for r in await cur.fetchall()]
+        assert "21.5" in values
 
-            # Daily coverage entries
-            await cur.execute(
-                "SELECT count(*) AS cnt FROM daily_coverage "
-                "WHERE device_name LIKE 'e2e-%'"
-            )
-            row = await cur.fetchone()
-            assert row["cnt"] > 0, "Expected daily_coverage entries"
+        # Daily coverage entries
+        await cur.execute(
+            "SELECT count(*) AS cnt FROM daily_coverage "
+            "WHERE device_name LIKE 'e2e-%'"
+        )
+        row = await cur.fetchone()
+        assert row["cnt"] > 0, "Expected daily_coverage entries"
 
-            # Sync metadata
-            await cur.execute(
-                "SELECT endpoint FROM sync_metadata WHERE endpoint = %(ep)s",
-                {"ep": ENDPOINT},
-            )
-            row = await cur.fetchone()
-            assert row is not None, "Expected sync_metadata row for e2e endpoint"
-            assert row["endpoint"] == ENDPOINT
+        # Sync metadata
+        await cur.execute(
+            "SELECT endpoint FROM sync_metadata WHERE endpoint = %(ep)s",
+            {"ep": ENDPOINT},
+        )
+        row = await cur.fetchone()
+        assert row is not None, "Expected sync_metadata row for e2e endpoint"
+        assert row["endpoint"] == ENDPOINT
 
     # ── 4. Assert dashboard responses ────────────────────────────────
     os.environ["WP6_TSDB_URL"] = TSDB_DSN
@@ -188,33 +190,32 @@ async def test_incremental_sync_and_dashboard_display(tsdb_conn):
     transport = ASGITransport(app=app)
     # ASGITransport does not drive FastAPI lifespan, so init_pool() never runs
     # unless we enter the lifespan context manually.
-    async with app.router.lifespan_context(app):
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="http://test",
-            follow_redirects=True,
-        ) as client:
-            # /health
-            resp = await client.get("/health")
-            assert resp.status_code == 200
+    async with app.router.lifespan_context(app), httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        follow_redirects=True,
+    ) as client:
+        # /health
+        resp = await client.get("/health")
+        assert resp.status_code == 200
 
-            # / (home) — should list our e2e devices and sensors
-            resp = await client.get("/")
-            assert resp.status_code == 200
-            body = resp.text
-            assert "e2e-device-alpha" in body
-            assert "e2e-temperature" in body
+        # / (home) — should list our e2e devices and sensors
+        resp = await client.get("/")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "e2e-device-alpha" in body
+        assert "e2e-temperature" in body
 
-            # /chart/e2e-temperature — should render a plotly chart
-            resp = await client.get("/chart/e2e-temperature")
-            assert resp.status_code == 200
-            assert "plotly" in resp.text.lower()
+        # /chart/e2e-temperature — should render a plotly chart
+        resp = await client.get("/chart/e2e-temperature")
+        assert resp.status_code == 200
+        assert "plotly" in resp.text.lower()
 
-            # /device/e2e-device-alpha — should render without error
-            resp = await client.get("/device/e2e-device-alpha")
-            assert resp.status_code == 200
+        # /device/e2e-device-alpha — should render without error
+        resp = await client.get("/device/e2e-device-alpha")
+        assert resp.status_code == 200
 
-            # /status — should contain coverage data for our e2e devices
-            resp = await client.get("/status")
-            assert resp.status_code == 200
-            assert "e2e-device-alpha" in resp.text
+        # /status — should contain coverage data for our e2e devices
+        resp = await client.get("/status")
+        assert resp.status_code == 200
+        assert "e2e-device-alpha" in resp.text

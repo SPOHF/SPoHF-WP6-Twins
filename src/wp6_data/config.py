@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     blue_export_dir: str = "/data/exports"
 
     # Optional CSV path for farm-wide fertigation events overlay in /chart.
-    # If empty, shared API falls back to uploads-blue/fertigation/
+    # If empty, blue routes fall back to uploads-blue/fertigation/
     # fertigation_events.csv relative to the workspace.
     blue_fertigation_events_csv: str = ""
 

@@ -1,4 +1,4 @@
-"""Shared fertigation helpers."""
+"""Blue fertigation helpers."""
 
 import csv
 from datetime import date

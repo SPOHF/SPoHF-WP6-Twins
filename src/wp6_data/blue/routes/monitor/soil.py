@@ -8,16 +8,16 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 from plotly.subplots import make_subplots
 
+from wp6_data.blue.fertigation import (
+    load_fertigation_event_days,
+    resolve_fertigation_csv_path,
+)
 from wp6_data.blue.routes.monitor._treatment import (
     load_device_treatment_map,
     treatment_color,
 )
 from wp6_data.config import Settings
 from wp6_data.shared import render_date_filter, render_page, resolve_date_range
-from wp6_data.shared.fertigation import (
-    load_fertigation_event_days,
-    resolve_fertigation_csv_path,
-)
 from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.twin import SensorDataProvider
 
