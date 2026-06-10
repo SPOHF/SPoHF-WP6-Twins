@@ -19,8 +19,10 @@ def load_fertigation_event_days(path: Path) -> list[date]:
     if not path.exists():
         return []
 
+    import math
+
     days: set[date] = set()
-    with path.open("r", encoding="utf-8", newline="") as fh:
+    with path.open("r", encoding="utf-8-sig", newline="") as fh:
         reader = csv.DictReader(fh)
         for row in reader:
             day_raw = (row.get("date") or "").strip()
@@ -35,8 +37,8 @@ def load_fertigation_event_days(path: Path) -> list[date]:
             try:
                 volume = float(vol_raw)
             except ValueError:
-                volume = 0.0
-            if volume <= 0:
+                continue
+            if not math.isfinite(volume) or volume <= 0:
                 continue
             days.add(day)
 
