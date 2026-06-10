@@ -61,7 +61,7 @@ def test_fertigation_events_csv_fallback_contract(client, monkeypatch, tmp_path)
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["source"] == str(csv_path)
+    assert body["source"] == "csv:fertigation_events"
     assert body["total_events"] == 2
     assert body["in_view_events"] == 1
     assert body["first_date"] == "2026-06-01"

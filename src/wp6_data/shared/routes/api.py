@@ -27,6 +27,7 @@ _settings = Settings()
 _logger = logging.getLogger(__name__)
 _FERT_SOURCE = "fertigation_events"
 _FERT_SENSOR = "volume_ml_per_plant"
+_FERT_CSV_SOURCE = "csv:fertigation_events"
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_session_user)])
 
@@ -216,7 +217,7 @@ async def fertigation_events(
     if not path.exists():
         return {
             "events": [],
-            "source": str(path),
+            "source": _FERT_CSV_SOURCE,
             "first_date": None,
             "last_date": None,
             "total_events": 0,
@@ -245,7 +246,7 @@ async def fertigation_events(
     ]
     return {
         "events": events,
-        "source": str(path),
+        "source": _FERT_CSV_SOURCE,
         "first_date": sorted_all[0].isoformat() if sorted_all else None,
         "last_date": sorted_all[-1].isoformat() if sorted_all else None,
         "total_events": len(sorted_all),
