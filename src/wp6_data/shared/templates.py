@@ -1786,6 +1786,7 @@ UNIFIED_CHART_JS = """
             }
             var s = startDate ? toMillis(startDate + 'T00:00:00') : null;
             var e = endDate ? toMillis(endDate + 'T23:59:59') : null;
+            if (s !== null && e !== null) {
                 return { start: Math.min(s, e), end: Math.max(s, e) };
             }
             var minT = null;
