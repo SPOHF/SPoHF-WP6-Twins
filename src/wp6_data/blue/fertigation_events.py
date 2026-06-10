@@ -63,6 +63,10 @@ def _aggregate(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]
         if not row or all(not c.strip() for c in row):
             continue
 
+        if len(row) < len(EXPECTED_HEADER):
+            # Trailing empty columns are often omitted in CSV exports; treat them as empty.
+            row.extend([""] * (len(EXPECTED_HEADER) - len(row)))
+
         if len(row) != len(EXPECTED_HEADER):
             skipped.append(
                 SkippedRow(
