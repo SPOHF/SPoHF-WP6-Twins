@@ -1,5 +1,6 @@
 """Shared JSON API endpoints for the unified chart page."""
 
+import csv
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any
 
@@ -154,7 +155,7 @@ async def fertigation_events(
 
     try:
         sorted_all = load_fertigation_event_days(path)
-    except (OSError, UnicodeError):
+    except (OSError, UnicodeError, csv.Error):
         return JSONResponse(
             content={"error": "Failed to read fertigation events CSV"},
             status_code=500,
