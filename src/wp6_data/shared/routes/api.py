@@ -203,7 +203,9 @@ async def fertigation_events(
     if total_events > 0:
         events = [
             {
-                "time": f"{d.isoformat()}T00:00:00.000000",
+                "time": to_local_isoformat(
+                    datetime.fromisoformat(f"{d.isoformat()}T00:00:00+00:00")
+                ),
                 "date": d.isoformat(),
             }
             for d in in_view_days
