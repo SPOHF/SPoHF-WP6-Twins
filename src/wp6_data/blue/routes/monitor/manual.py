@@ -140,7 +140,13 @@ async def measure_comparison(
     assert df is not None
     assert comparable is not None
     df_cmp = df[df["sensor"].isin(comparable)]
-    measure_cards = "".join(_render_measure_card(df_cmp, sensor) for sensor in comparable)
+    include_js = True
+    cards: list[str] = []
+    for sensor in comparable:
+        card_html, include_js = _render_measure_card(df_cmp, sensor, include_js=include_js)
+        if card_html:
+            cards.append(card_html)
+    measure_cards = "".join(cards)
 
     content = f"""
         <h1>Measure Comparison</h1>
@@ -277,25 +283,43 @@ def _measure_axis_label(sensor: str) -> str:
     return f"{label} ({unit})" if unit else label
 
 
-def _render_measure_card(df: pd.DataFrame, sensor: str) -> str:
+def _render_measure_card(
+    df: pd.DataFrame,
+    sensor: str,
+    *,
+    include_js: bool,
+) -> tuple[str, bool]:
     sensor_df = df[df["sensor"] == sensor].copy()
     if sensor_df.empty:
-        return ""
+        return "", include_js
 
     sensor_df["treatment"] = sensor_df["device"]
-    plot_html = "".join(_build_year_boxplot(sensor_df, sensor, year) for year in YEARS)
+    include_for_next = include_js
+    plots: list[str] = []
+    for year in YEARS:
+        year_html = _build_year_boxplot(sensor_df, sensor, year, include_js=include_for_next)
+        if year_html:
+            plots.append(year_html)
+            include_for_next = False
+    plot_html = "".join(plots)
     if not plot_html:
-        return ""
+        return "", include_js
 
     return f"""
         <article>
             <h3>{_measure_axis_label(sensor)}</h3>
             {plot_html}
         </article>
-    """
+    """, include_for_next
 
 
-def _build_year_boxplot(sensor_df: pd.DataFrame, sensor: str, year: int) -> str:
+def _build_year_boxplot(
+    sensor_df: pd.DataFrame,
+    sensor: str,
+    year: int,
+    *,
+    include_js: bool,
+) -> str:
     year_df = sensor_df[sensor_df["year"] == year]
     if year_df.empty:
         return ""
@@ -341,7 +365,7 @@ def _build_year_boxplot(sensor_df: pd.DataFrame, sensor: str, year: int) -> str:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
     )
-    return fig.to_html(full_html=False, include_plotlyjs="cdn")
+    return fig.to_html(full_html=False, include_plotlyjs="cdn" if include_js else False)
 
 
 def _build_correlation_heatmap_2025(
