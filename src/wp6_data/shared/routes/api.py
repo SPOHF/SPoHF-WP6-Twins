@@ -258,9 +258,7 @@ async def fertigation_events(
 
     events = [
         {
-            "time": to_local_isoformat(
-                datetime.fromisoformat(f"{d.isoformat()}T00:00:00+00:00")
-            ),
+            "time": f"{d.isoformat()}T00:00:00.000000",
             "date": d.isoformat(),
         }
         for d in sorted(in_view_days)
