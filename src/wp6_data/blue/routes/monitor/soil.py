@@ -67,7 +67,7 @@ def _fertigation_toggle_html(
     hint = (
         "Overlay global fertigation event starts on the soil chart."
         if available
-        else "No fertigation events CSV detected."
+        else "No fertigation events available (CSV missing or empty)."
     )
     return f"""
         <article class="date-filter" style="margin-top:0.4rem;">
