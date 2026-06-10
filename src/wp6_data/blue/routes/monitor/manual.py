@@ -217,6 +217,7 @@ async def _load_long_data(
     try:
         df = await provider.fetch_data(
             sensor_tags=_ALL_LONG_DATA_SENSORS,
+            device_names=_LONG_DATA_DEVICES,
             start=YEAR_START,
             end=YEAR_END,
         )
@@ -239,11 +240,8 @@ async def _load_long_data(
         )
 
     df = df.copy()
-    if "source" in df.columns:
-        df = df[df["source"] == LONG_DATA_SOURCE]
-    else:
-        # Backward compatibility for providers that do not expose source.
-        df = df[df["device"].isin(_LONG_DATA_DEVICES)]
+    # Scope by known long_data devices; keeps provider fetch_data schema stable.
+    df = df[df["device"].isin(_LONG_DATA_DEVICES)]
 
     df["year"] = df["time"].dt.year
     df = df[df["year"].isin(YEARS)]

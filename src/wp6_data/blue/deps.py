@@ -112,7 +112,7 @@ async def fetch_data(
 
     where = " AND ".join(conditions)
     params["limit"] = limit
-    columns = ["device", "sensor", "time", "value", "source"]
+    columns = ["device", "sensor", "time", "value"]
 
     if bucket is not None and agg is not None:
         if agg not in CHART_AGG_FUNCS:
@@ -129,11 +129,6 @@ async def fetch_data(
             SELECT device_name AS device, sensor_tag AS sensor,
                    time_bucket(%(bucket)s, time, %(tz)s) AS time,
                    {agg}(value) AS value,
-                   CASE
-                       WHEN count(DISTINCT coalesce(source, '')) = 1
-                           THEN coalesce(max(source), 'unknown')
-                       ELSE 'mixed'
-                   END AS source,
                    min(value) AS value_min,
                    max(value) AS value_max,
                    count(value) AS count
@@ -144,14 +139,13 @@ async def fetch_data(
             LIMIT %(limit)s
         """
         columns = [
-            "device", "sensor", "time", "value", "source",
+            "device", "sensor", "time", "value",
             "value_min", "value_max", "count",
         ]
     else:
         query = f"""
             SELECT device_name AS device, sensor_tag AS sensor,
-                   time, value,
-                   coalesce(source, 'unknown') AS source
+                   time, value
             FROM readings
             WHERE {where}
             ORDER BY time
