@@ -1768,7 +1768,10 @@ UNIFIED_CHART_JS = """
             return;
         }
         function toMillis(iso) {
-            var ms = Date.parse(iso);
+            if (!iso) return null;
+            // JS Date.parse is reliably supported up to milliseconds; trim microseconds.
+            var normalized = iso.replace(/\.(\d{3})\d+$/, '.$1');
+            var ms = Date.parse(normalized);
             return Number.isFinite(ms) ? ms : null;
         }
         function currentWindow() {
