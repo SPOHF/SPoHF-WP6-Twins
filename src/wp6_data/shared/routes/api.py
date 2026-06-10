@@ -1,6 +1,6 @@
 """Shared JSON API endpoints for the unified chart page."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated, Any
 
 import pandas as pd
@@ -17,6 +17,7 @@ from wp6_data.shared.fertigation import (
 from wp6_data.shared.metadata import MetadataRegistry
 from wp6_data.shared.routes.deps import get_metadata, get_provider
 from wp6_data.shared.templates import resolve_date_range
+from wp6_data.shared.time import to_local_isoformat
 from wp6_data.shared.twin import SensorDataProvider
 
 _settings = Settings()
