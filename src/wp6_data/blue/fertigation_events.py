@@ -95,11 +95,14 @@ def _aggregate(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]
             v = raw.strip()
             if v == "":
                 return None
+            import math
             try:
-                return float(v)
+                num = float(v)
             except ValueError as exc:
                 raise ValueError(f"{col}: {raw!r} is not a number") from exc
-
+            if not math.isfinite(num):
+                raise ValueError(f"{col}: {raw!r} is not a finite number")
+            return num
         try:
             program_id = _parse_float(row[1], "program_id")
             volume = _parse_float(row[4], "volume_ml_per_plant")
