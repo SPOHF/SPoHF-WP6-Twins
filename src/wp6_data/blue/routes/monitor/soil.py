@@ -141,12 +141,12 @@ async def soil_conditions(
             data_source=provider.data_source_label,
         )
 
-    extra_params = {"fert_events": "1"} if fert_events else None
+    extra_params = {"fert_events": "1"} if show_fert else None
     date_filter = render_date_filter(start, end, extra_params=extra_params)
     fert_toggle = _fertigation_toggle_html(
         start=start,
         end=end,
-        enabled=fert_events,
+        enabled=show_fert,
         available=bool(fert_days),
     )
 

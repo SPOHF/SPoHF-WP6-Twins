@@ -1345,6 +1345,7 @@ UNIFIED_CHART_JS = """
     var fertigationFirstDate = null;
     var fertigationLastDate = null;
     var fertigationTotalEvents = 0;
+    var fertigationLoadError = false;
     function defaultAxisCfg() {
         return {
             labelFormat: 'smart',
@@ -1808,6 +1809,11 @@ UNIFIED_CHART_JS = """
                 }
             });
         }
+        if (fertigationLoadError) {
+            fertigationWarning.textContent = 'Failed to load fertigation events.';
+            fertigationWarning.style.display = 'block';
+            return;
+        }
         if (fertigationTotalEvents > 0 && inView === 0) {
             var rangeTxt = (fertigationFirstDate && fertigationLastDate)
                 ? (fertigationFirstDate + ' to ' + fertigationLastDate)
@@ -1835,14 +1841,23 @@ UNIFIED_CHART_JS = """
         if (endDate) qp.push('end=' + encodeURIComponent(endDate));
         if (qp.length) url += '?' + qp.join('&');
         fetch(url)
-            .then(function(r) { return r.json(); })
+            .then(function(r) {
+                if (!r.ok) {
+                    throw new Error('Failed to fetch fertigation events: HTTP ' + r.status);
+                }
+                return r.json();
+            })
             .then(function(resp) {
+                if (resp && resp.error) {
+                    throw new Error(resp.error);
+                }
                 fertigationEvents = (resp.events || []).map(function(e) {
                     return e.time;
                 });
                 fertigationFirstDate = resp.first_date || null;
                 fertigationLastDate = resp.last_date || null;
                 fertigationTotalEvents = resp.total_events || 0;
+                fertigationLoadError = false;
                 updateIdealRange();
                 updateFertigationWarning();
             })
@@ -1851,6 +1866,7 @@ UNIFIED_CHART_JS = """
                 fertigationFirstDate = null;
                 fertigationLastDate = null;
                 fertigationTotalEvents = 0;
+                fertigationLoadError = true;
                 updateIdealRange();
                 updateFertigationWarning();
             });
