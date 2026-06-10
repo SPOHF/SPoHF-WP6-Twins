@@ -3,11 +3,11 @@
 from fastapi import APIRouter, Depends
 
 from wp6_data.blue.routes.monitor import (
- gdd,
- home,
- light,
- microclimate,
- soil,
+	gdd,
+	home,
+	light,
+	microclimate,
+	soil,
 )
 from wp6_data.shared.auth import verify_session_user
 
