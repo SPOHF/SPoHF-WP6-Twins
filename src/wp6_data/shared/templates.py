@@ -1744,7 +1744,8 @@ UNIFIED_CHART_JS = """
     if (fertigationInput) {
         fertigationInput.addEventListener('change', function() {
             fertigationOverlay = fertigationInput.checked;
-            if (fertigationOverlay && fertigationEvents.length === 0 && !fertigationLoadError) {
+            if (fertigationOverlay && fertigationEvents.length === 0) {
+                fertigationLoadError = false;
                 syncUrl();
                 fetchFertigationEvents();
                 return;
