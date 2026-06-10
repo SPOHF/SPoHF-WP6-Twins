@@ -41,7 +41,7 @@ class FertigationEventsParseError(ManualParseError):
 
 def _aggregate(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
     text = file_bytes.decode("utf-8-sig")
-    reader = csv.reader(text.splitlines())
+    reader = csv.reader(text.splitlines(keepends=True))
     try:
         header = next(reader)
     except StopIteration:
