@@ -41,12 +41,18 @@ class FertigationEventsParseError(ManualParseError):
 
 
 def _aggregate(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
-    text = file_bytes.decode("utf-8-sig")
-    reader = csv.reader(io.StringIO(text, newline=""))
     try:
+        text = file_bytes.decode("utf-8-sig")
+    except UnicodeError as exc:
+        raise FertigationEventsParseError("File is not valid UTF-8") from exc
+
+    try:
+        reader = csv.reader(io.StringIO(text, newline=""))
         header = next(reader)
     except StopIteration:
         raise FertigationEventsParseError("File is empty") from None
+    except csv.Error as exc:
+        raise FertigationEventsParseError(f"CSV parse error: {exc}") from exc
 
     actual_header = tuple(c.strip() for c in header)
     if actual_header != EXPECTED_HEADER:
