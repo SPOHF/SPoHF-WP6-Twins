@@ -2,7 +2,6 @@
 
 import csv
 from datetime import date
-from pathlib import Path
 from typing import Annotated
 
 import plotly.graph_objects as go
@@ -15,6 +14,7 @@ from wp6_data.blue.routes.monitor._treatment import (
     treatment_color,
 )
 from wp6_data.config import Settings
+from wp6_data.shared.fertigation import resolve_fertigation_csv_path
 from wp6_data.shared import render_date_filter, render_page, resolve_date_range
 from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.twin import SensorDataProvider
@@ -36,12 +36,8 @@ _PANELS = [
 _settings = Settings()
 
 
-def _fertigation_csv_path() -> Path:
-    configured = (_settings.blue_fertigation_events_csv or "").strip()
-    if configured:
-        p = Path(configured)
-        return p if p.is_absolute() else Path.cwd() / p
-    return Path.cwd() / "uploads-blue" / "fertigation" / "fertigation_events.csv"
+def _fertigation_csv_path():
+    return resolve_fertigation_csv_path(_settings.blue_fertigation_events_csv)
 
 
 def _load_fertigation_event_days() -> tuple[list[date], tuple[date, date] | None]:

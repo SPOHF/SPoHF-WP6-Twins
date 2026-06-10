@@ -3,7 +3,6 @@
 import csv
 import logging
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from typing import Annotated, Any
 
 import pandas as pd
@@ -15,6 +14,7 @@ from wp6_data.config import Settings
 from wp6_data.db.pool import get_pool
 from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.auth import verify_session_user
+from wp6_data.shared.fertigation import resolve_fertigation_csv_path
 from wp6_data.shared.metadata import MetadataRegistry
 from wp6_data.shared.routes.deps import get_metadata, get_provider
 from wp6_data.shared.templates import resolve_date_range
@@ -29,20 +29,14 @@ _FERT_SENSOR = "volume_ml_per_plant"
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_session_user)])
 
 
-def _fertigation_csv_path() -> Path:
+def _fertigation_csv_path():
     """Resolve fertigation events CSV path.
 
     Priority:
     1) ``WP6_BLUE_FERTIGATION_EVENTS_CSV`` / ``Settings.blue_fertigation_events_csv``
     2) Workspace-relative fallback: uploads-blue/fertigation/fertigation_events.csv
     """
-    configured = (_settings.blue_fertigation_events_csv or "").strip()
-    if configured:
-        p = Path(configured)
-        if p.is_absolute():
-            return p
-        return Path.cwd() / p
-    return Path.cwd() / "uploads-blue" / "fertigation" / "fertigation_events.csv"
+    return resolve_fertigation_csv_path(_settings.blue_fertigation_events_csv)
 
 
 @router.get("/sensors")

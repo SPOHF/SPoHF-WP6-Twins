@@ -10,6 +10,7 @@ and emit numeric readings for ``program_id``, ``volume_ml_per_plant`` and
 from __future__ import annotations
 
 import csv
+import io
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
@@ -41,7 +42,7 @@ class FertigationEventsParseError(ManualParseError):
 
 def _aggregate(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
     text = file_bytes.decode("utf-8-sig")
-    reader = csv.reader(text.splitlines(keepends=True))
+    reader = csv.reader(io.StringIO(text, newline=""))
     try:
         header = next(reader)
     except StopIteration:
