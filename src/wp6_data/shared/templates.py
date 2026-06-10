@@ -1799,12 +1799,12 @@ UNIFIED_CHART_JS = """
             }
             return null;
         }
-        var window = currentWindow();
+        var viewWindow = currentWindow();
         var inView = 0;
-        if (window) {
+        if (viewWindow) {
             fertigationEvents.forEach(function(t) {
                 var ms = toMillis(t);
-                if (ms !== null && ms >= window.start && ms <= window.end) {
+                if (ms !== null && ms >= viewWindow.start && ms <= viewWindow.end) {
                     inView += 1;
                 }
             });

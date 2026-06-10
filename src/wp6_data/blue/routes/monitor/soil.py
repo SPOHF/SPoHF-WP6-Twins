@@ -33,10 +33,11 @@ _PANELS = [
     ("soilConductivity",4, "EC (μS/cm)"),
 ]
 
+_settings = Settings()
+
 
 def _fertigation_csv_path() -> Path:
-    settings = Settings()
-    configured = (settings.blue_fertigation_events_csv or "").strip()
+    configured = (_settings.blue_fertigation_events_csv or "").strip()
     if configured:
         p = Path(configured)
         return p if p.is_absolute() else Path.cwd() / p
