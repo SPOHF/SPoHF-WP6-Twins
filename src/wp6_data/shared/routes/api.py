@@ -1,6 +1,5 @@
 """Shared JSON API endpoints for the unified chart page."""
 
-import csv
 import logging
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any
@@ -14,7 +13,10 @@ from wp6_data.config import Settings
 from wp6_data.db.pool import get_pool
 from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.auth import verify_session_user
-from wp6_data.shared.fertigation import resolve_fertigation_csv_path
+from wp6_data.shared.fertigation import (
+    load_fertigation_event_days,
+    resolve_fertigation_csv_path,
+)
 from wp6_data.shared.metadata import MetadataRegistry
 from wp6_data.shared.routes.deps import get_metadata, get_provider
 from wp6_data.shared.templates import resolve_date_range
@@ -221,27 +223,8 @@ async def fertigation_events(
             "in_view_events": 0,
         }
 
-    all_days: set[date] = set()
     try:
-        with path.open("r", encoding="utf-8", newline="") as fh:
-            reader = csv.DictReader(fh)
-            for row in reader:
-                day_raw = (row.get("date") or "").strip()
-                if not day_raw:
-                    continue
-                try:
-                    day = date.fromisoformat(day_raw)
-                except ValueError:
-                    continue
-
-                vol_raw = (row.get("volume_ml_per_plant") or "").strip()
-                try:
-                    volume = float(vol_raw)
-                except ValueError:
-                    volume = 0.0
-                if volume <= 0:
-                    continue
-                all_days.add(day)
+        sorted_all = load_fertigation_event_days(path)
     except OSError:
         return JSONResponse(
             content={"error": "Failed to read fertigation events CSV"},
@@ -249,17 +232,16 @@ async def fertigation_events(
         )
 
     in_view_days = [
-        d for d in all_days
+        d for d in sorted_all
         if (start is None or d >= start) and (end is None or d <= end)
     ]
-    sorted_all = sorted(all_days)
 
     events = [
         {
             "time": f"{d.isoformat()}T00:00:00.000000",
             "date": d.isoformat(),
         }
-        for d in sorted(in_view_days)
+        for d in in_view_days
     ]
     return {
         "events": events,

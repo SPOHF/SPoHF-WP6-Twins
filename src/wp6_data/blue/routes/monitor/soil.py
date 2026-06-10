@@ -1,6 +1,5 @@
 """GET /sensor-monitor/soil — Soil conditions with optional fertigation overlay."""
 
-import csv
 from datetime import date
 from typing import Annotated
 
@@ -15,7 +14,10 @@ from wp6_data.blue.routes.monitor._treatment import (
 )
 from wp6_data.config import Settings
 from wp6_data.shared import render_date_filter, render_page, resolve_date_range
-from wp6_data.shared.fertigation import resolve_fertigation_csv_path
+from wp6_data.shared.fertigation import (
+    load_fertigation_event_days,
+    resolve_fertigation_csv_path,
+)
 from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.twin import SensorDataProvider
 
@@ -43,34 +45,11 @@ def _fertigation_csv_path():
 def _load_fertigation_event_days() -> tuple[list[date], tuple[date, date] | None]:
     """Load global fertigation event dates from CSV (volume > 0 only)."""
     path = _fertigation_csv_path()
-    if not path.exists():
-        return [], None
-
-    days: set[date] = set()
     try:
-        with path.open("r", encoding="utf-8", newline="") as fh:
-            reader = csv.DictReader(fh)
-            for row in reader:
-                day_raw = (row.get("date") or "").strip()
-                if not day_raw:
-                    continue
-                try:
-                    day = date.fromisoformat(day_raw)
-                except ValueError:
-                    continue
-
-                vol_raw = (row.get("volume_ml_per_plant") or "").strip()
-                try:
-                    volume = float(vol_raw)
-                except ValueError:
-                    volume = 0.0
-                if volume <= 0:
-                    continue
-                days.add(day)
+        sorted_days = load_fertigation_event_days(path)
     except OSError:
         return [], None
 
-    sorted_days = sorted(days)
     if not sorted_days:
         return [], None
     return sorted_days, (sorted_days[0], sorted_days[-1])
