@@ -8,8 +8,10 @@ from typing import Annotated, Any
 import pandas as pd
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
+from psycopg.rows import dict_row
 
 from wp6_data.config import Settings
+from wp6_data.db.pool import get_pool
 from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.metadata import MetadataRegistry
@@ -19,6 +21,8 @@ from wp6_data.shared.time import to_local_isoformat
 from wp6_data.shared.twin import SensorDataProvider
 
 _settings = Settings()
+_FERT_SOURCE = "fertigation_events"
+_FERT_SENSOR = "volume_ml_per_plant"
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_session_user)])
 
@@ -140,12 +144,46 @@ async def fertigation_events(
     start: Annotated[date | None, Query()] = None,
     end: Annotated[date | None, Query()] = None,
 ) -> dict[str, Any]:
-    """List farm-wide fertigation event starts from CSV.
+    """List farm-wide fertigation event starts.
 
-    The source file has one row per treatment per day; this endpoint returns
-    unique event starts per date. Rows with ``volume_ml_per_plant <= 0`` are
-    ignored by design.
+    Primary source is DB-ingested manual rows (``source=fertigation_events``)
+    with ``sensor_tag=volume_ml_per_plant`` and ``value > 0``. Falls back to
+    the legacy CSV path when no DB events exist yet.
     """
+    pool = get_pool()
+    all_days: set[date] = set()
+    try:
+        async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                "SELECT DISTINCT time::date AS day "
+                "FROM readings "
+                "WHERE source = %s AND sensor_tag = %s AND value > 0",
+                (_FERT_SOURCE, _FERT_SENSOR),
+            )
+            all_days = {r["day"] for r in await cur.fetchall() if r["day"] is not None}
+    except Exception:
+        all_days = set()
+
+    if all_days:
+        in_view_days = [
+            d for d in all_days
+            if (start is None or d >= start) and (end is None or d <= end)
+        ]
+        sorted_all = sorted(all_days)
+        events = [
+            {"time": f"{d.isoformat()}T00:00:00", "date": d.isoformat()}
+            for d in sorted(in_view_days)
+        ]
+        return {
+            "events": events,
+            "source": "db:readings/fertigation_events",
+            "first_date": sorted_all[0].isoformat() if sorted_all else None,
+            "last_date": sorted_all[-1].isoformat() if sorted_all else None,
+            "total_events": len(sorted_all),
+            "in_view_events": len(in_view_days),
+        }
+
+    # Legacy fallback path during transition to manual-source ingest.
     path = _fertigation_csv_path()
     if not path.exists():
         return {
