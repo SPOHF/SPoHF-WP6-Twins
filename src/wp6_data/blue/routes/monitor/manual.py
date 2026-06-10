@@ -19,7 +19,6 @@ from wp6_data.shared.twin import SensorDataProvider
 router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 PAGE_TITLE = "SPoHF Blue - Manual Monitor"
-LONG_DATA_SOURCE = "long_data"
 YEAR_START = datetime(2024, 1, 1, tzinfo=UTC)
 YEAR_END = datetime(2026, 1, 1, tzinfo=UTC)
 YEARS: tuple[int, ...] = (2024, 2025)

@@ -1,16 +1,13 @@
 """Shared JSON API endpoints for the unified chart page."""
 
-import logging
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any
 
 import pandas as pd
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from psycopg.rows import dict_row
 
 from wp6_data.config import Settings
-from wp6_data.db.pool import get_pool
 from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.fertigation import (
@@ -24,9 +21,6 @@ from wp6_data.shared.time import to_local_isoformat
 from wp6_data.shared.twin import SensorDataProvider
 
 _settings = Settings()
-_logger = logging.getLogger(__name__)
-_FERT_SOURCE = "fertigation_events"
-_FERT_SENSOR = "volume_ml_per_plant"
 _FERT_CSV_SOURCE = "csv:fertigation_events"
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_session_user)])
@@ -145,81 +139,8 @@ async def fertigation_events(
 ) -> dict[str, Any]:
     """List farm-wide fertigation event starts.
 
-    Primary source is DB-ingested manual rows (``source=fertigation_events``)
-    with ``sensor_tag=volume_ml_per_plant`` and ``value > 0``. Falls back to
-    the legacy CSV path when no DB events exist yet.
+    Source is the fertigation-events CSV (volume > 0 rows).
     """
-    in_view_days: list[date] = []
-    first_day: date | None = None
-    last_day: date | None = None
-    total_events = 0
-    try:
-        pool = get_pool()
-        async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-            await cur.execute(
-                "SELECT MIN(time::date) AS first_day, "
-                "MAX(time::date) AS last_day, "
-                "COUNT(DISTINCT time::date) AS total_events "
-                "FROM readings "
-                "WHERE source = %s AND sensor_tag = %s AND value > 0",
-                (_FERT_SOURCE, _FERT_SENSOR),
-            )
-            stats = await cur.fetchone()
-            if stats is not None:
-                first_day = stats.get("first_day")
-                last_day = stats.get("last_day")
-                total_events = int(stats.get("total_events") or 0)
-
-            sql = (
-                "SELECT DISTINCT time::date AS day "
-                "FROM readings "
-                "WHERE source = %s AND sensor_tag = %s AND value > 0"
-            )
-            params: list[Any] = [_FERT_SOURCE, _FERT_SENSOR]
-            if start is not None:
-                sql += " AND time::date >= %s"
-                params.append(start)
-            if end is not None:
-                sql += " AND time::date <= %s"
-                params.append(end)
-            sql += " ORDER BY day"
-            await cur.execute(
-                sql,
-                tuple(params),
-            )
-            in_view_days = [r["day"] for r in await cur.fetchall() if r["day"] is not None]
-    except RuntimeError:
-        _logger.info("Fertigation events pool not initialised; falling back to CSV")
-        in_view_days = []
-        first_day = None
-        last_day = None
-        total_events = 0
-    except Exception:
-        _logger.exception("Fertigation events DB lookup failed; falling back to CSV")
-        in_view_days = []
-        first_day = None
-        last_day = None
-        total_events = 0
-    if total_events > 0:
-        events = [
-            {
-                "time": to_local_isoformat(
-                    datetime.fromisoformat(f"{d.isoformat()}T00:00:00+00:00")
-                ),
-                "date": d.isoformat(),
-            }
-            for d in in_view_days
-        ]
-        return {
-            "events": events,
-            "source": "db:readings/fertigation_events",
-            "first_date": first_day.isoformat() if first_day is not None else None,
-            "last_date": last_day.isoformat() if last_day is not None else None,
-            "total_events": total_events,
-            "in_view_events": len(in_view_days),
-        }
-
-    # Legacy fallback path during transition to manual-source ingest.
     path = _fertigation_csv_path()
     if not path.exists():
         return {
