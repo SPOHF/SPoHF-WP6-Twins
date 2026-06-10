@@ -188,13 +188,18 @@ async def fertigation_events(
                 tuple(params),
             )
             in_view_days = [r["day"] for r in await cur.fetchall() if r["day"] is not None]
+    except RuntimeError:
+        _logger.info("Fertigation events pool not initialised; falling back to CSV")
+        in_view_days = []
+        first_day = None
+        last_day = None
+        total_events = 0
     except Exception:
         _logger.exception("Fertigation events DB lookup failed; falling back to CSV")
         in_view_days = []
         first_day = None
         last_day = None
         total_events = 0
-
     if total_events > 0:
         events = [
             {
