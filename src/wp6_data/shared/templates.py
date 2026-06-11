@@ -1340,12 +1340,6 @@ UNIFIED_CHART_JS = """
     var splitMode = false;
     var idealLo = null;
     var idealHi = null;
-    var fertigationOverlay = false;
-    var fertigationEvents = [];
-    var fertigationFirstDate = null;
-    var fertigationLastDate = null;
-    var fertigationTotalEvents = 0;
-    var fertigationLoadError = false;
     function defaultAxisCfg() {
         return {
             labelFormat: 'smart',
@@ -1365,8 +1359,6 @@ UNIFIED_CHART_JS = """
     var rightSpecs = (params.get('r') || '').split(',').filter(Boolean);
     var startDate = params.get('start') || '';
     var endDate = params.get('end') || '';
-    var isBlueDashboard =
-        (document.documentElement.dataset.dashboard || 'blue') === 'blue';
 
     function readLabelFormat(name, fallback) {
         var v = params.get(name) || '';
@@ -1399,7 +1391,6 @@ UNIFIED_CHART_JS = """
     var _idealHiRaw = parseFloat(params.get('ideal_hi'));
     if (Number.isFinite(_idealLoRaw)) idealLo = _idealLoRaw;
     if (Number.isFinite(_idealHiRaw)) idealHi = _idealHiRaw;
-    fertigationOverlay = isBlueDashboard && params.get('fert_events') === '1';
     if (params.get('split') === '1') {
         splitMode = true;
         // Right-axis values fall back to left for any param not explicitly set
@@ -1429,9 +1420,6 @@ UNIFIED_CHART_JS = """
         boxmode: 'group'
     };
     Plotly.newPlot(chartDiv, [], layout, {responsive: true});
-    chartDiv.on('plotly_relayout', function() {
-        updateFertigationWarning();
-    });
 
     // Toggle panel
     if (toggleBtn) {
@@ -1469,7 +1457,6 @@ UNIFIED_CHART_JS = """
             syncUrl();
             updateStats();
             updateY2();
-            updateFertigationWarning();
             updateAllBadges();
         });
     }
@@ -1723,11 +1710,8 @@ UNIFIED_CHART_JS = """
     // --- Ideal range inputs ---
     var idealLoInput = document.getElementById('ideal-lo');
     var idealHiInput = document.getElementById('ideal-hi');
-    var fertigationInput = document.getElementById('fertigation-overlay');
-    var fertigationWarning = document.getElementById('fertigation-warning');
     if (idealLoInput && idealLo !== null) idealLoInput.value = idealLo;
     if (idealHiInput && idealHi !== null) idealHiInput.value = idealHi;
-    if (fertigationInput) fertigationInput.checked = fertigationOverlay;
     function onIdealChange() {
         var v;
         if (idealLoInput) {
@@ -1743,149 +1727,6 @@ UNIFIED_CHART_JS = """
     }
     if (idealLoInput) idealLoInput.addEventListener('change', onIdealChange);
     if (idealHiInput) idealHiInput.addEventListener('change', onIdealChange);
-    if (fertigationInput) {
-        fertigationInput.addEventListener('change', function() {
-            fertigationOverlay = fertigationInput.checked;
-            if (fertigationOverlay && fertigationEvents.length === 0) {
-                fertigationLoadError = false;
-                syncUrl();
-                fetchFertigationEvents();
-                return;
-            }
-            updateIdealRange();
-            updateFertigationWarning();
-            syncUrl();
-        });
-    }
-
-    function updateFertigationWarning() {
-        if (!fertigationWarning) return;
-        if (!fertigationOverlay) {
-            fertigationWarning.style.display = 'none';
-            fertigationWarning.textContent = '';
-            return;
-        }
-        if (Object.keys(activeSeries).length === 0) {
-            fertigationWarning.style.display = 'none';
-            fertigationWarning.textContent = '';
-            return;
-        }
-        function toMillis(iso) {
-            if (!iso) return null;
-            // JS Date.parse is reliably supported up to milliseconds; trim microseconds.
-            var normalized = iso.replace(/\.(\d{3})\d+$/, '.$1');
-            // Plotly gets timezone-less strings intended as UTC.
-            // Make parsing explicit.
-            if (!/[zZ]$|[+-]\d\d:\d\d$/.test(normalized)) normalized += 'Z';
-            var ms = Date.parse(normalized);
-            return Number.isFinite(ms) ? ms : null;
-        }
-        function currentWindow() {
-            var lx = chartDiv.layout && chartDiv.layout.xaxis;
-            var r = lx && lx.range;
-            if (r && r.length === 2) {
-                var a = toMillis(r[0]);
-                var b = toMillis(r[1]);
-                if (a !== null && b !== null) {
-                    return { start: Math.min(a, b), end: Math.max(a, b) };
-                }
-            }
-            var s = startDate ? toMillis(startDate + 'T00:00:00') : null;
-            var e = endDate ? toMillis(endDate + 'T23:59:59') : null;
-            if (s !== null && e !== null) {
-                return { start: Math.min(s, e), end: Math.max(s, e) };
-            }
-            var minT = null;
-            var maxT = null;
-            Object.keys(activeSeries).forEach(function(k) {
-                var sd = seriesData[k];
-                if (!sd || !sd.times || !sd.times.length) return;
-                var first = toMillis(sd.times[0]);
-                var last = toMillis(sd.times[sd.times.length - 1]);
-                if (first === null || last === null) return;
-                var lo = Math.min(first, last);
-                var hi = Math.max(first, last);
-                minT = minT === null ? lo : Math.min(minT, lo);
-                maxT = maxT === null ? hi : Math.max(maxT, hi);
-            });
-            if (minT !== null && maxT !== null) {
-                return { start: minT, end: maxT };
-            }
-            return null;
-        }
-        var viewWindow = currentWindow();
-        var inView = 0;
-        if (viewWindow) {
-            fertigationEvents.forEach(function(t) {
-                var ms = toMillis(t);
-                if (ms !== null && ms >= viewWindow.start && ms <= viewWindow.end) {
-                    inView += 1;
-                }
-            });
-        }
-        if (fertigationLoadError) {
-            fertigationWarning.textContent = 'Failed to load fertigation events.';
-            fertigationWarning.style.display = 'block';
-            return;
-        }
-        if (fertigationTotalEvents > 0 && inView === 0) {
-            var rangeTxt = (fertigationFirstDate && fertigationLastDate)
-                ? (fertigationFirstDate + ' to ' + fertigationLastDate)
-                : 'unknown range';
-            fertigationWarning.textContent =
-                'No fertigation events for the current view. '
-                + 'Available fertigation dates: ' + rangeTxt + '.';
-            fertigationWarning.style.display = 'block';
-            return;
-        }
-        if (fertigationTotalEvents === 0) {
-            fertigationWarning.textContent =
-                'No fertigation events are available yet (CSV missing or empty).';
-            fertigationWarning.style.display = 'block';
-            return;
-        }
-        fertigationWarning.style.display = 'none';
-        fertigationWarning.textContent = '';
-    }
-
-    function fetchFertigationEvents() {
-        var url = '/api/fertigation-events';
-        var qp = [];
-        if (startDate) qp.push('start=' + encodeURIComponent(startDate));
-        if (endDate) qp.push('end=' + encodeURIComponent(endDate));
-        if (qp.length) url += '?' + qp.join('&');
-        fetch(url)
-            .then(function(r) {
-                if (!r.ok) {
-                    throw new Error('Failed to fetch fertigation events: HTTP ' + r.status);
-                }
-                return r.json();
-            })
-            .then(function(resp) {
-                if (resp && resp.error) {
-                    throw new Error(resp.error);
-                }
-                fertigationEvents = (resp.events || []).map(function(e) {
-                    return e.time;
-                });
-                fertigationFirstDate = resp.first_date || null;
-                fertigationLastDate = resp.last_date || null;
-                fertigationTotalEvents = resp.total_events || 0;
-                fertigationLoadError = false;
-                updateIdealRange();
-                updateFertigationWarning();
-            })
-            .catch(function() {
-                fertigationEvents = [];
-                fertigationFirstDate = null;
-                fertigationLastDate = null;
-                fertigationTotalEvents = 0;
-                fertigationLoadError = true;
-                updateIdealRange();
-                updateFertigationWarning();
-            });
-    }
-    if (fertigationOverlay) fetchFertigationEvents();
 
     function buildTree(sensors, groupBy) {
         // Group sensors into {groupKey: [{device, sensor, ...}, ...]}
@@ -2575,22 +2416,6 @@ UNIFIED_CHART_JS = """
             }
         }
 
-        if (fertigationOverlay && fertigationEvents.length) {
-            fertigationEvents.forEach(function(t) {
-                shapes.push({
-                    type: 'line',
-                    xref: 'x',
-                    x0: t,
-                    x1: t,
-                    yref: 'paper',
-                    y0: 0,
-                    y1: 1,
-                    line: { color: 'rgba(14, 165, 233, 0.9)', width: 1, dash: 'dot' },
-                    layer: 'above'
-                });
-            });
-        }
-
         Plotly.relayout(chartDiv, { shapes: shapes });
     }
 
@@ -2687,8 +2512,6 @@ UNIFIED_CHART_JS = """
         else p.delete('ideal_lo');
         if (idealHi !== null) p.set('ideal_hi', idealHi);
         else p.delete('ideal_hi');
-        if (fertigationOverlay) p.set('fert_events', '1');
-        else p.delete('fert_events');
         var newUrl = window.location.pathname;
         var qs = p.toString();
         if (qs) newUrl += '?' + qs;
@@ -2705,7 +2528,7 @@ UNIFIED_CHART_JS = """
         var params = new URLSearchParams(window.location.search);
         ['s', 'r', 'lbl', 'ct', 'agg', 'bkt', 'band',
          'split', 'lbl_r', 'ct_r', 'agg_r', 'bkt_r', 'band_r',
-            'ideal_lo', 'ideal_hi', 'fert_events'].forEach(function(name) {
+            'ideal_lo', 'ideal_hi'].forEach(function(name) {
             var val = params.get(name);
             if (val) {
                 var input = document.createElement('input');
@@ -2722,7 +2545,7 @@ UNIFIED_CHART_JS = """
         if (!dateForm) return;
         ['s', 'r', 'lbl', 'ct', 'agg', 'bkt', 'band',
          'split', 'lbl_r', 'ct_r', 'agg_r', 'bkt_r', 'band_r',
-         'ideal_lo', 'ideal_hi', 'fert_events'].forEach(function(name) {
+         'ideal_lo', 'ideal_hi'].forEach(function(name) {
             var existing = dateForm.querySelector(
                 'input[name="' + name + '"]');
             var p = new URLSearchParams(window.location.search);
@@ -2835,7 +2658,7 @@ DASHBOARD_JS = """
         params.set('end', dates.end);
         ['lbl', 'agg', 'bkt', 'band',
          'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r',
-         'ideal_lo', 'ideal_hi', 'fert_events'].forEach(function(k) {
+         'ideal_lo', 'ideal_hi'].forEach(function(k) {
             if (chart[k]) params.set(k, chart[k]);
         });
         return '/chart?' + params.toString();
@@ -3053,7 +2876,6 @@ SAVE_TO_DASHBOARD_JS = """
             band_r: params.get('band_r') || '',
             ideal_lo: params.get('ideal_lo') || '',
             ideal_hi: params.get('ideal_hi') || '',
-            fert_events: params.get('fert_events') || '',
             createdAt: new Date().toISOString()
         };
 
@@ -3280,18 +3102,6 @@ def render_unified_chart_page(
         'stroke-width="1.1"/>'
         '<line x1="3" y1="6.2" x2="9" y2="6.2" stroke="currentColor" stroke-width="1.1"/></svg>'
     )
-    fertigation_toggle_html = ""
-    fertigation_warning_html = ""
-    if _dashboard_id == "blue":
-        fertigation_toggle_html = """
-                    <label class="advanced-toggle">
-                        <input type="checkbox" id="fertigation-overlay">
-                        Event overlay (fertigation)
-                    </label>
-        """
-        fertigation_warning_html = (
-            '<div class="chart-warning" id="fertigation-warning" style="display:none"></div>'
-        )
 
     content = f"""
     <div class="chart-layout">
@@ -3459,7 +3269,6 @@ to {end.isoformat()}</summary>
                         </div>
                         <small>Horizontal reference line/band (Y-axis)</small>
                     </div>
-                    {fertigation_toggle_html}
                 </div>
             </details>
         </div>
@@ -3469,7 +3278,6 @@ to {end.isoformat()}</summary>
             <button class="panel-toggle outline" id="save-to-dashboard"
                 title="Save current chart view to dashboard">&#9734; Save</button>
             <div class="chart-stats" id="chart-stats"></div>
-            {fertigation_warning_html}
             <div class="chart-empty" id="chart-empty">
                 Select sensors from the panel to start charting</div>
             <div id="chart-area"></div>
