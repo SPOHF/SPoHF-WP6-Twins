@@ -234,14 +234,19 @@ async def fetch_daily_coverage(project: str | None = None) -> list[dict[str, Any
 
     Manual coverage (``source`` is a manual slug) is always visible and flagged
     ``manual=True`` straight from the ``daily_coverage.source`` column — no
-    ``readings`` access. Automated coverage is kept only when the (device,
-    sensor) is visible under the ``project`` view; that visibility set is the
-    distinct pairs in the ``sensors_daily_summary`` continuous aggregate, which
-    already groups by ``project``. Reading the cagg replaces the previous
-    per-row correlated ``EXISTS`` against raw ``readings`` (measured ~8× faster:
-    the status page's bottleneck). The cagg can lag a freshly-ingested device by
-    one refresh cycle (~15 min), an acceptable staleness for a status view; the
-    join against the current ``daily_coverage`` discards any stale extra pairs.
+    ``readings`` access.
+
+    Automated coverage is matched against the ``sensors_daily_summary`` cagg at
+    **day granularity** — ``(device, sensor, day)``, not just ``(device,
+    sensor)``. ``daily_coverage`` has no ``project`` column, so a pair-level
+    match would show a day under a source-view whenever the *pair* appeared
+    anywhere in that view — leaking the other source's days (e.g.
+    ``weatherstation:airTemperature`` looked fresh under the Datalake view
+    because ``yookr-direct`` wrote those days). The cagg *does* group by
+    ``project``, so joining on the day (``bucket::date``, UTC — consistent with
+    how ``daily_coverage.day`` derives from ``readings.time``) keeps only the
+    days the active source actually owns. The cagg can lag a freshly-ingested
+    day by one refresh cycle (~15 min), acceptable for a status view.
     """
     pool = get_pool()
     proj_clause, params = _project_filter(project)
@@ -249,7 +254,7 @@ async def fetch_daily_coverage(project: str | None = None) -> list[dict[str, Any
 
     query = f"""
         WITH visible_auto AS (
-            SELECT DISTINCT device_name, sensor_tag
+            SELECT DISTINCT device_name, sensor_tag, bucket::date AS day
             FROM sensors_daily_summary
             WHERE {proj_clause}
         )
@@ -257,8 +262,8 @@ async def fetch_daily_coverage(project: str | None = None) -> list[dict[str, Any
                (dc.source = ANY(%(manual_sources)s)) AS manual
         FROM daily_coverage dc
         WHERE dc.source = ANY(%(manual_sources)s)
-           OR (dc.device_name, dc.sensor_tag)
-               IN (SELECT device_name, sensor_tag FROM visible_auto)
+           OR (dc.device_name, dc.sensor_tag, dc.day)
+               IN (SELECT device_name, sensor_tag, day FROM visible_auto)
         ORDER BY dc.sensor_tag, dc.device_name, dc.day
     """
 
