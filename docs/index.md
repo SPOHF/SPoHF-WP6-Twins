@@ -23,8 +23,8 @@ The 'digital twin' is a concept used in different contexts, lets make them more 
 
 | Dashboard | Status | Reason/remark | Sensor source | Manual sources | URL |
 |-----------|--------| -------|---------|-----|--|
-| **Blue** |🟢 Ready for use | Yookr API | Sync SPoHF Datalake | Insect Data, Fertilizing events, Pim's long data| [wp6-blue.spohf.fontysvenlo.dev](https://wp6-blue.spohf.fontysvenlo.dev) |
-| **Red** | 🟢 Ready for use | Temporary data source (data from october 2025) | Fontys GreenTechLab database | Sijia's fruit measurements | [wp6-red.spohf.fontysvenlo.dev](https://wp6-red.spohf.fontysvenlo.dev) |
+| **Blue** |🟢 Ready for use |  | Sync SPoHF Datalake | Insect Data, Fertilizing events, Pim's long data| [wp6-blue.spohf.fontysvenlo.dev](https://wp6-blue.spohf.fontysvenlo.dev) |
+| **Red** | 🟢 Ready for use | | Fontys GreenTechLab database | Sijia's fruit measurements | [wp6-red.spohf.fontysvenlo.dev](https://wp6-red.spohf.fontysvenlo.dev) |
 | **Grey** | 🟡 Public demo only | Demonstrating generic platform capabilities (public), no real use | Fake data | - | [wp6-grey.spohf.fontysvenlo.dev](https://wp6-grey.spohf.fontysvenlo.dev) |
 
 
