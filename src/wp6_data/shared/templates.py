@@ -1124,6 +1124,46 @@ BASE_CSS = """
         opacity: 0.45;
         pointer-events: none;
     }
+    .advanced-options {
+        margin-top: 0.6rem;
+    }
+    .advanced-options > summary {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--dashboard-primary);
+        cursor: pointer;
+    }
+    .advanced-options .advanced-inner {
+        margin-top: 0.4rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    .advanced-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        margin: 0;
+        cursor: pointer;
+    }
+    .advanced-toggle input[type="checkbox"] {
+        margin: 0;
+        width: auto;
+        appearance: auto;
+        -webkit-appearance: checkbox;
+        accent-color: var(--dashboard-primary);
+        transform: scale(1.05);
+        transform-origin: center;
+    }
+    .chart-warning {
+        margin: 0.35rem 0 0.5rem;
+        padding: 0.45rem 0.65rem;
+        border: 1px solid rgba(245, 158, 11, 0.45);
+        background: rgba(245, 158, 11, 0.08);
+        border-radius: 8px;
+        font-size: 0.82rem;
+    }
     .axis-split-toggle {
         display: flex;
         align-items: center;
@@ -2345,37 +2385,37 @@ UNIFIED_CHART_JS = """
     }
 
     function updateIdealRange() {
-        // Ideal range is ambiguous with active dual Y axes; keep stored values but clear visuals.
-        if (hasDualAxesActive()) {
-            Plotly.relayout(chartDiv, { shapes: [] });
-            return;
-        }
-        var yref = idealRangeAxisRef();
         var shapes = [];
-        var lo = idealLo;
-        var hi = idealHi;
-        if (lo !== null && hi !== null && lo < hi) {
-            shapes.push({
-                type: 'rect',
-                x0: 0, x1: 1, xref: 'paper',
-                yref: yref,
-                y0: lo, y1: hi,
-                fillcolor: 'rgba(34, 197, 94, 0.12)',
-                line: { width: 0 },
-                layer: 'below'
-            });
-        } else {
-            var lineVal = lo !== null ? lo : hi;
-            if (lineVal !== null) {
+        // Ideal range is ambiguous with active dual Y axes; keep stored values but
+        // suppress only ideal-range visuals, not other overlays.
+        if (!hasDualAxesActive()) {
+            var yref = idealRangeAxisRef();
+            var lo = idealLo;
+            var hi = idealHi;
+            if (lo !== null && hi !== null && lo < hi) {
                 shapes.push({
-                    type: 'line',
+                    type: 'rect',
                     x0: 0, x1: 1, xref: 'paper',
                     yref: yref,
-                    y0: lineVal, y1: lineVal,
-                    line: { color: 'rgba(34, 197, 94, 0.85)', width: 1.5, dash: 'dash' }
+                    y0: lo, y1: hi,
+                    fillcolor: 'rgba(34, 197, 94, 0.12)',
+                    line: { width: 0 },
+                    layer: 'below'
                 });
+            } else {
+                var lineVal = lo !== null ? lo : hi;
+                if (lineVal !== null) {
+                    shapes.push({
+                        type: 'line',
+                        x0: 0, x1: 1, xref: 'paper',
+                        yref: yref,
+                        y0: lineVal, y1: lineVal,
+                        line: { color: 'rgba(34, 197, 94, 0.85)', width: 1.5, dash: 'dash' }
+                    });
+                }
             }
         }
+
         Plotly.relayout(chartDiv, { shapes: shapes });
     }
 
@@ -2488,7 +2528,7 @@ UNIFIED_CHART_JS = """
         var params = new URLSearchParams(window.location.search);
         ['s', 'r', 'lbl', 'ct', 'agg', 'bkt', 'band',
          'split', 'lbl_r', 'ct_r', 'agg_r', 'bkt_r', 'band_r',
-         'ideal_lo', 'ideal_hi'].forEach(function(name) {
+            'ideal_lo', 'ideal_hi'].forEach(function(name) {
             var val = params.get(name);
             if (val) {
                 var input = document.createElement('input');
@@ -3213,19 +3253,24 @@ to {end.isoformat()}</summary>
                 <small class="band-hint">shade lowest–highest in each bucket</small>
                 </div>
             </div>
-            <div class="ideal-range-section" id="ideal-range-section">
-                <h4>Ideal range</h4>
-                <div class="ideal-range-inputs">
-                    <input type="number" id="ideal-lo" class="ideal-input"
-                           aria-label="Ideal minimum"
-                           step="any" placeholder="Min">
-                    <span class="date-sep">&ndash;</span>
-                    <input type="number" id="ideal-hi" class="ideal-input"
-                           aria-label="Ideal maximum"
-                           step="any" placeholder="Max">
+            <details class="advanced-options" id="advanced-options">
+                <summary>Advanced options</summary>
+                <div class="advanced-inner">
+                    <div class="ideal-range-section" id="ideal-range-section">
+                        <h4>Ideal range</h4>
+                        <div class="ideal-range-inputs">
+                            <input type="number" id="ideal-lo" class="ideal-input"
+                                   aria-label="Ideal minimum"
+                                   step="any" placeholder="Min">
+                            <span class="date-sep">&ndash;</span>
+                            <input type="number" id="ideal-hi" class="ideal-input"
+                                   aria-label="Ideal maximum"
+                                   step="any" placeholder="Max">
+                        </div>
+                        <small>Horizontal reference line/band (Y-axis)</small>
+                    </div>
                 </div>
-                <small>Horizontal reference line/band (Y-axis)</small>
-            </div>
+            </details>
         </div>
         <div class="chart-main">
             <button class="panel-toggle outline" id="panel-toggle">

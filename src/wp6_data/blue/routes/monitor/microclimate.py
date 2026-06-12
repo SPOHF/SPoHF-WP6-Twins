@@ -55,7 +55,7 @@ async def microclimate(
     except Exception as e:
         return render_page(
             PAGE_TITLE, f"<p>Error fetching data: {e}</p>",
-            show_back_link=True, back_url="/monitor",
+            show_back_link=True, back_url="/sensor-monitor",
             data_source=provider.data_source_label,
         )
 
@@ -66,7 +66,7 @@ async def microclimate(
             PAGE_TITLE,
             f"<h1>Microclimate</h1>{date_filter}"
             "<p>No microclimate sensor data for the selected period.</p>",
-            show_back_link=True, back_url="/monitor",
+            show_back_link=True, back_url="/sensor-monitor",
             data_source=provider.data_source_label,
         )
 
@@ -79,7 +79,7 @@ async def microclimate(
     """
     return render_page(
         PAGE_TITLE, content,
-        show_back_link=True, back_url="/monitor",
+        show_back_link=True, back_url="/sensor-monitor",
         data_source=provider.data_source_label,
     )
 

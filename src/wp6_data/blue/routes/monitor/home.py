@@ -1,4 +1,4 @@
-"""GET /monitor — Plant Monitor hub page."""
+"""GET /sensor-monitor — Plant Monitor hub page."""
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
@@ -22,24 +22,24 @@ async def monitor_home() -> str:
                 "GDD Tracker",
                 "Cumulative Growing Degree Days from biofix. Year-over-year "
                 "comparison with harvest threshold annotations.",
-                href="/monitor/gdd", label="View GDD",
+                href="/sensor-monitor/gdd", label="View GDD",
             ),
             render_hub_card(
                 "Soil Conditions",
                 "Soil temperature, moisture, pH, and electrical conductivity "
                 "across all soil sensors.",
-                href="/monitor/soil", label="View Soil",
+                href="/sensor-monitor/soil", label="View Soil",
             ),
             render_hub_card(
                 "Light",
                 "Photosynthetically Active Radiation (PAR) from in-canopy sensors, "
                 "plus outdoor solar radiation from the weather station.",
-                href="/monitor/light", label="View Light",
+                href="/sensor-monitor/light", label="View Light",
             ),
             render_hub_card(
                 "Microclimate",
                 "Air temperature, humidity, and leaf wetness sensors across the farm.",
-                href="/monitor/microclimate", label="View Microclimate",
+                href="/sensor-monitor/microclimate", label="View Microclimate",
             ),
         ])}
     """

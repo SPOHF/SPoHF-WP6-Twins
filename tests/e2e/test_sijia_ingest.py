@@ -111,7 +111,9 @@ async def test_ingest_populates_daily_coverage(service, red_tsdb_conn):
     async with red_tsdb_conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
             "SELECT count(*) AS n FROM daily_coverage "
-            "WHERE device_name IN (SELECT DISTINCT device_name FROM readings WHERE source = 'sijia')"
+            "WHERE device_name IN ("
+            "SELECT DISTINCT device_name FROM readings WHERE source = 'sijia'"
+            ")"
         )
         coverage_rows = (await cur.fetchone())["n"]
 

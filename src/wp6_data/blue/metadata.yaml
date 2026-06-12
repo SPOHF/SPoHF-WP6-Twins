@@ -168,6 +168,22 @@ sensor_defaults:
     unit: ""  # ordinal 1-10 (flower count)
     alias: "Flowering"
     source: "long_data"
+  # Manual fertigation event CSV measures.
+  program_id:
+    type: "fertigation"
+    unit: ""
+    alias: "Program"
+    source: "fertigation_events"
+  volume_ml_per_plant:
+    type: "fertigation"
+    unit: "ml/plant"
+    alias: "Volume"
+    source: "fertigation_events"
+  duration_min:
+    type: "fertigation"
+    unit: "min"
+    alias: "Duration"
+    source: "fertigation_events"
 
 devices:
   "PH2 | 4D25":

@@ -17,7 +17,7 @@ Options:
 
 import argparse
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 try:
     import httpx
@@ -39,7 +39,7 @@ def main():
         follow_redirects=True,
     )
 
-    end = datetime.now(timezone.utc)
+    end = datetime.now(UTC)
     start = end - timedelta(days=args.days)
     url = f"{args.url.rstrip('/')}/api/v1/data/yookr-data"
 

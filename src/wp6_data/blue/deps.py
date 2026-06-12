@@ -138,7 +138,10 @@ async def fetch_data(
             ORDER BY time_bucket(%(bucket)s, time, %(tz)s)
             LIMIT %(limit)s
         """
-        columns = ["device", "sensor", "time", "value", "value_min", "value_max", "count"]
+        columns = [
+            "device", "sensor", "time", "value",
+            "value_min", "value_max", "count",
+        ]
     else:
         query = f"""
             SELECT device_name AS device, sensor_tag AS sensor,

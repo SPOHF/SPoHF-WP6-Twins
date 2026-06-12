@@ -31,10 +31,9 @@ def fetch_sensor_data(sensor_tags: list[str] | None = None, limit: int = 10000) 
         LIMIT %(limit)s
     """
 
-    with psycopg.connect(DSN, row_factory=dict_row) as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            records = cur.fetchall()
+    with psycopg.connect(DSN, row_factory=dict_row) as conn, conn.cursor() as cur:
+        cur.execute(query, params)
+        records = cur.fetchall()
 
     df = pd.DataFrame(records)
     if not df.empty:

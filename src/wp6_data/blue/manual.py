@@ -18,6 +18,7 @@ import structlog
 from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
 
+from wp6_data.blue.fertigation_events import FERTIGATION_EVENTS
 from wp6_data.blue.insects import INSECTS
 from wp6_data.blue.long_data import LONG_DATA
 from wp6_data.config import Settings
@@ -36,7 +37,7 @@ log = structlog.get_logger()
 
 # Blue's manual sources. A new one = its decoder/descriptor module + an
 # entry here; the rest of this module stays unchanged.
-SOURCES: tuple[ManualSource, ...] = (INSECTS, LONG_DATA)
+SOURCES: tuple[ManualSource, ...] = (INSECTS, LONG_DATA, FERTIGATION_EVENTS)
 
 
 def _invalidate_blue_caches() -> None:
@@ -132,3 +133,11 @@ def ingest_long_data() -> None:
     calendar year(s) so prior years stay intact (see ADR 0002).
     """
     _cli(LONG_DATA, "usage: wp6-blue-ingest-long-data <path-to-xlsx>")
+
+
+def ingest_fertigation_events() -> None:
+    """Console-script entry: `wp6-blue-ingest-fertigation-events <path-to-csv>`."""
+    _cli(
+        FERTIGATION_EVENTS,
+        "usage: wp6-blue-ingest-fertigation-events <path-to-csv>",
+    )

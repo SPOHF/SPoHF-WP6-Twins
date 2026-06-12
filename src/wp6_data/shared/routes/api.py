@@ -20,7 +20,6 @@ _settings = Settings()
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_session_user)])
 
-
 @router.get("/sensors")
 async def list_sensors(
     provider: Annotated[SensorDataProvider, Depends(get_provider)],
@@ -115,3 +114,5 @@ async def get_series(
             rec["count"] = int(row["count"])
         records.append(rec)
     return {"data": records, "truncated": truncated, "limit": limit}
+
+
