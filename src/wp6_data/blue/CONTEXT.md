@@ -62,6 +62,19 @@ A kind of manual measurement. In source files this is a free-text column
 
 ## Data sources
 
+### Automated sensor sources — SPoHF datalake & yookr-direct
+The automated blue sensors (soil, leaf, PAR, pH, row climate, weather station)
+are the **same physical yookr sensors**, ingested two ways:
+
+- **SPoHF datalake** — the readings relayed through SPoHF's backoffice platform.
+  Intended to become the single canonical source as it matures.
+- **yookr-direct** — the same readings pulled straight from the yookr API,
+  without the SPoHF platform in between.
+
+These are not independent feeds of different sensors — they are alternate
+pipelines for one set of sensors, so their coverage is expected to overlap. A
+data-source toggle lets a viewer switch which pipeline the dashboard reads.
+
 ### long_data
 Manual, lab/field-recorded blueberry measurements delivered as yearly Excel
 files (`Long_Data <year>.xlsx`), one new file per year, ingested via CLI only.
