@@ -60,12 +60,13 @@ For SPoHF, wireless sensors were developed and installed.
 
 - **Multi-height** (current focus) - In WP1&WP2 a multi-height sensor setup is being implemented in the greenhouse, to measure the microclimate around the plants at different heights. We are investigating developing different views for this (driven by the needs of the users):
   - **Detailed views** with _prescriptive_ insight around the microclimate, to support actions on the different growth stages of the plants, including leaf maintenance, heat control, light control and positioning and water control.
-  ![Red Twin Prescriptive Detail view](./assets/red-proto-prescriptive.png) (AI-generated prototype)
+  ![Red Twin Prescriptive Detail view](./assets/red-proto-prescriptive1.png)
 
   - **3D visualization** of the microclimates in the entire greenhouse, incorporating multiple multi-height setups
   ![Red Twin 3D](./assets/red-proto-3d.png) (AI-generated prototype)
 
-  - **Timelapse** visualization of the microclimate around a single plant, to see how it changes over time and in response to actions taken.
+  - **Time travel** visualization of the microclimate around a single plant, to see how it changes over time and in response to actions taken.
+  ![Red Twin Time travel](./assets/red-proto-time.png)
 
 
 ## Architecture
