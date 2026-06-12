@@ -5,26 +5,26 @@ from typing import Annotated
 
 import plotly.graph_objects as go
 import structlog
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse
 
 from wp6_data.blue.gdd import (
     DEFAULT_BASE_TEMP,
+    WEATHER_SOURCE_LABEL,
     calculate_daily_gdd,
     cumulative_gdd_from_biofix,
     gdd_from_forecasts,
+    get_weather_hours,
 )
+from wp6_data.config import Settings
 from wp6_data.shared import render_card, render_page
-from wp6_data.shared.routes.deps import get_provider
-from wp6_data.shared.twin import SensorDataProvider
-from wp6_data.shared.weather import OpenMeteoClient
 
 log = structlog.get_logger()
 
 router = APIRouter()
 
-SENSOR_TAG = "airTemperature"
-DEVICE_NAME = "weatherstation"
+settings = Settings()
+
 PAGE_TITLE = "SPoHF Blue - GDD Tracker"
 
 VARIETY = "Cargo"
@@ -38,9 +38,9 @@ THRESHOLDS = [
     (393, "Shoot flowering (376–409)", "#81ec48"),
     (559, "Peak flowering (552–565)", "#1bbe18"),
     (768, "90% bud break (619–917)", "#0bf5e2"),
-    (1200, "Early harvest (?) (1200)", "#2790db"),
-    (1500, "Full harvest (?) (1500)", "#1634f9"),
-    (1650, "Late harvest (?) (1650)", "#6e179d")
+    (1100, "Early harvest (?) (1100)", "#2790db"),
+    (1350, "Full harvest (?) (1350)", "#1634f9"),
+    (1500, "Late harvest (?) (1500)", "#6e179d")
 ]
 
 # Colors for year traces
@@ -96,7 +96,6 @@ GDD_CSS = """
 
 @router.get("/gdd", response_class=HTMLResponse)
 async def gdd_tracker(
-    provider: Annotated[SensorDataProvider, Depends(get_provider)],
     year: Annotated[int | None, Query(description="Primary year")] = None,
     base: Annotated[float, Query(
         description="Base temperature °C")] = DEFAULT_BASE_TEMP,
@@ -105,33 +104,38 @@ async def gdd_tracker(
     biofix_day: Annotated[int, Query(
         description="Biofix day of month")] = 1,
 ) -> str:
-    """GDD tracker with per-year view and harvest threshold annotations."""
+    """GDD tracker with per-year view and harvest threshold annotations.
 
-    current_year = date.today().year
+    Weather is OpenMeteo modeled air temperature at the farm location — not an
+    on-site sensor — so this page is independent of the data-source toggle.
+    """
+
+    today = date.today()
+    current_year = today.year
     if year is None:
         year = current_year
 
     biofix_md = (biofix_month, biofix_day)
 
-    # Fetch ALL data once (cheaper than per-year queries)
+    # Fetch modeled weather once (archive + bridge actuals, plus the forecast).
+    # Cached ~1h per location, so base/biofix changes don't re-hit the API.
     try:
-        df = await provider.fetch_data(
-            sensor_tags=[SENSOR_TAG],
-            device_names=[DEVICE_NAME],
+        df, future_forecasts = await get_weather_hours(
+            settings.blue_weather_lat, settings.blue_weather_lon, today,
         )
     except Exception as e:
         return render_page(
             PAGE_TITLE, f"<h1>Error: {e}</h1>",
             show_back_link=True, back_url="/sensor-monitor",
-            data_source=provider.data_source_label)
+            show_source_indicator=False)
 
     if df.empty:
         return render_page(
             PAGE_TITLE,
             "<h1>GDD Tracker</h1>"
-            f"<p>No temperature data for {DEVICE_NAME}:{SENSOR_TAG}.</p>",
+            "<p>No weather data available from OpenMeteo.</p>",
             show_back_link=True, back_url="/sensor-monitor", extra_css=GDD_CSS,
-            data_source=provider.data_source_label)
+            show_source_indicator=False)
 
     # Calculate daily GDD for ALL data
     daily_all = calculate_daily_gdd(df, base_temp=base)
@@ -177,18 +181,17 @@ async def gdd_tracker(
                 "avg": year_daily["daily_gdd"].mean(),
             }
 
-    # Forecast for primary year (only if it's current year)
+    # Forecast for primary year (only if it's current year). Uses the future
+    # days already fetched alongside the actuals — no extra API call.
     forecast_df = None
     predicted_total = None
     if year == current_year and year in year_curves:
         try:
-            weather = OpenMeteoClient()
-            forecasts = await weather.get_forecast(days=14)
             primary = year_curves[year]["df"]
-            if forecasts and not primary.empty:
+            if future_forecasts and not primary.empty:
                 last_actual = primary["date"].iloc[-1]
                 future = [
-                    f for f in forecasts if f.date > last_actual
+                    f for f in future_forecasts if f.date > last_actual
                 ]
                 if future:
                     cum_start = primary["cumulative_gdd"].iloc[-1]
@@ -210,7 +213,6 @@ async def gdd_tracker(
                     predicted_total = forecast_df[
                         "cumulative_gdd"
                     ].iloc[-1]
-            await weather.close()
         except Exception:
             log.warning("gdd_forecast_failed", exc_info=True)
 
@@ -271,6 +273,8 @@ async def gdd_tracker(
 
     content = f"""
         <h1>GDD Tracker — {VARIETY}</h1>
+        <p style="font-size:0.8rem;opacity:0.7;margin-top:-0.5rem">
+            &#9925; Weather: {WEATHER_SOURCE_LABEL}</p>
         {year_toggle}
         {controls}
         {render_card("How GDD works", formula_html)}
@@ -282,7 +286,7 @@ async def gdd_tracker(
     return render_page(
         PAGE_TITLE, content,
         show_back_link=True, back_url="/sensor-monitor", extra_css=GDD_CSS,
-        data_source=provider.data_source_label)
+        show_source_indicator=False)
 
 
 def _year_toggle_html(

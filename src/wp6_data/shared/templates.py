@@ -2953,11 +2953,15 @@ def _source_toggle_js() -> str:
 """
 
 
-def render_nav_bar(*, data_source: str | None = None) -> str:
+def render_nav_bar(
+    *, data_source: str | None = None, show_source_indicator: bool = True,
+) -> str:
     """Render a sticky nav bar with dashboard name, home link, and dark mode toggle."""
     name = _dashboard_title
     user = _current_user.get()
-    source_html = _render_source_indicator(data_source)
+    # Source-independent pages (e.g. GDD, now OpenMeteo-backed) opt out of the
+    # data-source indicator so they don't imply the toggle affects their data.
+    source_html = _render_source_indicator(data_source) if show_source_indicator else ""
 
     groups = [
         '<div class="nav-group">'
@@ -3002,6 +3006,7 @@ def render_page(
     back_url: str = "/",
     extra_css: str = "",
     data_source: str | None = None,
+    show_source_indicator: bool = True,
 ) -> str:
     """Render a complete HTML page with consistent styling.
 
@@ -3045,7 +3050,7 @@ def render_page(
         </style>
     </head>
     <body>
-        {render_nav_bar(data_source=data_source)}
+        {render_nav_bar(data_source=data_source, show_source_indicator=show_source_indicator)}
         <main>
             {back_html}
             {content}

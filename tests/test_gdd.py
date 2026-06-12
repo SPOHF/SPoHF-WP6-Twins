@@ -1,15 +1,18 @@
 """Tests for the GDD (Growing Degree Day) calculator."""
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
 import pytest
 
+from wp6_data.blue import gdd as gdd_mod
 from wp6_data.blue.gdd import (
     DEFAULT_BASE_TEMP,
     calculate_daily_gdd,
     cumulative_gdd_from_biofix,
+    get_weather_hours,
 )
+from wp6_data.shared.weather import DailyForecast, HourlyWeather
 
 
 def _make_readings(temps: list[tuple[str, float]]) -> pd.DataFrame:
@@ -17,6 +20,87 @@ def _make_readings(temps: list[tuple[str, float]]) -> pd.DataFrame:
     return pd.DataFrame(
         [{"time": pd.Timestamp(t, tz="UTC"), "value": v} for t, v in temps],
     )
+
+
+def _forecast_day(d: date, temps: list[float]) -> DailyForecast:
+    """A DailyForecast with one HourlyWeather per temp (hours 0,6,12,...)."""
+    hourly = [
+        HourlyWeather(
+            datetime=datetime(d.year, d.month, d.day, i * 12, tzinfo=UTC),
+            solar_radiation=0.0, cloud_cover=0.0, temperature=t,
+        )
+        for i, t in enumerate(temps)
+    ]
+    return DailyForecast(date=d, hourly=hourly)
+
+
+class _FakeOpenMeteo:
+    """Stand-in for OpenMeteoClient: archive ends before `today`, forecast
+    supplies the bridge (past_days, overlapping the archive tail) + future."""
+
+    instances = 0
+
+    def __init__(self, latitude: float, longitude: float, **_: object) -> None:
+        type(self).instances += 1
+
+    async def get_historical(self, start: date, end: date) -> list[DailyForecast]:
+        # 06-01 .. 06-07 — archive lags, stops 5 days before `today` (06-12).
+        return [_forecast_day(date(2026, 6, d), [10.0, 20.0]) for d in range(1, 8)]
+
+    async def get_forecast(
+        self, days: int = 7, past_days: int = 0,
+    ) -> list[DailyForecast]:
+        out = []
+        # bridge: 06-05 .. 06-12 (overlaps archive on 06-05..07, distinct temps)
+        for d in range(5, 13):
+            out.append(_forecast_day(date(2026, 6, d), [11.0, 21.0]))
+        # future: 06-13 .. 06-12+days
+        for i in range(1, days + 1):
+            out.append(_forecast_day(date(2026, 6, 12) + timedelta(days=i),
+                                     [12.0, 22.0]))
+        return out
+
+    async def close(self) -> None:
+        return None
+
+
+class TestGetWeatherHours:
+    LAT, LON = 51.40642, 6.11714
+    TODAY = date(2026, 6, 12)
+
+    @pytest.fixture(autouse=True)
+    def _patch(self, monkeypatch):
+        gdd_mod._weather_cache.clear()
+        _FakeOpenMeteo.instances = 0
+        monkeypatch.setattr(gdd_mod, "OpenMeteoClient", _FakeOpenMeteo)
+
+    async def test_actual_is_time_value_up_to_today(self):
+        actual, _future = await get_weather_hours(self.LAT, self.LON, self.TODAY)
+        assert list(actual.columns) == ["time", "value"]
+        assert not actual.empty
+        # Archive start present, nothing past today.
+        assert actual["time"].min().date() == date(2026, 6, 1)
+        assert actual["time"].max().date() == self.TODAY
+
+    async def test_archive_wins_on_overlap_bridge_fills_gap(self):
+        actual, _ = await get_weather_hours(self.LAT, self.LON, self.TODAY)
+        at = dict(zip(actual["time"], actual["value"], strict=True))
+        # 06-05 noon is in BOTH archive (20.0) and bridge (21.0) → archive wins.
+        assert at[pd.Timestamp("2026-06-05 12:00", tz="UTC")] == 20.0
+        # 06-10 is archive-missing → filled from the bridge (21.0).
+        assert at[pd.Timestamp("2026-06-10 12:00", tz="UTC")] == 21.0
+
+    async def test_future_is_strictly_after_today(self):
+        _actual, future = await get_weather_hours(self.LAT, self.LON, self.TODAY)
+        assert {f.date for f in future} == {
+            self.TODAY + timedelta(days=i) for i in range(1, gdd_mod.FORECAST_DAYS + 1)
+        }
+        assert all(f.date > self.TODAY for f in future)
+
+    async def test_cached_per_location(self):
+        await get_weather_hours(self.LAT, self.LON, self.TODAY)
+        await get_weather_hours(self.LAT, self.LON, self.TODAY)
+        assert _FakeOpenMeteo.instances == 1  # second call served from cache
 
 
 class TestCalculateDailyGdd:

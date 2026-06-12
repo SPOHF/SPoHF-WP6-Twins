@@ -83,11 +83,16 @@ class OpenMeteoClient:
             await self._client.aclose()
             self._client = None
 
-    async def get_forecast(self, days: int = 7) -> list[DailyForecast]:
+    async def get_forecast(
+        self, days: int = 7, past_days: int = 0,
+    ) -> list[DailyForecast]:
         """Fetch solar radiation forecast for the next N days.
 
         Args:
             days: Number of days to forecast (1-16)
+            past_days: Recent past days to also include (0-92), from the same
+                forecast model — used to bridge the ~5-day lag of the ERA5
+                archive up to today.
 
         Returns:
             List of DailyForecast objects with hourly data
@@ -102,6 +107,8 @@ class OpenMeteoClient:
             "forecast_days": min(days, 16),
             "timezone": "UTC",
         }
+        if past_days:
+            params["past_days"] = min(past_days, 92)
 
         response = await client.get(OPENMETEO_FORECAST_URL, params=params)
         response.raise_for_status()

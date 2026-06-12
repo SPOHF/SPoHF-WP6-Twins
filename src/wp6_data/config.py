@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # only the latest 2 per source are kept on disk (audit rows kept forever).
     blue_upload_dir: str = "/data/blue-manual-uploads"
 
+    # Blue farm weather location for GDD modeled-weather lookups
+    # via OpenMeteo. Override per-deployment with WP6_BLUE_WEATHER_LAT/LON.
+    blue_weather_lat: float = 51.40642
+    blue_weather_lon: float = 6.11714
+
     # Display
     display_timezone: str = "Europe/Amsterdam"
 

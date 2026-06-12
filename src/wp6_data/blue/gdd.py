@@ -12,12 +12,11 @@ Reference: Carlson & Hancock (1991), MSU Extension.
 from __future__ import annotations
 
 from datetime import date
-from typing import TYPE_CHECKING
 
 import pandas as pd
+from cachetools import TTLCache
 
-if TYPE_CHECKING:
-    from wp6_data.shared.weather import DailyForecast
+from wp6_data.shared.weather import DailyForecast, OpenMeteoClient
 
 DEFAULT_BASE_TEMP = 5.0  # °C, European convention; biofix = Jan 1
 DEFAULT_CHILL_THRESHOLD = 7.2  # °C — hours below this count as chill hours
@@ -28,6 +27,76 @@ DEFAULT_CHILL_REQUIREMENT = 1000
 # Values outside this range are sensor errors (e.g. 0xFFFFFFFF overflow).
 TEMP_MIN_PLAUSIBLE = -40.0
 TEMP_MAX_PLAUSIBLE = 60.0
+
+# --- OpenMeteo weather source for GDD --------------------------------------
+# GDD tracks modeled outdoor air temperature at the farm, not an on-site sensor
+# (the sensor feed was only fresh via yookr-direct; see ADR-less decision in
+# issues/023). The archive (ERA5) lags ~5 days, so the forecast endpoint's
+# past_days bridges the recent tail up to today and also supplies the future.
+GDD_START_YEAR = 2024
+FORECAST_DAYS = 14
+BRIDGE_PAST_DAYS = 10  # forecast days covering the ERA5 tail (~5d) + margin
+WEATHER_SOURCE_LABEL = "OpenMeteo · Compass Agro"
+
+# Per-(lat, lon) cache of the fetched weather, so base/biofix changes recompute
+# without re-hitting the API. TTL ~1h: the archive is immutable, only the recent
+# tail moves. (2.5 yr of hourly data is one ~1.3s call.)
+_weather_cache: TTLCache = TTLCache(maxsize=8, ttl=3600)
+
+
+async def get_weather_hours(
+    latitude: float,
+    longitude: float,
+    today: date,
+) -> tuple[pd.DataFrame, list[DailyForecast]]:
+    """Fetch GDD weather from OpenMeteo only (cached ~1h per location).
+
+    Returns ``(actual_hourly_df, future_daily_forecasts)``:
+
+    - ``actual_hourly_df``: ``time``/``value`` hourly temperatures from
+      ``GDD_START_YEAR-01-01`` through ``today`` — the ERA5 archive plus the
+      forecast ``past_days`` bridge for the recent days the archive lacks
+      (archive wins on overlap). Shaped exactly like sensor readings so it
+      flows straight into :func:`calculate_daily_gdd`.
+    - ``future_daily_forecasts``: ``DailyForecast`` for days strictly after
+      ``today``, for :func:`gdd_from_forecasts`.
+    """
+    key = (round(latitude, 4), round(longitude, 4))
+    cached = _weather_cache.get(key)
+    if cached is not None:
+        return cached
+
+    client = OpenMeteoClient(latitude=latitude, longitude=longitude)
+    try:
+        archive = await client.get_historical(date(GDD_START_YEAR, 1, 1), today)
+        recent_future = await client.get_forecast(
+            days=FORECAST_DAYS, past_days=BRIDGE_PAST_DAYS,
+        )
+    finally:
+        await client.close()
+
+    # Actual hours: archive first, then bridge fills only the days/hours the
+    # archive is missing (archive = ERA5 reanalysis, preferred over forecast).
+    actual: dict = {}
+    for fc in archive:
+        for h in fc.hourly:
+            if h.datetime.date() <= today:
+                actual[h.datetime] = h.temperature
+    for fc in recent_future:
+        if fc.date <= today:
+            for h in fc.hourly:
+                if h.datetime.date() <= today:
+                    actual.setdefault(h.datetime, h.temperature)
+
+    actual_df = pd.DataFrame(
+        [{"time": t, "value": v} for t, v in sorted(actual.items())],
+        columns=["time", "value"],
+    )
+    future = [fc for fc in recent_future if fc.date > today]
+
+    result = (actual_df, future)
+    _weather_cache[key] = result
+    return result
 
 
 def calculate_daily_gdd(
