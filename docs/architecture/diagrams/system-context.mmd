@@ -1,0 +1,65 @@
+---
+title: "WP6 Digital Twins - System Context (C4 Level 1)"
+---
+graph TB
+    %% SSOT — also embedded in docs/architecture/index.md.
+    %% Edit this file first, then mirror into index.md.
+    classDef person fill:#08427b,color:#fff,stroke:none
+    classDef system fill:#1168bd,color:#fff,stroke:none
+    classDef external fill:#999,color:#fff,stroke:none
+
+    grower["Grower / Researcher
+    [Person]
+    Views sensor data, DLI/GDD analytics,
+    and growth forecasts"]:::person
+
+    visitor["Public Visitor
+    [Person]
+    Explores the platform demo
+    (Grey twin only)"]:::person
+
+    wp6["WP6 Digital Twins
+    [Software System]
+    Blue (blueberry), Red (tomato)
+    and Grey (synthetic demo) dashboards
+    on a shared FastAPI platform"]:::system
+
+    spohf["SPoHF Backoffice
+    [External System]
+    AppComm DataLake — aggregates
+    sensor data from field devices"]:::external
+
+    yookr["Yookr API
+    [External System]
+    Direct sensor data access
+    for blueberry field devices"]:::external
+
+    openmeteo["Open-Meteo
+    [External System]
+    Weather forecast and
+    historical weather data API"]:::external
+
+    oidc["OIDC Provider
+    [External System]
+    Identity provider for
+    authenticated dashboards"]:::external
+
+    greenhouse["Greenhouse Sensors
+    [External System]
+    PAR, temperature, humidity
+    sensors at Vitarom"]:::external
+
+    field["Field Sensors
+    [External System]
+    Soil, climate, and nutrient
+    sensors at Compass Agro"]:::external
+
+    grower -->|"Views Blue/Red dashboards\n(HTTPS, OIDC)"| wp6
+    visitor -->|"Views Grey demo\n(HTTPS, public)"| wp6
+    wp6 -->|"Authenticates user\n(OIDC)"| oidc
+    wp6 -->|"Fetches sensor readings\n(REST API)"| spohf
+    wp6 -->|"Fetches sensor readings\n(REST API)"| yookr
+    wp6 -->|"Fetches weather data\n(REST API)"| openmeteo
+    greenhouse -->|"Publishes readings"| spohf
+    field -->|"Publishes readings"| spohf
+    field -->|"Publishes readings"| yookr

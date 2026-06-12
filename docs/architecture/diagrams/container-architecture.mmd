@@ -1,0 +1,120 @@
+---
+title: "WP6 Digital Twins - Container Diagram (C4 Level 2)"
+---
+graph TB
+    %% SSOT — also embedded in docs/architecture/index.md.
+    %% Edit this file first, then mirror into index.md.
+    classDef person fill:#08427b,color:#fff,stroke:none
+    classDef container fill:#1168bd,color:#fff,stroke:none
+    classDef database fill:#1168bd,color:#fff,stroke:none
+    classDef external fill:#999,color:#fff,stroke:none
+    classDef cronjob fill:#438dd5,color:#fff,stroke:none
+    classDef shared fill:#0a3d62,color:#fff,stroke:none
+
+    grower["Grower / Researcher
+    [Person]"]:::person
+    visitor["Public Visitor
+    [Person]"]:::person
+
+    subgraph wp6["WP6 Digital Twins"]
+        direction TB
+
+        subgraph platform["Shared Platform (wp6_data.shared)"]
+            app_factory["App Factory
+            [Library: FastAPI + Jinja2]
+            Builds a dashboard from a
+            TwinConfig (provider, theme,
+            metadata, extra routers)"]:::shared
+        end
+
+        subgraph blue_twin["Blue Twin (Blueberries)"]
+            blue_dash["Blue Dashboard
+            [Container: FastAPI]
+            Authenticated dashboard with
+            chart compare, GDD tracker,
+            and SPoHF / Yookr source toggle"]:::container
+        end
+
+        subgraph red_twin["Red Twin (Tomatoes)"]
+            red_dash["Red Dashboard
+            [Container: FastAPI]
+            Authenticated dashboard with
+            DLI analysis and ML forecasting
+            (model trained on startup)"]:::container
+        end
+
+        subgraph grey_twin["Grey Twin (Demo)"]
+            grey_dash["Grey Dashboard
+            [Container: FastAPI]
+            Public demo with synthetic
+            in-memory sensor data —
+            exercises the shared platform"]:::container
+        end
+
+        subgraph data_engine["Data Engine"]
+            sync_job["wp6-data Sync Job
+            [Container: Python CronJob]
+            python -m wp6_data:
+            SPoHF + Yookr ingest
+            (sequential, every 15 min)"]:::cronjob
+
+            blue_export["Blue CSV Export Job
+            [Container: Python CronJob]
+            Nightly export of Blue
+            sensor data to CSV"]:::cronjob
+
+            red_export["Red CSV Export Job
+            [Container: Python CronJob]
+            Nightly export of Red
+            sensor tables to CSV"]:::cronjob
+        end
+
+        tsdb[("TimescaleDB
+        [Database: PostgreSQL 17]
+        readings, sync_metadata,
+        daily_coverage hypertables")]:::database
+    end
+
+    mysqldb[("MySQL
+    [External Database: MySQL 8]
+    Fontys GreenTechLab —
+    greenhouse sensor tables
+    (Red twin only)")]:::external
+
+    spohf["SPoHF Backoffice
+    [External: REST API]"]:::external
+    yookr["Yookr API
+    [External: REST API]"]:::external
+    openmeteo["Open-Meteo
+    [External: REST API]"]:::external
+    oidc["OIDC Provider
+    [External: HTTPS]"]:::external
+
+    %% User flows
+    grower -->|"HTTPS\n(OIDC)"| blue_dash
+    grower -->|"HTTPS\n(OIDC)"| red_dash
+    visitor -->|"HTTPS\n(public)"| grey_dash
+
+    %% Auth flow
+    blue_dash -.->|"OIDC"| oidc
+    red_dash -.->|"OIDC"| oidc
+
+    %% Platform composition (each dashboard IS a configured app_factory)
+    blue_dash -.->|"built from"| app_factory
+    red_dash -.->|"built from"| app_factory
+    grey_dash -.->|"built from"| app_factory
+
+    %% Data access
+    blue_dash -->|"Async queries\n(psycopg3 pool)\nproject filter:\nspohf-datalake | yookr-direct"| tsdb
+    red_dash -->|"Async queries\n(aiomysql)"| mysqldb
+    red_dash -->|"Daily forecast\n(HTTPS)"| openmeteo
+    %% grey_dash has no datastore (in-memory)
+
+    %% Sync job (single process runs both ingests sequentially)
+    sync_job -->|"Paginated fetch\n(httpx)"| spohf
+    sync_job -->|"Per-sensor fetch\n(httpx)"| yookr
+    sync_job -->|"Batch upsert"| tsdb
+
+    %% Export jobs
+    blue_export -->|"Read readings"| tsdb
+    red_export -->|"Read sensor tables"| mysqldb

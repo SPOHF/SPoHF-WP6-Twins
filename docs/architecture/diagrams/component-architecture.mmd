@@ -1,0 +1,262 @@
+---
+title: "WP6 Digital Twins - Component Diagram (C4 Level 3)"
+---
+graph TB
+    %% SSOT — also embedded in docs/architecture/index.md.
+    %% Edit this file first, then mirror into index.md.
+    classDef component fill:#438dd5,color:#fff,stroke:none
+    classDef platform fill:#0a3d62,color:#fff,stroke:none
+    classDef protocol fill:#8e44ad,color:#fff,stroke:none
+    classDef database fill:#1168bd,color:#fff,stroke:none
+    classDef external fill:#999,color:#fff,stroke:none
+
+    %% ── External systems ──
+    spohf_api["SPoHF REST API
+    [External]"]:::external
+    yookr_api["Yookr REST API
+    [External]"]:::external
+    openmeteo_api["Open-Meteo API
+    [External]"]:::external
+    oidc_provider["OIDC Provider
+    [External]"]:::external
+    tsdb[("TimescaleDB
+    readings | sync_metadata
+    daily_coverage")]:::database
+    mysqldb[("MySQL
+    GTL sensor tables
+    (Red only)")]:::database
+
+    %% ────────────────────────────────────────────────
+    %% Shared Platform — the heart of the application
+    %% ────────────────────────────────────────────────
+    subgraph platform["Shared Platform (wp6_data.shared)"]
+        app_factory["create_app
+        [Component]
+        Builds FastAPI app from
+        TwinConfig: routes, auth,
+        provider dispatch, lifespan"]:::platform
+
+        twin_config["TwinConfig
+        [Dataclass]
+        twin_id, title, theme,
+        data_sources, metadata,
+        extra_routers, hero_cards"]:::platform
+
+        provider_protocol["SensorDataProvider
+        [Protocol]
+        fetch_data, fetch_available_sensors,
+        fetch_device_data, fetch_sync_metrics,
+        fetch_daily_coverage"]:::protocol
+
+        shared_routes["Shared Routes
+        [Component]
+        home | charts | dashboard_page
+        status | api | health"]:::platform
+
+        auth_mod["Auth (OIDC)
+        [Component]
+        startup_oidc, make_auth_router,
+        verify_session_user"]:::platform
+
+        metadata_mod["MetadataRegistry
+        [Component]
+        Loads metadata.yaml:
+        device + sensor labels, units"]:::platform
+
+        misc_shared["templates | aggregation
+        charts | export | time
+        sensor_summary | twin
+        [Components]"]:::platform
+    end
+
+    %% ────────────────────────────────────────────────
+    %% Blue Twin
+    %% ────────────────────────────────────────────────
+    subgraph blue_layer["Blue Twin (wp6_data.blue)"]
+        blue_config["dashboard.config
+        [TwinConfig instance]
+        2 DataSources: spohf-datalake
+        and yookr-direct"]:::component
+        blue_provider["BlueSensorProvider
+        [Component, x2]
+        TSDB-backed, project-filtered
+        (one per DataSource)"]:::component
+        blue_deps["deps
+        [Component]
+        TSDB queries, fetch_data,
+        fetch_sync_metrics, …"]:::component
+        blue_routes_x["Blue Extra Routes
+        [Components]
+        ops | charts | gdd"]:::component
+        blue_gdd["gdd
+        [Component]
+        Growing Degree Days
+        cumulative heat tracker"]:::component
+        blue_metadata[("blue/metadata.yaml")]:::component
+    end
+
+    %% ────────────────────────────────────────────────
+    %% Red Twin
+    %% ────────────────────────────────────────────────
+    subgraph red_layer["Red Twin (wp6_data.red)"]
+        red_config["dashboard.config
+        [TwinConfig instance]
+        1 DataSource: mysql"]:::component
+        red_provider["RedSensorProvider
+        [Component]
+        MySQL-backed sensor access"]:::component
+        red_db["MySQLConnection
+        [Component]
+        aiomysql pool with
+        sensor type mapping"]:::component
+        red_routes_x["Red Extra Routes
+        [Components]
+        browse | dli | dli_model | charts"]:::component
+        red_metadata[("red/metadata.yaml")]:::component
+
+        subgraph dli_layer["DLI sub-package (red.dli)"]
+            dli_model["LightModel
+            [Component]
+            Two-stage Ridge regression
+            persisted to .pkl"]:::component
+            dli_calc["Calculator
+            [Component]
+            PAR→DLI conversion,
+            lamp contribution"]:::component
+            dli_weather["WeatherClient
+            [Component]
+            Open-Meteo daily forecasts
+            with caching"]:::component
+            dli_agg["Aggregation
+            [Component]
+            Daily features,
+            cyclic day-of-year"]:::component
+        end
+    end
+
+    %% ────────────────────────────────────────────────
+    %% Grey Twin (demo / platform smoke test)
+    %% ────────────────────────────────────────────────
+    subgraph grey_layer["Grey Twin (wp6_data.grey)"]
+        grey_config["dashboard.config
+        [TwinConfig instance]
+        require_auth=False,
+        in-memory data source"]:::component
+        grey_provider["GreySensorProvider
+        [Component]
+        Sine-wave synthetic data,
+        no DB"]:::component
+        grey_metadata[("grey/metadata.yaml")]:::component
+    end
+
+    %% ────────────────────────────────────────────────
+    %% Sync layer (independent CronJob processes)
+    %% ────────────────────────────────────────────────
+    subgraph sync_layer["Sync Orchestration (wp6_data.sync)"]
+        spohf_orch["SyncOrchestrator
+        [Component]
+        Windowed sync with
+        early-stop on duplicates"]:::component
+        yookr_orch["YookrSyncOrchestrator
+        [Component]
+        Per-sensor ingestion
+        via SensorRegistry (CSV)"]:::component
+    end
+
+    %% ────────────────────────────────────────────────
+    %% API client + DB layers
+    %% ────────────────────────────────────────────────
+    subgraph api_layer["API Clients (wp6_data.api, wp6_data.yookr)"]
+        spohf_client["SpoHFClient
+        [Component]
+        Paginated async fetcher
+        with timestamp windowing"]:::component
+        yookr_client["YookrClient
+        [Component]
+        Session auth, per-sensor
+        monthly-windowed fetcher"]:::component
+    end
+
+    subgraph db_layer["Database Layer (wp6_data.db)"]
+        pool["ConnectionPool
+        [Component]
+        Async psycopg3 pool
+        (singleton, lazy init)"]:::component
+        queries["Queries
+        [Component]
+        upsert_readings,
+        upsert_daily_coverage"]:::component
+        schema["Schema
+        [Component]
+        Idempotent DDL:
+        hypertables + indexes"]:::component
+    end
+
+    config["Settings (Pydantic)
+    [Component]
+    WP6_* env vars for all
+    connections and behavior"]:::component
+
+    %% ────────────────────────────────────────────────
+    %% Connections — platform composition
+    %% ────────────────────────────────────────────────
+    twin_config -->|"data_sources[*].provider"| provider_protocol
+    app_factory -->|"reads"| twin_config
+    app_factory -->|"mounts"| shared_routes
+    app_factory -->|"wires"| auth_mod
+    app_factory -->|"loads"| metadata_mod
+    shared_routes -->|"depends on"| provider_protocol
+    auth_mod -->|"OIDC flow"| oidc_provider
+    misc_shared -.->|"used by"| shared_routes
+
+    %% Per-twin: each is a TwinConfig + provider implementing the protocol
+    blue_config -->|"built by"| app_factory
+    red_config -->|"built by"| app_factory
+    grey_config -->|"built by"| app_factory
+
+    blue_provider -.->|"implements"| provider_protocol
+    red_provider -.->|"implements"| provider_protocol
+    grey_provider -.->|"implements"| provider_protocol
+
+    blue_config -->|"data_sources"| blue_provider
+    blue_config -->|"extra_routers"| blue_routes_x
+    blue_config -->|"metadata"| blue_metadata
+    blue_provider --> blue_deps
+    blue_routes_x --> blue_gdd
+    blue_routes_x --> blue_deps
+
+    red_config -->|"data_sources"| red_provider
+    red_config -->|"extra_routers"| red_routes_x
+    red_config -->|"metadata"| red_metadata
+    red_provider --> red_db
+    red_routes_x --> dli_model
+    red_routes_x --> red_db
+    dli_model --> dli_calc
+    dli_model --> dli_weather
+    dli_model --> dli_agg
+    dli_weather -->|"Daily weather"| openmeteo_api
+
+    grey_config -->|"data_sources"| grey_provider
+    grey_config -->|"metadata"| grey_metadata
+
+    %% Data layer
+    blue_deps --> pool
+    pool --> tsdb
+    schema --> pool
+    red_db --> mysqldb
+
+    %% Sync (separate processes — not the dashboards)
+    spohf_orch --> spohf_client
+    spohf_orch --> queries
+    yookr_orch --> yookr_client
+    yookr_orch --> queries
+    queries --> pool
+    spohf_client -->|"GET /api/v1/data"| spohf_api
+    yookr_client -->|"POST /login\nGET /sensor/read"| yookr_api
+
+    %% Config flows everywhere
+    config -.->|"configures"| spohf_orch
+    config -.->|"configures"| yookr_orch
+    config -.->|"configures"| pool
+    config -.->|"configures"| blue_config
+    config -.->|"configures"| red_config

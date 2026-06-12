@@ -21,11 +21,11 @@ The 'digital twin' is a concept used in different contexts, lets make them more 
 - The specific digital twins, which built on top of the platform, with specific features to support use cases and findings from the blueberry and tomato domains. Due to the color of the fruits, we call them the 'blue' and 'red' twin respectively.
 
 
-| Dashboard | Status | Reason/remark | Data source | URL |
-|-----------|--------| -------|---------|-----|
-| **Blue** |🟢 Ready for use | Yookr API | Synced from Yookr API (AppComm) | [wp6-blue.spohf.fontysvenlo.dev](https://wp6-blue.spohf.fontysvenlo.dev) |
-| **Red** | 🟢 Ready for use | Temporary data source (data from october 2025) | Fontys GreenTechLab database | [wp6-red.spohf.fontysvenlo.dev](https://wp6-red.spohf.fontysvenlo.dev) |
-| **Grey** | 🟡 Public demo only | Demonstrating generic platform capabilities (public)  | Fake data | [wp6-grey.spohf.fontysvenlo.dev](https://wp6-grey.spohf.fontysvenlo.dev) |
+| Dashboard | Status | Reason/remark | Sensor source | Manual sources | URL |
+|-----------|--------| -------|---------|-----|--|
+| **Blue** |🟢 Ready for use | Yookr API | Sync SPoHF Datalake | Insect Data, Fertilizing events, Pim's long data| [wp6-blue.spohf.fontysvenlo.dev](https://wp6-blue.spohf.fontysvenlo.dev) |
+| **Red** | 🟢 Ready for use | Temporary data source (data from october 2025) | Fontys GreenTechLab database | Sijia's fruit measurements | [wp6-red.spohf.fontysvenlo.dev](https://wp6-red.spohf.fontysvenlo.dev) |
+| **Grey** | 🟡 Public demo only | Demonstrating generic platform capabilities (public), no real use | Fake data | - | [wp6-grey.spohf.fontysvenlo.dev](https://wp6-grey.spohf.fontysvenlo.dev) |
 
 
 ## Red and Blue twins
@@ -43,23 +43,29 @@ The product features provides are therefore more focused on supporting the resea
 ### Blue features
 
 - **GDD** - A specific feature we've built for investigating is the Growing Degree Days (GDD), which is a measure of heat accumulation used to predict plant development stages. By analyzing the GDD in relation to the fertilization strategies and other factors, we can gain insights into how to optimize the growth and yield of the blueberries. But also discover undocumented data on the specific cultivar used in the field.
+
 - **Insect Data** - The Twin ingests the automated insect counts from pictures of yellow cards in the fields (from work package 3).
 
 Pending work:
-- Analysis results of 2026
+- More in-depth results of 2024, 2025
+- Analysis of 2026
 
 ## Red Twin
 
-- **DLI prediction model** - (on hold) With the sensor data and weather predictions, we built a model to predict the Daily Light Integral (DLI) in the greenhouse, which is a measure of the total amount of photosynthetically active radiation (PAR) received by the plants in a day. This can help in optimizing costs and light conditions for the tomatoes, especially in winter when artificial lighting is used.
+For SPoHF, wireless sensors were developed and installed.
 
-- **Multi-height** - (current focus) In WP1&WP2 a multi-height sensor setup is being implemented in the greenhouse, to measure the microclimate around the plants at different heights. We are investigating developing different views for this (driven by the needs of the users):
+- **DLI prediction model** (on hold) - With the sensor data and weather predictions, we built a model to predict the Daily Light Integral (DLI) in the greenhouse, which is a measure of the total amount of photosynthetically active radiation (PAR) received by the plants in a day. This can help in optimizing costs and light conditions for the tomatoes, especially in winter when artificial lighting is used.
+
+- **Existing data** (explore) - Once data from the existing system, LetsGrow, is available - we can leverage data we dont have yet, such as actuators (heating, ventilation).
+
+- **Multi-height** (current focus) - In WP1&WP2 a multi-height sensor setup is being implemented in the greenhouse, to measure the microclimate around the plants at different heights. We are investigating developing different views for this (driven by the needs of the users):
   - **Detailed views** with _prescriptive_ insight around the microclimate, to support actions on the different growth stages of the plants, including leaf maintenance, heat control, light control and positioning and water control.
   ![Red Twin Prescriptive Detail view](./assets/red-proto-prescriptive.png) (AI-generated prototype)
 
   - **3D visualization** of the microclimates in the entire greenhouse, incorporating multiple multi-height setups
   ![Red Twin 3D](./assets/red-proto-3d.png) (AI-generated prototype)
 
-  - **Time-lapse** visualization of the microclimate around a single plant, to see how it changes over time and in response to actions taken.
+  - **Timelapse** visualization of the microclimate around a single plant, to see how it changes over time and in response to actions taken.
 
 
 ## Architecture

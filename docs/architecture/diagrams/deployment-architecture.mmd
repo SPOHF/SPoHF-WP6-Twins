@@ -1,0 +1,123 @@
+---
+title: "WP6 Digital Twins - Deployment Diagram"
+---
+graph TB
+    %% SSOT — also embedded in docs/architecture/index.md.
+    %% Edit this file first, then mirror into index.md.
+    %% Current state: everything runs in the Fontys K8s cluster.
+    %% (The desired-state split with ProcEvolution is described in
+    %% the "Operations" section of architecture/index.md.)
+    classDef k8s fill:#326ce5,color:#fff,stroke:none
+    classDef pod fill:#438dd5,color:#fff,stroke:none
+    classDef storage fill:#1168bd,color:#fff,stroke:none
+    classDef ingress fill:#08427b,color:#fff,stroke:none
+    classDef external fill:#999,color:#fff,stroke:none
+    classDef cronjob fill:#6b9ed6,color:#fff,stroke:none
+
+    %% ── External actors and services ──
+    user["Grower / Researcher
+    [Browser]"]:::external
+    visitor["Public Visitor
+    [Browser]"]:::external
+    spohf_ext["backoffice.spohf.com"]:::external
+    yookr_ext["api.yookr.org"]:::external
+    openmeteo_ext["api.open-meteo.com"]:::external
+    oidc_ext["OIDC Provider"]:::external
+    mysql_ext[("Fontys GTL MySQL 8
+    [External Managed DB]
+    Greenhouse sensor tables
+    (85.215.61.145:3306)")]:::external
+
+    %% ── Fontys IDP cluster, namespace spohf-system ──
+    subgraph fontys["Fontys IDP K8s Cluster — namespace: spohf-system"]
+        direction TB
+
+        blue_ingress["Ingress
+        wp6-blue.spohf.fontysvenlo.dev"]:::ingress
+        red_ingress["Ingress
+        wp6-red.spohf.fontysvenlo.dev"]:::ingress
+        grey_ingress["Ingress
+        wp6-grey.spohf.fontysvenlo.dev"]:::ingress
+
+        blue_deploy["Blue Dashboard
+        [Deployment: 1 replica]
+        FastAPI + Uvicorn"]:::pod
+        red_deploy["Red Dashboard
+        [Deployment: 1 replica]
+        FastAPI + Uvicorn"]:::pod
+        grey_deploy["Grey Dashboard
+        [Deployment: 1 replica]
+        FastAPI + Uvicorn
+        (no DB, no auth)"]:::pod
+
+        sync_cron["wp6-data Sync
+        [CronJob: */15 * * * *]
+        python -m wp6_data:
+        SPoHF + Yookr (sequential)
+        (uses wp6-data-blue image)"]:::cronjob
+
+        blue_export_cron["Blue CSV Export
+        [CronJob: 0 2 * * *]
+        Nightly Blue export"]:::cronjob
+        red_export_cron["Red CSV Export
+        [CronJob: 0 2 * * *]
+        Nightly Red sensor export"]:::cronjob
+
+        tsdb_sts["TimescaleDB
+        [StatefulSet: 1 replica]
+        PostgreSQL 17 +
+        TimescaleDB extension"]:::storage
+
+        tsdb_pvc[("PersistentVolumeClaim
+        timescaledb-data")]:::storage
+
+        secret_main["wp6-data-secrets
+        [Secret, externally provisioned]
+        OIDC client/session,
+        TSDB URL,
+        SPoHF + Yookr API tokens"]:::k8s
+
+        secret_red["wp6-data-red-secrets
+        [Secret, externally provisioned]
+        MySQL password (Red)"]:::k8s
+    end
+
+    %% ── User → Ingress → Deployment ──
+    user -->|"HTTPS"| blue_ingress
+    user -->|"HTTPS"| red_ingress
+    visitor -->|"HTTPS"| grey_ingress
+    blue_ingress --> blue_deploy
+    red_ingress --> red_deploy
+    grey_ingress --> grey_deploy
+
+    %% ── Auth ──
+    blue_deploy -.->|"OIDC"| oidc_ext
+    red_deploy -.->|"OIDC"| oidc_ext
+
+    %% ── Dashboard data access ──
+    blue_deploy -->|"psycopg3\nport 5432"| tsdb_sts
+    red_deploy -->|"aiomysql\nport 3306"| mysql_ext
+    red_deploy -->|"HTTPS"| openmeteo_ext
+
+    %% ── Storage ──
+    tsdb_sts --- tsdb_pvc
+
+    %% ── Sync job (single process, runs both ingests sequentially) ──
+    sync_cron -->|"HTTPS"| spohf_ext
+    sync_cron -->|"HTTPS"| yookr_ext
+    sync_cron -->|"port 5432"| tsdb_sts
+
+    %% ── Export jobs ──
+    blue_export_cron -->|"port 5432"| tsdb_sts
+    red_export_cron -->|"port 3306"| mysql_ext
+
+    %% ── Secret mounts ──
+    %% Main secret feeds Blue, sync, and Blue export
+    secret_main -.->|"mounted"| blue_deploy
+    secret_main -.->|"mounted"| sync_cron
+    secret_main -.->|"mounted"| blue_export_cron
+    %% Red dashboard reads OIDC/TSDB from main, MySQL password from red secret
+    secret_main -.->|"mounted"| red_deploy
+    secret_red -.->|"mounted"| red_deploy
+    secret_red -.->|"mounted"| red_export_cron
+    %% grey_deploy needs no secrets — it's stateless and public
