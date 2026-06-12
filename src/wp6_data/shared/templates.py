@@ -2656,8 +2656,8 @@ DASHBOARD_JS = """
         if (chart.r) params.set('r', chart.r);
         params.set('start', dates.start);
         params.set('end', dates.end);
-        ['lbl', 'agg', 'bkt', 'band',
-         'split', 'lbl_r', 'agg_r', 'bkt_r', 'band_r',
+        ['lbl', 'ct', 'agg', 'bkt', 'band',
+         'split', 'lbl_r', 'ct_r', 'agg_r', 'bkt_r', 'band_r',
          'ideal_lo', 'ideal_hi'].forEach(function(k) {
             if (chart[k]) params.set(k, chart[k]);
         });
@@ -2866,11 +2866,13 @@ SAVE_TO_DASHBOARD_JS = """
             start: params.get('start') || '',
             end: params.get('end') || '',
             lbl: params.get('lbl') || '',
+            ct: params.get('ct') || '',
             agg: params.get('agg') || '',
             bkt: params.get('bkt') || '',
             band: params.get('band') || '',
             split: params.get('split') || '',
             lbl_r: params.get('lbl_r') || '',
+            ct_r: params.get('ct_r') || '',
             agg_r: params.get('agg_r') || '',
             bkt_r: params.get('bkt_r') || '',
             band_r: params.get('band_r') || '',
