@@ -34,8 +34,8 @@ In behavior they are different, due to different data, models, needs and usage.
 
 ### Blue Twin
 
-The research on blueberries performed by our partner Compass Agro is more scientific-based. It is an experimental approach, where different fertilization strategies are applied in the field, and the results are analyzed chemically to see which one works best.
-Therefore, the data is being analyzed to find correlations between the sensor data, manual measurements and actions together with the fertilization strategy.
+The research on blueberries performed by our partner Compass Agro is more scientific-based. It is an experimental approach, where different fertigation strategies are applied in the field, and the results are analyzed chemically to see which one works best.
+Therefore, the data is being analyzed to find correlations between the sensor data, manual measurements and actions together with the fertilizing strategy.
 Blueberries are perenial plants and the harvest is once a year, so the feedback cycle is very long, and the twin can help in prescribing actions to take over the year to get a more desirable harvest. These actions include irrigation, adding nutrients, and pest control.
 
 The product features provides are therefore more focused on supporting the research and analysis, rather than being a 'ready to use' product for farmers or other users. Analysis happens on historical data, to find correlations and insights.
