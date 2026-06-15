@@ -1,6 +1,19 @@
 # Make the datalake's real coverage visible: project-aware dedup + clean tag
 
-**Status:** in-progress
+**Status:** Step 1 ✅ shipped + verified on prod 2026-06-15; Step 2 pending
+
+> **Step 1 done (`759d838`):** project-aware dedup + `spohf-datalake` tag deployed.
+> Prod-verified: migration clean (v2 index in, old out, yookr-direct intact at
+> 3.65M), datalake & yookr-direct rows now **coexist** at the same timestamps with
+> identical values, and `/status` shows the datalake's real coverage (21 series
+> fresh — the relay's one-sensor-per-device subset, now visible not absorbed).
+> **Step 2 delete ✅ (2026-06-15):** removed 593,761 legacy `project='unknown' AND
+> source='unknown'` rows from prod — yookr-direct, spohf-datalake, and manual
+> (long_data/insects/fertigation) all intact. `/status` datalake view is now clean
+> (fresh spohf-datalake + manual, no stale automated clutter).
+> **Deferred:** the full historical backfill under `spohf-datalake` — better done
+> *after* SPoHF fixes the relay (issue 024) so it lands all 58 series in one pass
+> rather than re-pulling the partial 21. See `docs/blue/spohf-relay-bug-report.md`.
 
 ## Design source
 
