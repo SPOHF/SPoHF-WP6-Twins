@@ -38,7 +38,10 @@ async def upsert_readings(
         "  END,"
         "  %(value)s, %(project)s"
         " )"
-        " ON CONFLICT (device_name, sensor_tag, time)"
+        # `project` is part of the dedup key (idx_readings_dedup_v2), so rows from
+        # different sources (yookr-direct vs spohf-datalake) for the same
+        # (device, sensor, time) coexist instead of one absorbing the other.
+        " ON CONFLICT (device_name, sensor_tag, time, project)"
         " DO UPDATE SET value = EXCLUDED.value,"
         "              raw_value = EXCLUDED.raw_value,"
         "              synced_at = NOW()"

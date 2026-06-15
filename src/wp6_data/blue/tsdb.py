@@ -42,8 +42,20 @@ SELECT create_hypertable('readings', 'time', if_not_exists => TRUE);
 CREATE INDEX IF NOT EXISTS idx_readings_device_tag
     ON readings (device_name, sensor_tag, time DESC);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_readings_dedup
-    ON readings (device_name, sensor_tag, time);
+-- Dedup key includes `project` so the datalake (project='spohf-datalake') and
+-- yookr-direct (project='yookr-direct') rows for the same (device, sensor, time)
+-- coexist instead of one absorbing the other on upsert (issue 026). Manual rows
+-- are distinct devices, so `project` alone suffices in the key.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_readings_dedup_v2
+    ON readings (device_name, sensor_tag, time, project);
+"""
+
+# Migration for existing blue DBs: drop the old 3-column dedup index once the
+# 4-column one above exists. Idempotent — a no-op after the first run, and on a
+# fresh DB (which never had the 3-column index). Ordered after the table DDL so
+# the replacement index is already in place before the old one is removed.
+_BLUE_DEDUP_MIGRATION_SQL = """
+DROP INDEX IF EXISTS idx_readings_dedup;
 """
 
 # Blue's readings gains the same nullable FK red's readings has, added
@@ -82,6 +94,7 @@ async def ensure_schema_blue(pool: AsyncConnectionPool) -> None:
         await conn.execute(_READINGS_BLUE_SQL)
         await conn.execute(_BLUE_UPLOAD_ID_SQL)
         await conn.execute(_BLUE_SOURCE_SQL)
+        await conn.execute(_BLUE_DEDUP_MIGRATION_SQL)
         await conn.commit()
     await ensure_aggregates(pool, project_column="project")
     logger.info("blue_tsdb_schema_ensured")

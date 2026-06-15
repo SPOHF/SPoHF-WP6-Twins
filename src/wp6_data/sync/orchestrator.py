@@ -38,6 +38,12 @@ FULL_SYNC_START = datetime(2024, 1, 1, tzinfo=UTC)
 INCREMENTAL_LOOKBACK_DAYS = 7
 CONSECUTIVE_DUPE_WINDOW_THRESHOLD = 3
 
+# All SPoHF datalake-relayed readings are tagged with this single project — the
+# toggle-dimension counterpart to yookr-direct's 'yookr-direct' (issue 026). We
+# deliberately ignore the relay API's own `reading.project` (which arrives as
+# 'unknown') so the datalake is one clean, measurable bucket.
+DATALAKE_PROJECT = "spohf-datalake"
+
 
 def _log_window_summary(
     window_start: datetime,
@@ -345,7 +351,7 @@ class SyncOrchestrator:
         """Convert SensorReading to query parameters."""
         return {
             "sensor_id": reading.sensor_id,
-            "project": reading.project,
+            "project": DATALAKE_PROJECT,
             "device_name": reading.device_name,
             "sensor_tag": reading.sensor_tag,
             "value": reading.value,
