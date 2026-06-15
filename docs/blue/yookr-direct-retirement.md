@@ -1,22 +1,40 @@
 # Retiring yookr-direct — blockers & exit criteria
 
-**Status: deferred (as of 2026-06-12).** Goal: make the SPoHF datalake the single
-canonical automated source and remove the `yookr-direct` ingest + the dual-source
-toggle + the `project` column. Blocked today because the datalake is not yet a
-healthy superset of `yookr-direct`. See the coverage snapshot:
+**Status: deferred — BLOCKED ON UPSTREAM (SPoHF) as of 2026-06-15.** Goal: make the
+SPoHF datalake the single canonical automated source and remove the `yookr-direct`
+ingest + the dual-source toggle + the `project` column. See the coverage snapshot:
 [`yookr-vs-datalake-coverage.md`](./yookr-vs-datalake-coverage.md).
 
-## Why it's deferred (the problems)
+## ⛔ Hard blocker (confirmed 2026-06-15): the relay serves one sensor per device
 
-1. **The datalake relay sync is failing.** `sync_metadata.yookr-data`:
-   `last_run_success = false`, **316 total failures**, 0 records last run. The
-   `yookr-direct` sync is green by contrast.
-2. **The datalake is stale across every automated sensor.** Newest automated
-   datalake point is 2026-05-12; most are 2025-12-31 → 2026-03-20. `yookr-direct`
-   is fresh to today for all of them.
-3. **Five automated devices are entirely absent from the datalake** (`366D`,
-   `366E`, `3670`, `3672` row sensors; `PH1 | 4D1D` soil-pH). One device
-   (`366F`) exists *only* in the datalake and is itself ~a year stale.
+A direct comparison of the `yookr-data` relay API against yookr-direct (both pull
+the same yookr sensors) shows the **relay exposes only ONE sensor per device**:
+
+| source | series (3-day window) | rows | weatherstation:airTemperature |
+|---|---|---|---|
+| yookr-direct | **58** (full sensor set per device) | 8,738 | present, fresh |
+| `yookr-data` relay | **21** (one sensor per device) | 2,362 | **absent** |
+
+Non-artifactual: a single 6-hour page returns 47 rows / 10 devices with **zero**
+devices reporting >1 sensor (soil → only `soilMoisture`, row sensors → only
+`temperature`, `weatherstation` → only `windspeedGust`). This is an **upstream bug
+in `backoffice.spohf.com/api/v1/data/yookr-data`** — not fixable on our side, and
+not fixable by any amount of re-syncing or re-tagging.
+
+⇒ **yookr-direct cannot be retired until SPoHF fixes the relay to expose every
+sensor per device.** This supersedes the issues below (all real, but secondary).
+
+## Why it's deferred (the secondary problems)
+
+1. **~~The datalake relay sync is failing.~~** *(RESOLVED 2026-06-15: the API token
+   had been revoked → `401 Unauthorized`; restored, sync recovered — 6,803 records,
+   fresh. But it only ingests the one-sensor-per-device subset above.)*
+2. **The datalake is stale across every automated sensor.** Was a symptom of the
+   401 outage (and, for absorbed series, of the dedup race below) — not a fixed
+   property. With the token restored the relay is fresh, but still incomplete.
+3. **Five automated devices appeared entirely absent from the datalake** (`366D`,
+   `366E`, `3670`, `3672` row sensors; `PH1 | 4D1D` soil-pH). Mostly the 401
+   outage; the relay now returns them — but only their single exposed sensor.
 4. **The dedup race makes a naive resync ineffective.** `readings`' unique key is
    `(device_name, sensor_tag, time)` — no `project` — and the upsert's
    `ON CONFLICT … DO UPDATE` rewrites `value`/`raw_value` but **never `project`**.
@@ -42,11 +60,21 @@ healthy superset of `yookr-direct`. See the coverage snapshot:
 
 ## Exit criteria — retire only when ALL hold
 
+- [ ] **(BLOCKING, upstream) The `yookr-data` relay exposes every sensor per
+      device.** Verify with the relay-API diff: enumerate distinct
+      `(device, sensor)` from `GET /api/v1/data/yookr-data` over a recent window
+      and confirm it matches yookr-direct's full set (58 series, incl.
+      `weatherstation:airTemperature`) — not one sensor per device. Owned by SPoHF.
 - [ ] `sync_metadata.yookr-data` shows `last_run_success = true` with recent,
       non-zero records over several consecutive runs.
 - [ ] Re-running the coverage query (below) shows **every** automated
       `(device, sensor)` fresh (last day ≈ today) under the datalake filter
       (`project <> 'yookr-direct'`), with **no missing devices**.
+
+> Note: the third check can only pass *after* yookr-direct stops owning the dedup
+> keys (it absorbs the datalake's identical-timestamp rows — see problem 4). So in
+> practice: confirm the relay is complete via the **API diff** (check 1), then the
+> retirement sequence below frees the keys and the in-DB check becomes meaningful.
 
 ```sql
 SELECT device_name, sensor_tag,

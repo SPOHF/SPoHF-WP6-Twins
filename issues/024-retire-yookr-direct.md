@@ -1,6 +1,13 @@
 # Epic: retire yookr-direct and drop the `project` column (deferred)
 
-**Status:** Deferred — blocked on datalake-green (see exit criteria)
+**Status:** Deferred — BLOCKED ON UPSTREAM (SPoHF relay serves 1 sensor/device)
+
+> **2026-06-15 update:** relay-API diff confirmed the `yookr-data` endpoint exposes
+> only **one sensor per device** (21 of yookr-direct's 58 series; `airTemperature`
+> absent). The token-expiry (401) and dedup-race tagging are real but secondary —
+> the relay is incomplete *at the source*, so yookr-direct cannot be retired until
+> SPoHF fixes it. Full analysis + exit criteria in
+> `docs/blue/yookr-direct-retirement.md`. Next action: raise with SPoHF.
 
 ## Design source
 
