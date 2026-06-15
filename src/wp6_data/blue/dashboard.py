@@ -4,6 +4,7 @@ from pathlib import Path
 
 from wp6_data.blue import deps
 from wp6_data.blue import manual as blue_manual
+from wp6_data.blue.explore import render_fertilization_strategies_tab
 from wp6_data.blue.provider import BlueSensorProvider
 from wp6_data.blue.routes import api as blue_api
 from wp6_data.blue.routes import charts as blue_charts
@@ -77,6 +78,12 @@ config = TwinConfig(
         manual_monitor.router,
         *blue_manual.manual_routers(),
     ],
+    explore_extra_tabs={
+        "fertilization": (
+            "Fertilization Strategies",
+            render_fertilization_strategies_tab(),
+        ),
+    },
     hero_cards=[_monitor_card],
     status_extras=blue_manual.manual_cards(),
     export_sanitise_names=True,

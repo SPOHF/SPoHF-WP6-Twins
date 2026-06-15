@@ -407,27 +407,39 @@ def build_explore_tabs(
     }
 
 
-def render_explore_tabs(tabs: dict[str, str], active: str = "devices") -> str:
+def render_explore_tabs(
+    tabs: dict[str, str],
+    active: str = "devices",
+    extra_tabs: dict[str, tuple[str, str]] | None = None,
+) -> str:
     """Wrap the explore tables in a tab switcher.
 
     Args:
         tabs: ``{tab_id: html}`` content for each tab.
         active: Initially-selected tab id; falls back to "devices" if invalid.
+        extra_tabs: ``{tab_id: (label, html)}`` for twin-specific extra tabs
+            rendered after the built-in three.
     """
-    if active not in EXPLORE_TAB_IDS:
+    extra_tabs = extra_tabs or {}
+    all_ids = list(EXPLORE_TAB_IDS) + [tid for tid in extra_tabs if tid not in EXPLORE_TAB_IDS]
+    all_labels = {**EXPLORE_TAB_LABELS, **{tid: lbl for tid, (lbl, _) in extra_tabs.items()}}
+    all_content = {**{tid: tabs.get(tid, "") for tid in EXPLORE_TAB_IDS},
+                   **{tid: html for tid, (_, html) in extra_tabs.items()}}
+
+    if active not in all_ids:
         active = "devices"
 
     buttons = "".join(
         f'<button type="button" role="tab" data-tab="{tid}"'
         f' aria-selected="{"true" if tid == active else "false"}">'
-        f"{EXPLORE_TAB_LABELS[tid]}</button>"
-        for tid in EXPLORE_TAB_IDS
+        f"{all_labels[tid]}</button>"
+        for tid in all_ids
     )
     panels = "".join(
         f'<div role="tabpanel" data-tab-panel="{tid}"'
         f'{"" if tid == active else " hidden"}>'
-        f'{tabs.get(tid, "")}</div>'
-        for tid in EXPLORE_TAB_IDS
+        f'{all_content.get(tid, "")}</div>'
+        for tid in all_ids
     )
 
     return (

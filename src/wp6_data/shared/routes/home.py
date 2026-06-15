@@ -68,7 +68,9 @@ async def home(
 
         {hero_html}
 
-        {render_card("Explore", render_explore_tabs(explore_tabs, active=tab))}
+        {render_card("Explore", render_explore_tabs(
+            explore_tabs, active=tab, extra_tabs=config.explore_extra_tabs,
+        ))}
 
         {config.home_extra_html}
 
