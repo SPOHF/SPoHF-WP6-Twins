@@ -32,7 +32,7 @@ def _monitor_card() -> str:
             ' <a href="/mixed-views" role="button" class="outline">'
             'Mixed Views</a>'
             ' <a href="/broken-sensors" role="button" class="outline">'
-            'Broken Sensors</a>'
+            'Unreliable Sensors</a>'
         ),
         description=(
             "Sensor monitor (GDD, soil, light, microclimate) and manual "

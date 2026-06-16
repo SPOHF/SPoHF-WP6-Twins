@@ -354,7 +354,7 @@ def _build_weather_table(df: pd.DataFrame) -> str:
 @router.get("/broken-sensors", response_class=HTMLResponse)
 async def broken_sensors_hub() -> str:
     content = f"""
-        <h1>Broken Sensors</h1>
+        <h1>Unreliable Sensors</h1>
         <p>
           Reliability assessment for soil sensors and the weather station,
           based on 2025 data. Known issues are pre-labeled from agronomic
