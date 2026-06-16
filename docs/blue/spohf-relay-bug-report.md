@@ -25,6 +25,27 @@ Examples of what the relay returns per device (each should have more):
 - `366D \| LT + LV \| Rij 1 Onder \| 5` → only `temperature` (missing `humidity`)
 - `weatherstation` → only `windspeedGust` (missing `airTemperature` + 9 others)
 
+## Sharper findings (2026-06-16, after a full historical backfill)
+
+A full backfill of the relay (2024→today) clarified two things:
+
+1. **It's a recent regression, not how the relay always behaved.** The *historical*
+   relay data is rich — **81 distinct (device, sensor) series**, with full sensor
+   sets per device through 2024–2025. The "one sensor per device" symptom only
+   appears in the **recent** window. So something degraded the relay's recent
+   output; the pipeline itself can clearly carry the full set.
+
+2. **The partial delivery is tied to specific device *names*, and there's
+   duplication.** The same physical soil probes are carried under two naming
+   schemes — hardware-ID names (`01 \| 0E5E \| BV + EC + BT` …) **and** row-position
+   names (`SPoHF_EC-BV_rij1` … `rij5`). The relay currently fills the
+   **`SPoHF_EC-BV_rijN`** names *completely* (all of moisture/conductivity/
+   temperature) but only **partially** fills the `0Exx` names (e.g. `01 \| 0E5E`
+   → moisture only, `02 \| 0E4F` → temperature only). The direct feed fills both
+   fully. Two asks here: (a) restore full per-sensor delivery on the `0Exx`
+   names, and (b) confirm whether the `0Exx` and `SPoHF_EC-BV_rijN` names are the
+   same physical sensors (so we can de-duplicate rather than show both).
+
 ## Reproduction
 
 ```
