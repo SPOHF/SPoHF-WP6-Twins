@@ -50,8 +50,8 @@ def _load_models(pkl_paths: list[Path]) -> dict[tuple[str, str], SoilForecaster]
         try:
             fc = SoilForecaster.load(path)
             result[(fc.sensor_type, fc.treatment)] = fc
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[soil_forecast] failed to load model {path}: {exc}")
     return result
 
 
@@ -84,7 +84,7 @@ def _run_predictions(
         try:
             results[key] = fc.predict(series)
         except ValueError as e:
-            results[key] = f"needs exog: {e}"
+            results[key] = str(e)
         except Exception as e:
             results[key] = f"error: {e}"
     return results

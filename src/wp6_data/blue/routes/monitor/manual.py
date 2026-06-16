@@ -320,16 +320,17 @@ def render_correlation_explanation() -> str:
           <summary><strong>How to read a correlation matrix</strong></summary>
           <div style="padding:0.75rem 0 0.25rem">
             <p>
-              A correlation matrix shows the <strong>Pearson correlation coefficient
-              (r)</strong> between every pair of variables. Each cell holds a value
-              between <strong>&minus;1</strong> and <strong>+1</strong>:
+              A correlation matrix shows the <strong>correlation coefficient</strong>
+              (typically Pearson <strong>r</strong> or Spearman <strong>ρ</strong>)
+              between every pair of variables. Each cell holds a value between
+              <strong>&minus;1</strong> and <strong>+1</strong>:
             </p>
             <ul>
-              <li><strong>r = +1</strong> — perfect positive relationship: when one
+              <li><strong>r/ρ = +1</strong> — perfect positive relationship: when one
                 variable rises the other rises by a proportional amount.</li>
-              <li><strong>r = &minus;1</strong> — perfect negative (inverse)
+              <li><strong>r/ρ = &minus;1</strong> — perfect negative (inverse)
                 relationship.</li>
-              <li><strong>r = 0</strong> — no linear relationship.</li>
+              <li><strong>r/ρ = 0</strong> — no linear relationship.</li>
               <li>Values near <strong>&plusmn;0.3</strong> are often considered weak,
                 <strong>&plusmn;0.5</strong> moderate, and <strong>&plusmn;0.7</strong>
                 strong, though thresholds depend on the domain.</li>

@@ -420,7 +420,14 @@ def render_explore_tabs(
         extra_tabs: ``{tab_id: (label, html)}`` for twin-specific extra tabs
             rendered after the built-in three.
     """
+    import re
+
     extra_tabs = extra_tabs or {}
+    extra_tabs = {
+        tid: tab
+        for tid, tab in extra_tabs.items()
+        if re.fullmatch(r"[a-z0-9_-]+", tid)
+    }
     all_ids = list(EXPLORE_TAB_IDS) + [tid for tid in extra_tabs if tid not in EXPLORE_TAB_IDS]
     all_labels = {**EXPLORE_TAB_LABELS, **{tid: lbl for tid, (lbl, _) in extra_tabs.items()}}
     all_content = {**{tid: tabs.get(tid, "") for tid in EXPLORE_TAB_IDS},

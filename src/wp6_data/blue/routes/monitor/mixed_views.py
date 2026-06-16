@@ -88,22 +88,28 @@ def _col_label(col: str) -> str:
 @lru_cache(maxsize=1)
 def _load_fertilizer_wide() -> pd.DataFrame:
     """Parse fertilizer_strategy_2025.xlsx into a treatment-indexed DataFrame."""
-    wb = openpyxl.load_workbook(_FERTILIZER_XLSX, read_only=True, data_only=True)
-    ws = wb.active
-    data: dict[str, list[float | None]] = {}
-    for row in ws.iter_rows(values_only=True):
-        key = str(row[0]).strip() if row[0] is not None else ""
-        if key not in _XLSX_TREATMENT_MAP:
-            continue
-        if row[1] is None or "Totaal" not in str(row[1]):
-            continue
-        code = _XLSX_TREATMENT_MAP[key]
-        values = [
-            float(row[i]) if isinstance(row[i], (int, float)) else None
-            for i in range(2, 8)
-        ]
-        data[code] = values
-    wb.close()
+    try:
+        wb = openpyxl.load_workbook(_FERTILIZER_XLSX, read_only=True, data_only=True)
+    except OSError:
+        return pd.DataFrame()
+
+    try:
+        ws = wb.active
+        data: dict[str, list[float | None]] = {}
+        for row in ws.iter_rows(values_only=True):
+            key = str(row[0]).strip() if row[0] is not None else ""
+            if key not in _XLSX_TREATMENT_MAP:
+                continue
+            if row[1] is None or "Totaal" not in str(row[1]):
+                continue
+            code = _XLSX_TREATMENT_MAP[key]
+            values = [
+                float(row[i]) if isinstance(row[i], (int, float)) else None
+                for i in range(2, 8)
+            ]
+            data[code] = values
+    finally:
+        wb.close()
     if not data:
         return pd.DataFrame()
     df = pd.DataFrame.from_dict(data, orient="index", columns=_NUTRIENT_COLS)
