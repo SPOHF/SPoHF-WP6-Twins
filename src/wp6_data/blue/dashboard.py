@@ -9,6 +9,7 @@ from wp6_data.blue.provider import BlueSensorProvider
 from wp6_data.blue.routes import api as blue_api
 from wp6_data.blue.routes import charts as blue_charts
 from wp6_data.blue.routes import ops
+from wp6_data.blue.routes.monitor import broken_sensors as broken_sensors_monitor
 from wp6_data.blue.routes.monitor import legacy_router as legacy_monitor_router
 from wp6_data.blue.routes.monitor import manual as manual_monitor
 from wp6_data.blue.routes.monitor import mixed_views as mixed_views_monitor
@@ -30,6 +31,8 @@ def _monitor_card() -> str:
             'Manual Dashboards</a>'
             ' <a href="/mixed-views" role="button" class="outline">'
             'Mixed Views</a>'
+            ' <a href="/broken-sensors" role="button" class="outline">'
+            'Broken Sensors</a>'
         ),
         description=(
             "Sensor monitor (GDD, soil, light, microclimate) and manual "
@@ -80,6 +83,7 @@ config = TwinConfig(
         legacy_monitor_router,
         manual_monitor.router,
         mixed_views_monitor.router,
+        broken_sensors_monitor.router,
         *blue_manual.manual_routers(),
     ],
     explore_extra_tabs={
