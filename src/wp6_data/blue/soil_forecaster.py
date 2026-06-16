@@ -202,7 +202,7 @@ class SoilForecaster:
             series: pd.Series,
             exog: pd.DataFrame | None = None,
             alpha_grid: list = _ALPHA_GRID,
-            val_frac: float = 0.2) -> SoilForecaster:
+            val_frac: float = 0.2) -> "SoilForecaster":
         """
         Train one ridge model per forecast horizon (7d and 30d).
         Alpha selected by lowest validation MAE (time-based 80/20 split).
@@ -342,7 +342,7 @@ class SoilForecaster:
             pickle.dump(self, fh)
 
     @classmethod
-    def load(cls, path) -> SoilForecaster:
+    def load(cls, path) -> "SoilForecaster":
         with open(path, 'rb') as fh:
             return pickle.load(fh)
 
