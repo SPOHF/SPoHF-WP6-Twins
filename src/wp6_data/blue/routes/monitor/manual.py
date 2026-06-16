@@ -91,6 +91,8 @@ MEASURE_UNITS: dict[str, str] = {
 }
 
 # Comparable fertilizer strategies kept adjacent for easy visual comparison.
+# The 2025 sub-strategy codes (V_CA, G_K, …) are the canonical device names as
+# stored in the DB by long_data ingest; they are not the same as Ca1/K1 etc.
 TREATMENT_ORDER: tuple[str, ...] = (
     "Std",
     "Org1", "Org2",
@@ -192,6 +194,7 @@ async def correlation_2025(
             Pearson correlations across treatment-level seasonal means for 2025,
             including score-type measures where present.
         </p>
+        {render_correlation_explanation()}
         <article>
             {corr_html}
         </article>
@@ -310,6 +313,42 @@ def _render_measure_card(
     """, include_for_next
 
 
+def render_correlation_explanation() -> str:
+    """Collapsible 'how to read a correlation matrix' block, reusable across pages."""
+    return """
+        <details style="margin-bottom:1rem">
+          <summary><strong>How to read a correlation matrix</strong></summary>
+          <div style="padding:0.75rem 0 0.25rem">
+            <p>
+              A correlation matrix shows the <strong>correlation coefficient</strong>
+              (typically Pearson <strong>r</strong> or Spearman <strong>ρ</strong>)
+              between every pair of variables. Each cell holds a value between
+              <strong>&minus;1</strong> and <strong>+1</strong>:
+            </p>
+            <ul>
+              <li><strong>r/ρ = +1</strong> — perfect positive relationship: when one
+                variable rises the other rises by a proportional amount.</li>
+              <li><strong>r/ρ = &minus;1</strong> — perfect negative (inverse)
+                relationship.</li>
+              <li><strong>r/ρ = 0</strong> — no linear relationship.</li>
+              <li>Values near <strong>&plusmn;0.3</strong> are often considered weak,
+                <strong>&plusmn;0.5</strong> moderate, and <strong>&plusmn;0.7</strong>
+                strong, though thresholds depend on the domain.</li>
+            </ul>
+            <p>
+              The matrix is <em>symmetric</em>: the cell at row A / column B is
+              identical to row B / column A. The diagonal is always 1 (a variable
+              is perfectly correlated with itself). Colour encodes direction and
+              strength: red tones indicate positive correlation, blue tones
+              indicate negative. Cells marked <strong>NaN</strong> mean there
+              were not enough overlapping, non-constant observations to compute
+              a coefficient.
+            </p>
+          </div>
+        </details>
+    """
+
+
 def _build_year_boxplot(
     sensor_df: pd.DataFrame,
     sensor: str,
@@ -348,6 +387,17 @@ def _build_year_boxplot(
             ),
         )
 
+    counts_parts = [
+        f'<span style="color:{treatment_color(t)};font-weight:600">{t}</span>: '
+        f'{len(year_df[year_df["treatment"] == t])}'
+        for t in present_treatments
+    ]
+    counts_html = (
+        '<p style="font-size:0.82rem;margin:0 0 0.25rem">'
+        f'data points &mdash; {" &nbsp;&middot;&nbsp; ".join(counts_parts)}'
+        "</p>"
+    )
+
     fig.update_layout(
         template="plotly_white",
         height=380,
@@ -362,7 +412,8 @@ def _build_year_boxplot(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
     )
-    return fig.to_html(full_html=False, include_plotlyjs="cdn" if include_js else False)
+    plot_html = fig.to_html(full_html=False, include_plotlyjs="cdn" if include_js else False)
+    return counts_html + plot_html
 
 
 def _build_correlation_heatmap_2025(

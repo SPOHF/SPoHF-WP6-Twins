@@ -4,12 +4,15 @@ from pathlib import Path
 
 from wp6_data.blue import deps
 from wp6_data.blue import manual as blue_manual
+from wp6_data.blue.explore import render_fertilization_strategies_tab
 from wp6_data.blue.provider import BlueSensorProvider
 from wp6_data.blue.routes import api as blue_api
 from wp6_data.blue.routes import charts as blue_charts
 from wp6_data.blue.routes import ops
+from wp6_data.blue.routes.monitor import broken_sensors as broken_sensors_monitor
 from wp6_data.blue.routes.monitor import legacy_router as legacy_monitor_router
 from wp6_data.blue.routes.monitor import manual as manual_monitor
+from wp6_data.blue.routes.monitor import mixed_views as mixed_views_monitor
 from wp6_data.blue.routes.monitor import router as monitor_router
 from wp6_data.config import Settings
 from wp6_data.shared import render_card
@@ -26,6 +29,10 @@ def _monitor_card() -> str:
             '<a href="/sensor-monitor" role="button">Sensor Monitor</a>'
             ' <a href="/manual-monitor" role="button" class="outline">'
             'Manual Dashboards</a>'
+            ' <a href="/mixed-views" role="button" class="outline">'
+            'Mixed Views</a>'
+            ' <a href="/broken-sensors" role="button" class="outline">'
+            'Broken Sensors</a>'
         ),
         description=(
             "Sensor monitor (GDD, soil, light, microclimate) and manual "
@@ -75,8 +82,16 @@ config = TwinConfig(
         monitor_router,
         legacy_monitor_router,
         manual_monitor.router,
+        mixed_views_monitor.router,
+        broken_sensors_monitor.router,
         *blue_manual.manual_routers(),
     ],
+    explore_extra_tabs={
+        "fertilization": (
+            "Fertilization Strategies",
+            render_fertilization_strategies_tab(),
+        ),
+    },
     hero_cards=[_monitor_card],
     status_extras=blue_manual.manual_cards(),
     export_sanitise_names=True,

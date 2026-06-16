@@ -155,6 +155,7 @@ class TwinConfig:
         default_factory=list,
     )
     home_extra_html: str = ""
+    explore_extra_tabs: dict[str, tuple[str, str]] = field(default_factory=dict)
     require_auth: bool = True
     export_sanitise_names: bool = False
     lifespan_startup: Callable[..., Awaitable[None]] | None = None

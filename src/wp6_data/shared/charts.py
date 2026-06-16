@@ -8,6 +8,63 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 
+def render_correlation_heatmap_html(
+    corr: pd.DataFrame,
+    labels: list[str],
+    *,
+    include_js: bool = True,
+    value_label: str = "r",
+) -> str:
+    """Render a correlation matrix as a Plotly heatmap HTML fragment.
+
+    Args:
+        corr: Square DataFrame from ``df.corr()``; columns/index must match
+              ``labels`` in order.
+        labels: Display labels for each variable (same length as corr).
+        include_js: Include Plotly JS bundle (CDN). Pass False for subsequent
+                    heatmaps on the same page.
+        value_label: Symbol shown in hover tooltip (``"r"`` for Pearson,
+                     ``"ρ"`` for Spearman).
+    """
+    import math
+
+    z = corr.values.tolist()
+    text = [
+        [
+            "NaN" if (v is None or (isinstance(v, float) and math.isnan(v)))
+            else f"{v:.2f}"
+            for v in row
+        ]
+        for row in z
+    ]
+    fig = go.Figure(
+        go.Heatmap(
+            z=z,
+            x=labels,
+            y=labels,
+            colorscale="RdBu",
+            reversescale=True,
+            zmin=-1,
+            zmax=1,
+            text=text,
+            texttemplate="%{text}",
+            textfont={"size": 11},
+            hovertemplate=f"X: %{{x}}<br>Y: %{{y}}<br>{value_label} = %{{z:.3f}}<extra></extra>",
+        ),
+    )
+    fig.update_layout(
+        template="plotly_white",
+        height=max(400, 150 + len(labels) * 55),
+        margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig.to_html(
+        full_html=False,
+        include_plotlyjs="cdn" if include_js else False,
+    )
+
+
 def make_line_chart(df: pd.DataFrame, title: str = "Sensor Readings Over Time") -> go.Figure:
     """Create line chart from sensor data.
 
