@@ -25,6 +25,12 @@ async def monitor_home() -> str:
                 href="/sensor-monitor/gdd", label="View GDD",
             ),
             render_hub_card(
+                "Soil Forecast",
+                "7-day and 30-day ridge regression forecasts for soil temperature "
+                "and moisture per treatment, trained on 2025 growing season data.",
+                href="/sensor-monitor/soil/forecast", label="View Forecast",
+            ),
+            render_hub_card(
                 "Soil Conditions",
                 "Soil temperature, moisture, pH, and electrical conductivity "
                 "across all soil sensors.",
