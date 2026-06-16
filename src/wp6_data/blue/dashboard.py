@@ -11,6 +11,7 @@ from wp6_data.blue.routes import charts as blue_charts
 from wp6_data.blue.routes import ops
 from wp6_data.blue.routes.monitor import legacy_router as legacy_monitor_router
 from wp6_data.blue.routes.monitor import manual as manual_monitor
+from wp6_data.blue.routes.monitor import mixed_views as mixed_views_monitor
 from wp6_data.blue.routes.monitor import router as monitor_router
 from wp6_data.config import Settings
 from wp6_data.shared import render_card
@@ -27,6 +28,8 @@ def _monitor_card() -> str:
             '<a href="/sensor-monitor" role="button">Sensor Monitor</a>'
             ' <a href="/manual-monitor" role="button" class="outline">'
             'Manual Dashboards</a>'
+            ' <a href="/mixed-views" role="button" class="outline">'
+            'Mixed Views</a>'
         ),
         description=(
             "Sensor monitor (GDD, soil, light, microclimate) and manual "
@@ -76,6 +79,7 @@ config = TwinConfig(
         monitor_router,
         legacy_monitor_router,
         manual_monitor.router,
+        mixed_views_monitor.router,
         *blue_manual.manual_routers(),
     ],
     explore_extra_tabs={
