@@ -34,13 +34,19 @@ VARIETY = "Cargo"
 # specific data. Ripening thresholds are intentionally absent — calibrate
 # locally once observed pick dates are available.
 THRESHOLDS = [
-    (243, "Bud break (222–265)", "#cc7716"),
-    (393, "Shoot flowering (376–409)", "#81ec48"),
-    (559, "Peak flowering (552–565)", "#1bbe18"),
-    (768, "90% bud break (619–917)", "#0bf5e2"),
-    (1100, "Early harvest (?) (1100)", "#2790db"),
-    (1350, "Full harvest (?) (1350)", "#1634f9"),
-    (1500, "Late harvest (?) (1500)", "#6e179d")
+    # (243, "Bud break (222–265)", "#cc7716"),
+    # (393, "Shoot flowering (376–409)", "#81ec48"),
+    # (559, "Peak flowering (552–565)", "#1bbe18"),
+    # (768, "90% bud break (619–917)", "#0bf5e2"),
+    # (1100, "Early harvest (?) (1100)", "#2790db"),
+    # (1350, "Full harvest (?) (1350)", "#1634f9"),
+    # (1500, "Late harvest (?) (1500)", "#6e179d")
+
+    # Derrived from manual data gathering:
+    (165, "Bud score (165)", "#cc7716"),
+    (450, "Flowering score (450)", "#81ec48"),
+    (1175, "First harvest (1175)", "#2790db"),
+
 ]
 
 # Colors for year traces
