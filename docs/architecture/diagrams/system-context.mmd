@@ -10,8 +10,9 @@ graph TB
 
     grower["Grower / Researcher
     [Person]
-    Views sensor data, DLI/GDD analytics,
-    and growth forecasts"]:::person
+    Views sensor data, DLI/GDD analytics
+    and growth forecasts; uploads manual
+    lab/measurement files"]:::person
 
     visitor["Public Visitor
     [Person]
@@ -36,13 +37,18 @@ graph TB
 
     openmeteo["Open-Meteo
     [External System]
-    Weather forecast and
-    historical weather data API"]:::external
+    Weather forecast and history;
+    powers Red DLI and Blue GDD"]:::external
 
     oidc["OIDC Provider
     [External System]
     Identity provider for
     authenticated dashboards"]:::external
+
+    greentechlab["Fontys GreenTechLab
+    [External System]
+    LoRaWAN platform storing
+    greenhouse sensor tables (Red)"]:::external
 
     greenhouse["Greenhouse Sensors
     [External System]
@@ -55,11 +61,13 @@ graph TB
     sensors at Compass Agro"]:::external
 
     grower -->|"Views Blue/Red dashboards\n(HTTPS, OIDC)"| wp6
+    grower -->|"Uploads manual files\n(CSV/XLSX, admin-gated)"| wp6
     visitor -->|"Views Grey demo\n(HTTPS, public)"| wp6
     wp6 -->|"Authenticates user\n(OIDC)"| oidc
     wp6 -->|"Fetches sensor readings\n(REST API)"| spohf
     wp6 -->|"Fetches sensor readings\n(REST API)"| yookr
+    wp6 -->|"Fetches greenhouse readings\n(MySQL)"| greentechlab
     wp6 -->|"Fetches weather data\n(REST API)"| openmeteo
-    greenhouse -->|"Publishes readings"| spohf
+    greenhouse -->|"Publishes readings"| greentechlab
     field -->|"Publishes readings"| spohf
     field -->|"Publishes readings"| yookr

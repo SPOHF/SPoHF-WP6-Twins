@@ -13,6 +13,7 @@ graph TB
     classDef ingress fill:#08427b,color:#fff,stroke:none
     classDef external fill:#999,color:#fff,stroke:none
     classDef cronjob fill:#6b9ed6,color:#fff,stroke:none
+    classDef job fill:#7b6bd6,color:#fff,stroke:none
 
     %% ── External actors and services ──
     user["Grower / Researcher
@@ -25,7 +26,7 @@ graph TB
     oidc_ext["OIDC Provider"]:::external
     mysql_ext[("Fontys GTL MySQL 8
     [External Managed DB]
-    Greenhouse sensor tables
+    Greenhouse + wire sensor tables
     (85.215.61.145:3306)")]:::external
 
     %% ── Fontys IDP cluster, namespace spohf-system ──
@@ -63,23 +64,41 @@ graph TB
         [CronJob: 0 2 * * *]
         Nightly Red sensor export"]:::cronjob
 
-        tsdb_sts["TimescaleDB
-        [StatefulSet: 1 replica]
-        PostgreSQL 17 +
-        TimescaleDB extension"]:::storage
+        red_bootstrap["Red TSDB Bootstrap
+        [Job: Helm post-install/upgrade hook]
+        Creates wp6_red role + database
+        in the shared TimescaleDB"]:::job
+
+        subgraph tsdb_sts["TimescaleDB [StatefulSet: 1 replica] — PostgreSQL 17 + TimescaleDB"]
+            db_blue[("wp6_blue
+            [Database]")]:::storage
+            db_red[("wp6_red
+            [Database]")]:::storage
+        end
 
         tsdb_pvc[("PersistentVolumeClaim
         timescaledb-data")]:::storage
 
+        blue_uploads_pvc[("PVC
+        blue-manual-uploads")]:::storage
+        red_uploads_pvc[("PVC
+        red-manual-uploads")]:::storage
+
         secret_main["wp6-data-secrets
         [Secret, externally provisioned]
         OIDC client/session,
-        TSDB URL,
+        TSDB superuser password,
         SPoHF + Yookr API tokens"]:::k8s
+
+        secret_blue["wp6-data-blue-secrets
+        [Secret, externally provisioned]
+        tsdb-url (wp6_blue)"]:::k8s
 
         secret_red["wp6-data-red-secrets
         [Secret, externally provisioned]
-        MySQL password (Red)"]:::k8s
+        MySQL password,
+        tsdb-url (wp6_red),
+        tsdb-red-password"]:::k8s
     end
 
     %% ── User → Ingress → Deployment ──
@@ -95,29 +114,41 @@ graph TB
     red_deploy -.->|"OIDC"| oidc_ext
 
     %% ── Dashboard data access ──
-    blue_deploy -->|"psycopg3\nport 5432"| tsdb_sts
-    red_deploy -->|"aiomysql\nport 3306"| mysql_ext
-    red_deploy -->|"HTTPS"| openmeteo_ext
+    blue_deploy -->|"psycopg3\nport 5432"| db_blue
+    blue_deploy -->|"HTTPS (GDD)"| openmeteo_ext
+    red_deploy -->|"aiomysql\nport 3306 (live feed)"| mysql_ext
+    red_deploy -->|"psycopg3\nport 5432 (manual + risk)"| db_red
+    red_deploy -->|"HTTPS (DLI)"| openmeteo_ext
 
     %% ── Storage ──
     tsdb_sts --- tsdb_pvc
+    blue_deploy --- blue_uploads_pvc
+    red_deploy --- red_uploads_pvc
+
+    %% ── Bootstrap hook provisions the red database ──
+    red_bootstrap -->|"psql\nport 5432"| tsdb_sts
 
     %% ── Sync job (single process, runs both ingests sequentially) ──
     sync_cron -->|"HTTPS"| spohf_ext
     sync_cron -->|"HTTPS"| yookr_ext
-    sync_cron -->|"port 5432"| tsdb_sts
+    sync_cron -->|"port 5432"| db_blue
 
     %% ── Export jobs ──
-    blue_export_cron -->|"port 5432"| tsdb_sts
+    blue_export_cron -->|"port 5432"| db_blue
     red_export_cron -->|"port 3306"| mysql_ext
 
     %% ── Secret mounts ──
-    %% Main secret feeds Blue, sync, and Blue export
+    %% Shared secret: OIDC + API tokens + TSDB superuser (bootstrap)
     secret_main -.->|"mounted"| blue_deploy
-    secret_main -.->|"mounted"| sync_cron
-    secret_main -.->|"mounted"| blue_export_cron
-    %% Red dashboard reads OIDC/TSDB from main, MySQL password from red secret
     secret_main -.->|"mounted"| red_deploy
+    secret_main -.->|"mounted"| sync_cron
+    secret_main -.->|"mounted"| red_bootstrap
+    %% Blue secret: wp6_blue connection URL (dashboard, sync, export)
+    secret_blue -.->|"mounted"| blue_deploy
+    secret_blue -.->|"mounted"| sync_cron
+    secret_blue -.->|"mounted"| blue_export_cron
+    %% Red secret: MySQL password + wp6_red URL + role password
     secret_red -.->|"mounted"| red_deploy
     secret_red -.->|"mounted"| red_export_cron
+    secret_red -.->|"mounted"| red_bootstrap
     %% grey_deploy needs no secrets — it's stateless and public

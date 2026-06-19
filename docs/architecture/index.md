@@ -141,7 +141,10 @@ the single source of truth — the embedded copies below are kept in sync manual
 ### System context (C4 L1)
 
 How WP6 fits into its environment: who uses it and which external systems it
-integrates with.
+integrates with. Note that growers/researchers also *upload* manual measurement
+files (lab long-data, insect counts, Sijia phenotyping), greenhouse readings
+come from the Fontys GreenTechLab platform (MySQL), and Open-Meteo powers both
+Red's DLI and Blue's GDD analytics.
 
 ```mermaid
 ---
@@ -156,8 +159,9 @@ graph TB
 
     grower["Grower / Researcher
     [Person]
-    Views sensor data, DLI/GDD analytics,
-    and growth forecasts"]:::person
+    Views sensor data, DLI/GDD analytics
+    and growth forecasts; uploads manual
+    lab/measurement files"]:::person
 
     visitor["Public Visitor
     [Person]
@@ -182,13 +186,18 @@ graph TB
 
     openmeteo["Open-Meteo
     [External System]
-    Weather forecast and
-    historical weather data API"]:::external
+    Weather forecast and history;
+    powers Red DLI and Blue GDD"]:::external
 
     oidc["OIDC Provider
     [External System]
     Identity provider for
     authenticated dashboards"]:::external
+
+    greentechlab["Fontys GreenTechLab
+    [External System]
+    LoRaWAN platform storing
+    greenhouse sensor tables (Red)"]:::external
 
     greenhouse["Greenhouse Sensors
     [External System]
@@ -201,12 +210,14 @@ graph TB
     sensors at Compass Agro"]:::external
 
     grower -->|"Views Blue/Red dashboards\n(HTTPS, OIDC)"| wp6
+    grower -->|"Uploads manual files\n(CSV/XLSX, admin-gated)"| wp6
     visitor -->|"Views Grey demo\n(HTTPS, public)"| wp6
     wp6 -->|"Authenticates user\n(OIDC)"| oidc
     wp6 -->|"Fetches sensor readings\n(REST API)"| spohf
     wp6 -->|"Fetches sensor readings\n(REST API)"| yookr
+    wp6 -->|"Fetches greenhouse readings\n(MySQL)"| greentechlab
     wp6 -->|"Fetches weather data\n(REST API)"| openmeteo
-    greenhouse -->|"Publishes readings"| spohf
+    greenhouse -->|"Publishes readings"| greentechlab
     field -->|"Publishes readings"| spohf
     field -->|"Publishes readings"| yookr
 ```
@@ -216,7 +227,11 @@ graph TB
 The deployable units — three dashboards (Blue, Red, Grey), the sync and export
 CronJobs, and the data stores — and how they communicate. Note that DLI is part
 of the Red dashboard process (not a separate container) and the shared platform
-is shown as a library that every dashboard is built from.
+is shown as a library that every dashboard is built from. The TimescaleDB
+instance is now **shared**, holding one database per twin (`wp6_blue`,
+`wp6_red`); Red reads its *live* greenhouse feed from MySQL but persists manual
+uploads and risk episodes in `wp6_red`. Each authenticated dashboard also mounts
+a PersistentVolumeClaim for raw uploaded files.
 
 ```mermaid
 ---
@@ -231,6 +246,7 @@ graph TB
     classDef external fill:#999,color:#fff,stroke:none
     classDef cronjob fill:#438dd5,color:#fff,stroke:none
     classDef shared fill:#0a3d62,color:#fff,stroke:none
+    classDef storage fill:#3c6382,color:#fff,stroke:none
 
     grower["Grower / Researcher
     [Person]"]:::person
@@ -245,23 +261,32 @@ graph TB
             [Library: FastAPI + Jinja2]
             Builds a dashboard from a
             TwinConfig (provider, theme,
-            metadata, extra routers)"]:::shared
+            metadata, extra routers); hosts
+            the generic manual-ingest pipeline"]:::shared
         end
 
         subgraph blue_twin["Blue Twin (Blueberries)"]
             blue_dash["Blue Dashboard
             [Container: FastAPI]
-            Authenticated dashboard with
-            chart compare, GDD tracker,
+            Chart compare, GDD tracker,
+            soil forecast, manual uploads,
             and SPoHF / Yookr source toggle"]:::container
+            blue_uploads[("Blue Manual Uploads
+            [PVC]
+            Raw insect / long-data /
+            fertigation files")]:::storage
         end
 
         subgraph red_twin["Red Twin (Tomatoes)"]
             red_dash["Red Dashboard
             [Container: FastAPI]
-            Authenticated dashboard with
-            DLI analysis and ML forecasting
-            (model trained on startup)"]:::container
+            DLI analysis + ML forecast
+            (trained on startup), wire
+            risk views, Sijia uploads"]:::container
+            red_uploads[("Red Manual Uploads
+            [PVC]
+            Raw Sijia measurement
+            files")]:::storage
         end
 
         subgraph grey_twin["Grey Twin (Demo)"]
@@ -290,17 +315,23 @@ graph TB
             sensor tables to CSV"]:::cronjob
         end
 
-        tsdb[("TimescaleDB
-        [Database: PostgreSQL 17]
-        readings, sync_metadata,
-        daily_coverage hypertables")]:::database
+        subgraph tsdb_inst["Shared TimescaleDB [PostgreSQL 17]"]
+            tsdb_blue[("wp6_blue
+            [Database]
+            readings, sync_metadata,
+            daily_coverage, manual_uploads")]:::database
+            tsdb_red[("wp6_red
+            [Database]
+            readings, risk_episodes,
+            risk_state, manual_uploads")]:::database
+        end
     end
 
     mysqldb[("MySQL
     [External Database: MySQL 8]
     Fontys GreenTechLab —
     greenhouse sensor tables
-    (Red twin only)")]:::external
+    (Red live feed)")]:::external
 
     spohf["SPoHF Backoffice
     [External: REST API]"]:::external
@@ -325,19 +356,25 @@ graph TB
     red_dash -.->|"built from"| app_factory
     grey_dash -.->|"built from"| app_factory
 
-    %% Data access
-    blue_dash -->|"Async queries\n(psycopg3 pool)\nproject filter:\nspohf-datalake | yookr-direct"| tsdb
-    red_dash -->|"Async queries\n(aiomysql)"| mysqldb
-    red_dash -->|"Daily forecast\n(HTTPS)"| openmeteo
+    %% Blue data access
+    blue_dash -->|"Async queries\n(psycopg3 pool)\nproject filter:\nspohf-datalake | yookr"| tsdb_blue
+    blue_dash -->|"Daily weather\n(HTTPS, GDD)"| openmeteo
+    blue_dash -->|"Stores uploads"| blue_uploads
+
+    %% Red data access (live feed from MySQL, manual + risk in TSDB)
+    red_dash -->|"Async queries\n(aiomysql, live feed)"| mysqldb
+    red_dash -->|"Manual + risk\n(psycopg3 pool)"| tsdb_red
+    red_dash -->|"Daily forecast\n(HTTPS, DLI)"| openmeteo
+    red_dash -->|"Stores uploads"| red_uploads
     %% grey_dash has no datastore (in-memory)
 
     %% Sync job (single process runs both ingests sequentially)
     sync_job -->|"Paginated fetch\n(httpx)"| spohf
     sync_job -->|"Per-sensor fetch\n(httpx)"| yookr
-    sync_job -->|"Batch upsert"| tsdb
+    sync_job -->|"Batch upsert"| tsdb_blue
 
     %% Export jobs
-    blue_export -->|"Read readings"| tsdb
+    blue_export -->|"Read readings"| tsdb_blue
     red_export -->|"Read sensor tables"| mysqldb
 ```
 
@@ -347,7 +384,14 @@ Inside the codebase. The shared platform (`wp6_data.shared`) defines a
 `SensorDataProvider` Protocol; each twin (`wp6_data.blue`, `wp6_data.red`,
 `wp6_data.grey`) provides an implementation plus a `TwinConfig`, and
 `create_app(config)` assembles the FastAPI dashboard. Twin-specific features
-(DLI for Red, GDD for Blue) attach as `extra_routers`.
+(DLI and the wire **risk engine** for Red, GDD and soil forecasting for Blue)
+attach as `extra_routers`. Two cross-cutting subsystems now live in the shared
+platform: a generic **manual-ingest pipeline** (`ManualSource` descriptor +
+transactional `ManualIngestService` + content-addressed `UploadStorage`) that
+Blue (insects, long-data, fertigation) and Red (Sijia) plug their CSV/XLSX
+sources into, and a twin-agnostic `OpenMeteoClient` shared by Red's DLI model
+and Blue's GDD tracker. Red's provider is **federated** — it reads the live
+greenhouse feed from MySQL and wire/manual data from the `wp6_red` database.
 
 ```mermaid
 ---
@@ -361,6 +405,7 @@ graph TB
     classDef protocol fill:#8e44ad,color:#fff,stroke:none
     classDef database fill:#1168bd,color:#fff,stroke:none
     classDef external fill:#999,color:#fff,stroke:none
+    classDef storage fill:#3c6382,color:#fff,stroke:none
 
     %% ── External systems ──
     spohf_api["SPoHF REST API
@@ -371,12 +416,17 @@ graph TB
     [External]"]:::external
     oidc_provider["OIDC Provider
     [External]"]:::external
-    tsdb[("TimescaleDB
+    tsdb_blue[("TimescaleDB wp6_blue
     readings | sync_metadata
-    daily_coverage")]:::database
+    daily_coverage | manual_uploads")]:::database
+    tsdb_red[("TimescaleDB wp6_red
+    readings | risk_episodes
+    risk_state | manual_uploads")]:::database
     mysqldb[("MySQL
-    GTL sensor tables
-    (Red only)")]:::database
+    GTL greenhouse + wire tables
+    (Red live feed)")]:::database
+    uploads_pvc[("Manual Uploads
+    [PVC, content-addressed]")]:::storage
 
     %% ────────────────────────────────────────────────
     %% Shared Platform — the heart of the application
@@ -390,15 +440,16 @@ graph TB
 
         twin_config["TwinConfig
         [Dataclass]
-        twin_id, title, theme,
-        data_sources, metadata,
-        extra_routers, hero_cards"]:::platform
+        twin_id, title, theme, data_sources,
+        metadata, extra_routers, hero_cards,
+        status_extras, explore_extra_tabs,
+        require_auth, lifespan hooks"]:::platform
 
         provider_protocol["SensorDataProvider
         [Protocol]
         fetch_data, fetch_available_sensors,
-        fetch_device_data, fetch_sync_metrics,
-        fetch_daily_coverage"]:::protocol
+        fetch_device_data, fetch_manual_metadata,
+        fetch_sync_metrics, fetch_daily_coverage"]:::protocol
 
         shared_routes["Shared Routes
         [Component]
@@ -408,16 +459,43 @@ graph TB
         auth_mod["Auth (OIDC)
         [Component]
         startup_oidc, make_auth_router,
-        verify_session_user"]:::platform
+        verify_session_user/admin"]:::platform
 
         metadata_mod["MetadataRegistry
         [Component]
         Loads metadata.yaml:
         device + sensor labels, units"]:::platform
 
+        subgraph manual_ingest["Manual Ingest (shared.manual_ingest)"]
+            mi_source["ManualSource
+            [Descriptor]
+            slug, categorical_value,
+            parse, validate, replace_scope"]:::platform
+            mi_service["ManualIngestService
+            [Component]
+            Transactional validate/apply:
+            delete prior + audit + insert"]:::platform
+            mi_routes["make_source_router / make_card
+            [Component]
+            Admin-gated preview | apply | history"]:::platform
+            mi_cli["run_ingest (CLI)
+            [Component]
+            Headless validate + apply"]:::platform
+        end
+
+        upload_storage["UploadStorage
+        [Component]
+        SHA256-addressed file store,
+        keeps latest 2 per source"]:::platform
+
+        weather["OpenMeteoClient
+        [Component]
+        Twin-agnostic forecast +
+        archive (DLI and GDD)"]:::platform
+
         misc_shared["templates | aggregation
         charts | export | time
-        sensor_summary | twin
+        sensor_summary | compat
         [Components]"]:::platform
     end
 
@@ -428,22 +506,31 @@ graph TB
         blue_config["dashboard.config
         [TwinConfig instance]
         2 DataSources: spohf-datalake
-        and yookr-direct"]:::component
+        and yookr"]:::component
         blue_provider["BlueSensorProvider
         [Component, x2]
         TSDB-backed, project-filtered
         (one per DataSource)"]:::component
-        blue_deps["deps
+        blue_deps["deps / tsdb / yookr
         [Component]
-        TSDB queries, fetch_data,
-        fetch_sync_metrics, …"]:::component
+        wp6_blue queries, schema,
+        project-scoped fetch"]:::component
         blue_routes_x["Blue Extra Routes
         [Components]
-        ops | charts | gdd"]:::component
+        ops | api | charts | monitor
+        mixed_views | broken_sensors"]:::component
         blue_gdd["gdd
         [Component]
-        Growing Degree Days
-        cumulative heat tracker"]:::component
+        Growing Degree Days from
+        Open-Meteo modeled weather"]:::component
+        blue_soil["soil_forecaster
+        [Component]
+        Ridge soil moisture/temp
+        7d + 30d forecast"]:::component
+        blue_manual["manual sources
+        [ManualSource x3]
+        insects | long_data |
+        fertigation_events"]:::component
         blue_metadata[("blue/metadata.yaml")]:::component
     end
 
@@ -453,36 +540,61 @@ graph TB
     subgraph red_layer["Red Twin (wp6_data.red)"]
         red_config["dashboard.config
         [TwinConfig instance]
-        1 DataSource: mysql"]:::component
+        1 DataSource: mysql (live feed)"]:::component
         red_provider["RedSensorProvider
         [Component]
-        MySQL-backed sensor access"]:::component
+        Federated: MySQL + wire
+        + wp6_red readings"]:::component
         red_db["MySQLConnection
         [Component]
-        aiomysql pool with
-        sensor type mapping"]:::component
+        aiomysql pool, sensor +
+        wire table mapping"]:::component
+        red_tsdb["tsdb
+        [Component]
+        wp6_red schema + queries
+        (readings, risk tables)"]:::component
         red_routes_x["Red Extra Routes
         [Components]
-        browse | dli | dli_model | charts"]:::component
+        browse | charts | multi_height
+        dli | dli_model | sijia"]:::component
+        red_sijia["sijia
+        [ManualSource]
+        Excel phenotyping upload
+        (source='sijia')"]:::component
         red_metadata[("red/metadata.yaml")]:::component
 
         subgraph dli_layer["DLI sub-package (red.dli)"]
-            dli_model["LightModel
+            dli_model["TwoStageLightModel
             [Component]
             Two-stage Ridge regression
             persisted to .pkl"]:::component
-            dli_calc["Calculator
+            dli_calc["calculator
             [Component]
-            PAR→DLI conversion,
+            PAR→DLI integral,
             lamp contribution"]:::component
-            dli_weather["WeatherClient
+            dli_lamp["lamp / schedule
             [Component]
-            Open-Meteo daily forecasts
-            with caching"]:::component
-            dli_agg["Aggregation
+            Lamp profile + hourly
+            schedule inference"]:::component
+            dli_agg["aggregation
             [Component]
             Daily features,
             cyclic day-of-year"]:::component
+        end
+
+        subgraph risk_layer["Risk engine (red.risk)"]
+            risk_engine["engine / metrics / episodes
+            [Component]
+            Pure: VPD, wet-hours, CO2
+            depletion, canopy DLI episodes"]:::component
+            risk_service["service / cli
+            [Component]
+            Fetch wire → evaluate
+            → persist range"]:::component
+            risk_store["store / config
+            [Component]
+            risk_episodes + risk_state
+            upsert; thresholds from yaml"]:::component
         end
     end
 
@@ -561,6 +673,15 @@ graph TB
     auth_mod -->|"OIDC flow"| oidc_provider
     misc_shared -.->|"used by"| shared_routes
 
+    %% Manual ingest wiring
+    mi_routes -->|"uses"| mi_service
+    mi_cli -->|"uses"| mi_service
+    mi_service -->|"dispatch on"| mi_source
+    mi_service -->|"persist files"| upload_storage
+    mi_service -->|"insert readings"| queries
+    upload_storage --> uploads_pvc
+    weather -->|"forecast/archive"| openmeteo_api
+
     %% Per-twin: each is a TwinConfig + provider implementing the protocol
     blue_config -->|"built by"| app_factory
     red_config -->|"built by"| app_factory
@@ -570,30 +691,45 @@ graph TB
     red_provider -.->|"implements"| provider_protocol
     grey_provider -.->|"implements"| provider_protocol
 
+    %% Blue wiring
     blue_config -->|"data_sources"| blue_provider
     blue_config -->|"extra_routers"| blue_routes_x
     blue_config -->|"metadata"| blue_metadata
     blue_provider --> blue_deps
     blue_routes_x --> blue_gdd
+    blue_routes_x --> blue_soil
     blue_routes_x --> blue_deps
+    blue_gdd -->|"weather"| weather
+    blue_manual -->|"register via"| mi_routes
+    blue_deps --> pool
 
+    %% Red wiring
     red_config -->|"data_sources"| red_provider
     red_config -->|"extra_routers"| red_routes_x
     red_config -->|"metadata"| red_metadata
     red_provider --> red_db
+    red_provider --> red_tsdb
     red_routes_x --> dli_model
     red_routes_x --> red_db
+    red_routes_x -->|"risk views"| risk_service
+    red_sijia -->|"register via"| mi_routes
     dli_model --> dli_calc
-    dli_model --> dli_weather
+    dli_model --> dli_lamp
     dli_model --> dli_agg
-    dli_weather -->|"Daily weather"| openmeteo_api
+    dli_model -->|"weather"| weather
+    risk_service --> risk_engine
+    risk_service --> risk_store
+    risk_service -->|"wire readings"| red_db
+    risk_store --> red_tsdb
+    red_tsdb --> pool
 
+    %% Grey wiring
     grey_config -->|"data_sources"| grey_provider
     grey_config -->|"metadata"| grey_metadata
 
     %% Data layer
-    blue_deps --> pool
-    pool --> tsdb
+    pool --> tsdb_blue
+    pool --> tsdb_red
     schema --> pool
     red_db --> mysqldb
 
@@ -617,10 +753,16 @@ graph TB
 ### Deployment view
 
 Current state: every workload runs in the Fontys Kubernetes cluster. The only
-external datastore is the Fontys GreenTechLab MySQL (Red twin). The desired
-split with ProcEvolution hosting the data warehouse and sync jobs is described
-in *Operations* above; the diagram intentionally reflects what's deployed today,
-not the target architecture.
+external datastore is the Fontys GreenTechLab MySQL (Red's live greenhouse
+feed). The in-cluster TimescaleDB StatefulSet is shared by both twins, holding a
+`wp6_blue` and a `wp6_red` database; a Helm post-install/upgrade hook Job
+provisions the `wp6_red` role and database. Each authenticated dashboard mounts a
+manual-uploads PVC, and connection details are split across three secrets (a
+shared one for OIDC + API tokens + the TSDB superuser password, plus per-twin
+secrets for each database URL and MySQL/role credentials). The desired split with
+ProcEvolution hosting the data warehouse and sync jobs is described in
+*Operations* above; the diagram intentionally reflects what's deployed today, not
+the target architecture.
 
 ```mermaid
 ---
@@ -638,6 +780,7 @@ graph TB
     classDef ingress fill:#08427b,color:#fff,stroke:none
     classDef external fill:#999,color:#fff,stroke:none
     classDef cronjob fill:#6b9ed6,color:#fff,stroke:none
+    classDef job fill:#7b6bd6,color:#fff,stroke:none
 
     %% ── External actors and services ──
     user["Grower / Researcher
@@ -650,7 +793,7 @@ graph TB
     oidc_ext["OIDC Provider"]:::external
     mysql_ext[("Fontys GTL MySQL 8
     [External Managed DB]
-    Greenhouse sensor tables
+    Greenhouse + wire sensor tables
     (85.215.61.145:3306)")]:::external
 
     %% ── Fontys IDP cluster, namespace spohf-system ──
@@ -688,23 +831,41 @@ graph TB
         [CronJob: 0 2 * * *]
         Nightly Red sensor export"]:::cronjob
 
-        tsdb_sts["TimescaleDB
-        [StatefulSet: 1 replica]
-        PostgreSQL 17 +
-        TimescaleDB extension"]:::storage
+        red_bootstrap["Red TSDB Bootstrap
+        [Job: Helm post-install/upgrade hook]
+        Creates wp6_red role + database
+        in the shared TimescaleDB"]:::job
+
+        subgraph tsdb_sts["TimescaleDB [StatefulSet: 1 replica] — PostgreSQL 17 + TimescaleDB"]
+            db_blue[("wp6_blue
+            [Database]")]:::storage
+            db_red[("wp6_red
+            [Database]")]:::storage
+        end
 
         tsdb_pvc[("PersistentVolumeClaim
         timescaledb-data")]:::storage
 
+        blue_uploads_pvc[("PVC
+        blue-manual-uploads")]:::storage
+        red_uploads_pvc[("PVC
+        red-manual-uploads")]:::storage
+
         secret_main["wp6-data-secrets
         [Secret, externally provisioned]
         OIDC client/session,
-        TSDB URL,
+        TSDB superuser password,
         SPoHF + Yookr API tokens"]:::k8s
+
+        secret_blue["wp6-data-blue-secrets
+        [Secret, externally provisioned]
+        tsdb-url (wp6_blue)"]:::k8s
 
         secret_red["wp6-data-red-secrets
         [Secret, externally provisioned]
-        MySQL password (Red)"]:::k8s
+        MySQL password,
+        tsdb-url (wp6_red),
+        tsdb-red-password"]:::k8s
     end
 
     %% ── User → Ingress → Deployment ──
@@ -720,31 +881,43 @@ graph TB
     red_deploy -.->|"OIDC"| oidc_ext
 
     %% ── Dashboard data access ──
-    blue_deploy -->|"psycopg3\nport 5432"| tsdb_sts
-    red_deploy -->|"aiomysql\nport 3306"| mysql_ext
-    red_deploy -->|"HTTPS"| openmeteo_ext
+    blue_deploy -->|"psycopg3\nport 5432"| db_blue
+    blue_deploy -->|"HTTPS (GDD)"| openmeteo_ext
+    red_deploy -->|"aiomysql\nport 3306 (live feed)"| mysql_ext
+    red_deploy -->|"psycopg3\nport 5432 (manual + risk)"| db_red
+    red_deploy -->|"HTTPS (DLI)"| openmeteo_ext
 
     %% ── Storage ──
     tsdb_sts --- tsdb_pvc
+    blue_deploy --- blue_uploads_pvc
+    red_deploy --- red_uploads_pvc
+
+    %% ── Bootstrap hook provisions the red database ──
+    red_bootstrap -->|"psql\nport 5432"| tsdb_sts
 
     %% ── Sync job (single process, runs both ingests sequentially) ──
     sync_cron -->|"HTTPS"| spohf_ext
     sync_cron -->|"HTTPS"| yookr_ext
-    sync_cron -->|"port 5432"| tsdb_sts
+    sync_cron -->|"port 5432"| db_blue
 
     %% ── Export jobs ──
-    blue_export_cron -->|"port 5432"| tsdb_sts
+    blue_export_cron -->|"port 5432"| db_blue
     red_export_cron -->|"port 3306"| mysql_ext
 
     %% ── Secret mounts ──
-    %% Main secret feeds Blue, sync, and Blue export
+    %% Shared secret: OIDC + API tokens + TSDB superuser (bootstrap)
     secret_main -.->|"mounted"| blue_deploy
-    secret_main -.->|"mounted"| sync_cron
-    secret_main -.->|"mounted"| blue_export_cron
-    %% Red dashboard reads OIDC/TSDB from main, MySQL password from red secret
     secret_main -.->|"mounted"| red_deploy
+    secret_main -.->|"mounted"| sync_cron
+    secret_main -.->|"mounted"| red_bootstrap
+    %% Blue secret: wp6_blue connection URL (dashboard, sync, export)
+    secret_blue -.->|"mounted"| blue_deploy
+    secret_blue -.->|"mounted"| sync_cron
+    secret_blue -.->|"mounted"| blue_export_cron
+    %% Red secret: MySQL password + wp6_red URL + role password
     secret_red -.->|"mounted"| red_deploy
     secret_red -.->|"mounted"| red_export_cron
+    secret_red -.->|"mounted"| red_bootstrap
     %% grey_deploy needs no secrets — it's stateless and public
 ```
 

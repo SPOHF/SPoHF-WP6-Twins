@@ -9,6 +9,7 @@ graph TB
     classDef protocol fill:#8e44ad,color:#fff,stroke:none
     classDef database fill:#1168bd,color:#fff,stroke:none
     classDef external fill:#999,color:#fff,stroke:none
+    classDef storage fill:#3c6382,color:#fff,stroke:none
 
     %% ── External systems ──
     spohf_api["SPoHF REST API
@@ -19,12 +20,17 @@ graph TB
     [External]"]:::external
     oidc_provider["OIDC Provider
     [External]"]:::external
-    tsdb[("TimescaleDB
+    tsdb_blue[("TimescaleDB wp6_blue
     readings | sync_metadata
-    daily_coverage")]:::database
+    daily_coverage | manual_uploads")]:::database
+    tsdb_red[("TimescaleDB wp6_red
+    readings | risk_episodes
+    risk_state | manual_uploads")]:::database
     mysqldb[("MySQL
-    GTL sensor tables
-    (Red only)")]:::database
+    GTL greenhouse + wire tables
+    (Red live feed)")]:::database
+    uploads_pvc[("Manual Uploads
+    [PVC, content-addressed]")]:::storage
 
     %% ────────────────────────────────────────────────
     %% Shared Platform — the heart of the application
@@ -38,15 +44,16 @@ graph TB
 
         twin_config["TwinConfig
         [Dataclass]
-        twin_id, title, theme,
-        data_sources, metadata,
-        extra_routers, hero_cards"]:::platform
+        twin_id, title, theme, data_sources,
+        metadata, extra_routers, hero_cards,
+        status_extras, explore_extra_tabs,
+        require_auth, lifespan hooks"]:::platform
 
         provider_protocol["SensorDataProvider
         [Protocol]
         fetch_data, fetch_available_sensors,
-        fetch_device_data, fetch_sync_metrics,
-        fetch_daily_coverage"]:::protocol
+        fetch_device_data, fetch_manual_metadata,
+        fetch_sync_metrics, fetch_daily_coverage"]:::protocol
 
         shared_routes["Shared Routes
         [Component]
@@ -56,16 +63,43 @@ graph TB
         auth_mod["Auth (OIDC)
         [Component]
         startup_oidc, make_auth_router,
-        verify_session_user"]:::platform
+        verify_session_user/admin"]:::platform
 
         metadata_mod["MetadataRegistry
         [Component]
         Loads metadata.yaml:
         device + sensor labels, units"]:::platform
 
+        subgraph manual_ingest["Manual Ingest (shared.manual_ingest)"]
+            mi_source["ManualSource
+            [Descriptor]
+            slug, categorical_value,
+            parse, validate, replace_scope"]:::platform
+            mi_service["ManualIngestService
+            [Component]
+            Transactional validate/apply:
+            delete prior + audit + insert"]:::platform
+            mi_routes["make_source_router / make_card
+            [Component]
+            Admin-gated preview | apply | history"]:::platform
+            mi_cli["run_ingest (CLI)
+            [Component]
+            Headless validate + apply"]:::platform
+        end
+
+        upload_storage["UploadStorage
+        [Component]
+        SHA256-addressed file store,
+        keeps latest 2 per source"]:::platform
+
+        weather["OpenMeteoClient
+        [Component]
+        Twin-agnostic forecast +
+        archive (DLI and GDD)"]:::platform
+
         misc_shared["templates | aggregation
         charts | export | time
-        sensor_summary | twin
+        sensor_summary | compat
         [Components]"]:::platform
     end
 
@@ -76,22 +110,31 @@ graph TB
         blue_config["dashboard.config
         [TwinConfig instance]
         2 DataSources: spohf-datalake
-        and yookr-direct"]:::component
+        and yookr"]:::component
         blue_provider["BlueSensorProvider
         [Component, x2]
         TSDB-backed, project-filtered
         (one per DataSource)"]:::component
-        blue_deps["deps
+        blue_deps["deps / tsdb / yookr
         [Component]
-        TSDB queries, fetch_data,
-        fetch_sync_metrics, …"]:::component
+        wp6_blue queries, schema,
+        project-scoped fetch"]:::component
         blue_routes_x["Blue Extra Routes
         [Components]
-        ops | charts | gdd"]:::component
+        ops | api | charts | monitor
+        mixed_views | broken_sensors"]:::component
         blue_gdd["gdd
         [Component]
-        Growing Degree Days
-        cumulative heat tracker"]:::component
+        Growing Degree Days from
+        Open-Meteo modeled weather"]:::component
+        blue_soil["soil_forecaster
+        [Component]
+        Ridge soil moisture/temp
+        7d + 30d forecast"]:::component
+        blue_manual["manual sources
+        [ManualSource x3]
+        insects | long_data |
+        fertigation_events"]:::component
         blue_metadata[("blue/metadata.yaml")]:::component
     end
 
@@ -101,36 +144,61 @@ graph TB
     subgraph red_layer["Red Twin (wp6_data.red)"]
         red_config["dashboard.config
         [TwinConfig instance]
-        1 DataSource: mysql"]:::component
+        1 DataSource: mysql (live feed)"]:::component
         red_provider["RedSensorProvider
         [Component]
-        MySQL-backed sensor access"]:::component
+        Federated: MySQL + wire
+        + wp6_red readings"]:::component
         red_db["MySQLConnection
         [Component]
-        aiomysql pool with
-        sensor type mapping"]:::component
+        aiomysql pool, sensor +
+        wire table mapping"]:::component
+        red_tsdb["tsdb
+        [Component]
+        wp6_red schema + queries
+        (readings, risk tables)"]:::component
         red_routes_x["Red Extra Routes
         [Components]
-        browse | dli | dli_model | charts"]:::component
+        browse | charts | multi_height
+        dli | dli_model | sijia"]:::component
+        red_sijia["sijia
+        [ManualSource]
+        Excel phenotyping upload
+        (source='sijia')"]:::component
         red_metadata[("red/metadata.yaml")]:::component
 
         subgraph dli_layer["DLI sub-package (red.dli)"]
-            dli_model["LightModel
+            dli_model["TwoStageLightModel
             [Component]
             Two-stage Ridge regression
             persisted to .pkl"]:::component
-            dli_calc["Calculator
+            dli_calc["calculator
             [Component]
-            PAR→DLI conversion,
+            PAR→DLI integral,
             lamp contribution"]:::component
-            dli_weather["WeatherClient
+            dli_lamp["lamp / schedule
             [Component]
-            Open-Meteo daily forecasts
-            with caching"]:::component
-            dli_agg["Aggregation
+            Lamp profile + hourly
+            schedule inference"]:::component
+            dli_agg["aggregation
             [Component]
             Daily features,
             cyclic day-of-year"]:::component
+        end
+
+        subgraph risk_layer["Risk engine (red.risk)"]
+            risk_engine["engine / metrics / episodes
+            [Component]
+            Pure: VPD, wet-hours, CO2
+            depletion, canopy DLI episodes"]:::component
+            risk_service["service / cli
+            [Component]
+            Fetch wire → evaluate
+            → persist range"]:::component
+            risk_store["store / config
+            [Component]
+            risk_episodes + risk_state
+            upsert; thresholds from yaml"]:::component
         end
     end
 
@@ -209,6 +277,15 @@ graph TB
     auth_mod -->|"OIDC flow"| oidc_provider
     misc_shared -.->|"used by"| shared_routes
 
+    %% Manual ingest wiring
+    mi_routes -->|"uses"| mi_service
+    mi_cli -->|"uses"| mi_service
+    mi_service -->|"dispatch on"| mi_source
+    mi_service -->|"persist files"| upload_storage
+    mi_service -->|"insert readings"| queries
+    upload_storage --> uploads_pvc
+    weather -->|"forecast/archive"| openmeteo_api
+
     %% Per-twin: each is a TwinConfig + provider implementing the protocol
     blue_config -->|"built by"| app_factory
     red_config -->|"built by"| app_factory
@@ -218,30 +295,45 @@ graph TB
     red_provider -.->|"implements"| provider_protocol
     grey_provider -.->|"implements"| provider_protocol
 
+    %% Blue wiring
     blue_config -->|"data_sources"| blue_provider
     blue_config -->|"extra_routers"| blue_routes_x
     blue_config -->|"metadata"| blue_metadata
     blue_provider --> blue_deps
     blue_routes_x --> blue_gdd
+    blue_routes_x --> blue_soil
     blue_routes_x --> blue_deps
+    blue_gdd -->|"weather"| weather
+    blue_manual -->|"register via"| mi_routes
+    blue_deps --> pool
 
+    %% Red wiring
     red_config -->|"data_sources"| red_provider
     red_config -->|"extra_routers"| red_routes_x
     red_config -->|"metadata"| red_metadata
     red_provider --> red_db
+    red_provider --> red_tsdb
     red_routes_x --> dli_model
     red_routes_x --> red_db
+    red_routes_x -->|"risk views"| risk_service
+    red_sijia -->|"register via"| mi_routes
     dli_model --> dli_calc
-    dli_model --> dli_weather
+    dli_model --> dli_lamp
     dli_model --> dli_agg
-    dli_weather -->|"Daily weather"| openmeteo_api
+    dli_model -->|"weather"| weather
+    risk_service --> risk_engine
+    risk_service --> risk_store
+    risk_service -->|"wire readings"| red_db
+    risk_store --> red_tsdb
+    red_tsdb --> pool
 
+    %% Grey wiring
     grey_config -->|"data_sources"| grey_provider
     grey_config -->|"metadata"| grey_metadata
 
     %% Data layer
-    blue_deps --> pool
-    pool --> tsdb
+    pool --> tsdb_blue
+    pool --> tsdb_red
     schema --> pool
     red_db --> mysqldb
 

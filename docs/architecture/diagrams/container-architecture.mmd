@@ -10,6 +10,7 @@ graph TB
     classDef external fill:#999,color:#fff,stroke:none
     classDef cronjob fill:#438dd5,color:#fff,stroke:none
     classDef shared fill:#0a3d62,color:#fff,stroke:none
+    classDef storage fill:#3c6382,color:#fff,stroke:none
 
     grower["Grower / Researcher
     [Person]"]:::person
@@ -24,23 +25,32 @@ graph TB
             [Library: FastAPI + Jinja2]
             Builds a dashboard from a
             TwinConfig (provider, theme,
-            metadata, extra routers)"]:::shared
+            metadata, extra routers); hosts
+            the generic manual-ingest pipeline"]:::shared
         end
 
         subgraph blue_twin["Blue Twin (Blueberries)"]
             blue_dash["Blue Dashboard
             [Container: FastAPI]
-            Authenticated dashboard with
-            chart compare, GDD tracker,
+            Chart compare, GDD tracker,
+            soil forecast, manual uploads,
             and SPoHF / Yookr source toggle"]:::container
+            blue_uploads[("Blue Manual Uploads
+            [PVC]
+            Raw insect / long-data /
+            fertigation files")]:::storage
         end
 
         subgraph red_twin["Red Twin (Tomatoes)"]
             red_dash["Red Dashboard
             [Container: FastAPI]
-            Authenticated dashboard with
-            DLI analysis and ML forecasting
-            (model trained on startup)"]:::container
+            DLI analysis + ML forecast
+            (trained on startup), wire
+            risk views, Sijia uploads"]:::container
+            red_uploads[("Red Manual Uploads
+            [PVC]
+            Raw Sijia measurement
+            files")]:::storage
         end
 
         subgraph grey_twin["Grey Twin (Demo)"]
@@ -69,17 +79,23 @@ graph TB
             sensor tables to CSV"]:::cronjob
         end
 
-        tsdb[("TimescaleDB
-        [Database: PostgreSQL 17]
-        readings, sync_metadata,
-        daily_coverage hypertables")]:::database
+        subgraph tsdb_inst["Shared TimescaleDB [PostgreSQL 17]"]
+            tsdb_blue[("wp6_blue
+            [Database]
+            readings, sync_metadata,
+            daily_coverage, manual_uploads")]:::database
+            tsdb_red[("wp6_red
+            [Database]
+            readings, risk_episodes,
+            risk_state, manual_uploads")]:::database
+        end
     end
 
     mysqldb[("MySQL
     [External Database: MySQL 8]
     Fontys GreenTechLab —
     greenhouse sensor tables
-    (Red twin only)")]:::external
+    (Red live feed)")]:::external
 
     spohf["SPoHF Backoffice
     [External: REST API]"]:::external
@@ -104,17 +120,23 @@ graph TB
     red_dash -.->|"built from"| app_factory
     grey_dash -.->|"built from"| app_factory
 
-    %% Data access
-    blue_dash -->|"Async queries\n(psycopg3 pool)\nproject filter:\nspohf-datalake | yookr-direct"| tsdb
-    red_dash -->|"Async queries\n(aiomysql)"| mysqldb
-    red_dash -->|"Daily forecast\n(HTTPS)"| openmeteo
+    %% Blue data access
+    blue_dash -->|"Async queries\n(psycopg3 pool)\nproject filter:\nspohf-datalake | yookr"| tsdb_blue
+    blue_dash -->|"Daily weather\n(HTTPS, GDD)"| openmeteo
+    blue_dash -->|"Stores uploads"| blue_uploads
+
+    %% Red data access (live feed from MySQL, manual + risk in TSDB)
+    red_dash -->|"Async queries\n(aiomysql, live feed)"| mysqldb
+    red_dash -->|"Manual + risk\n(psycopg3 pool)"| tsdb_red
+    red_dash -->|"Daily forecast\n(HTTPS, DLI)"| openmeteo
+    red_dash -->|"Stores uploads"| red_uploads
     %% grey_dash has no datastore (in-memory)
 
     %% Sync job (single process runs both ingests sequentially)
     sync_job -->|"Paginated fetch\n(httpx)"| spohf
     sync_job -->|"Per-sensor fetch\n(httpx)"| yookr
-    sync_job -->|"Batch upsert"| tsdb
+    sync_job -->|"Batch upsert"| tsdb_blue
 
     %% Export jobs
-    blue_export -->|"Read readings"| tsdb
+    blue_export -->|"Read readings"| tsdb_blue
     red_export -->|"Read sensor tables"| mysqldb
