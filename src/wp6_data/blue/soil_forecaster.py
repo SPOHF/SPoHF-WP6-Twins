@@ -11,13 +11,14 @@ Training (notebook):
 Inference (dashboard):
     from soil_forecaster import SoilForecaster, build_exog_moisture
     fc = SoilForecaster.load('models/soilMoisture_K1.pkl')
-    preds = fc.predict(recent_hourly)               # temperature: {7: 18.2, 30: 21.5}
-    preds = fc.predict(recent_hourly, exog)         # moisture: pass recent precip exog
+    preds = fc.predict(recent_hourly)          # {1: 18.1, 2: 18.4, ..., 7: 19.0}
+    preds = fc.predict(recent_hourly, exog)    # moisture: pass recent precip exog
 
 Dependencies: numpy, pandas (standard). No sklearn needed.
 """
 
 import pickle
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -27,15 +28,14 @@ import pandas as pd
 
 _LAG_DAYS       = [1, 3, 7, 14]
 _LAG_HOURS      = [24, 72, 168, 336]   # 1d, 3d, 7d, 14d in hours
-_HORIZONS       = [7, 30]
-_HORIZONS_HOURS = [168, 720]            # 7d, 30d in hours
+_HORIZONS       = [1, 2, 3, 4, 5, 6, 7]           # one day-ahead model per day
+_HORIZONS_HOURS = [24, 48, 72, 96, 120, 144, 168]
 _ALPHA_GRID     = [0.1, 1.0, 10.0, 100.0]
 _GROWING_MONTHS = [3, 4, 5, 6, 7, 8, 9, 10]
 
 # Known-bad sensor/treatment pairs — skipped during training
 _EXCLUDED = {
     'soilMoisture':    {'Ca'},   # electrical failure confirmed May–Oct 2025
-    'soilTemperature': {'Std'},  # systematic bias −2 to +6 °C vs other sensors
 }
 
 
@@ -170,7 +170,8 @@ def _r2(y, yhat):
 class SoilForecaster:
     """
     Ridge regression forecaster for one (sensor_type, treatment) pair.
-    Trains separate direct-forecast models for 7-day and 30-day horizons.
+    Trains a separate direct-forecast model for each day-ahead horizon,
+    1 through 7 days out.
 
     Parameters
     ----------
@@ -192,6 +193,7 @@ class SoilForecaster:
         self.lag_days      = lag_days
         self.seasonal      = seasonal
         self.freq          = freq
+        self.trained_at: datetime | None = None
         self._models: dict       = {}
         self._feature_cols: list = []
         self.fitted: bool        = False
@@ -204,7 +206,7 @@ class SoilForecaster:
             alpha_grid: list = _ALPHA_GRID,
             val_frac: float = 0.2) -> SoilForecaster:
         """
-        Train one ridge model per forecast horizon (7d and 30d).
+        Train one ridge model per forecast horizon (day+1 .. day+7).
         Alpha selected by lowest validation MAE (time-based 80/20 split).
 
         Parameters
@@ -272,6 +274,7 @@ class SoilForecaster:
             }
 
         self.fitted = True
+        self.trained_at = datetime.now(UTC)
         return self
 
     # ── inference ─────────────────────────────────────────────────────────────
@@ -294,7 +297,7 @@ class SoilForecaster:
 
         Returns
         -------
-        dict  e.g. {7: 34.1, 30: 31.8}  — keys are always in days
+        dict  e.g. {1: 33.8, 2: 34.0, ..., 7: 34.1}  — keys are always in days
         """
         if not self.fitted:
             raise RuntimeError('Forecaster not fitted. Call fit() first.')
@@ -357,8 +360,16 @@ def train_all_forecasters(
     freq: str = 'D',
 ) -> dict:
     """
-    Train one SoilForecaster per (sensor_type, treatment) for 2025 growing season.
+    Train one SoilForecaster per (sensor_type, treatment) on all growing-season
+    (Mar-Oct) data available, across every year present in the input.
     Skips known-bad sensor/treatment pairs automatically.
+
+    Off-season (Nov-Feb) gaps between years are left out rather than zero-filled
+    or interpolated: `_build_features` reindexes to a full daily index and drops
+    rows whose lag features cross a gap, so multi-year data trains correctly
+    without leaking across the gap. This also means a partial first season
+    (e.g. training mid-summer, before Nov) already has usable data — there is
+    no need to wait for a season to "complete" before training.
 
     Parameters
     ----------
@@ -379,13 +390,11 @@ def train_all_forecasters(
     df = treatment_sensors_df.copy()
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df['month'] = df['timestamp'].dt.month
-    df['year']  = df['timestamp'].dt.year
     df['date']  = df['timestamp'].dt.normalize()
 
     df = df[
         (df['sensor_type'].isin(['soilMoisture', 'soilTemperature'])) &
-        (df['month'].isin(_GROWING_MONTHS)) &
-        (df['year'] == 2025)
+        (df['month'].isin(_GROWING_MONTHS))
     ]
 
     min_samples = min_days * 24 if freq == 'H' else min_days

@@ -1,15 +1,21 @@
-"""GET /sensor-monitor/soil/forecast — 7-day and 30-day soil condition forecasts."""
+"""GET /sensor-monitor/soil/forecast — daily soil condition forecast (day+1..7)."""
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
 import pandas as pd
-from fastapi import APIRouter, Depends
-from fastapi.responses import HTMLResponse
+import plotly.graph_objects as go
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import HTMLResponse, RedirectResponse
+from plotly.subplots import make_subplots
 
-from wp6_data.blue.routes.monitor._treatment import load_device_treatment_map
-from wp6_data.blue.soil_forecaster import SoilForecaster
+from wp6_data.blue.routes.monitor._treatment import (
+    load_device_treatment_map,
+    treatment_color,
+)
+from wp6_data.blue.soil_forecaster import SoilForecaster, train_all_forecasters
 from wp6_data.config import Settings
 from wp6_data.shared import render_card, render_page
 from wp6_data.shared.routes.deps import get_provider
@@ -24,7 +30,9 @@ _SENSOR_META: dict[str, tuple[str, str]] = {
     "soilTemperature": ("Soil Temperature", "°C"),
     "soilMoisture":    ("Soil Moisture",    "%VWC"),
 }
+_SENSOR_ROWS = [("soilTemperature", 1), ("soilMoisture", 2)]
 _RECENT_DAYS = 30  # days of history needed for lag features
+_DEFAULT_TREATMENT = "Std"
 
 _settings = Settings()
 _MODELS_DIR = Path(_settings.blue_export_dir) / "models"
@@ -35,7 +43,54 @@ FORECAST_CSS = """
         flex: 1; min-width: 110px; text-align: center; padding: 0.5rem;
     }
     .stat-value { font-size: 1.5rem; font-weight: bold; }
+    .treatment-picker {
+        display: flex; gap: 0.75rem; flex-wrap: wrap;
+        align-items: center; margin-bottom: 0.5rem;
+    }
+    .treatment-picker label {
+        display: flex; align-items: center; gap: 0.3rem;
+        font-size: 0.85rem; margin: 0; white-space: nowrap;
+    }
 """
+
+
+def _treatment_picker_html(
+    available: list[str], selected: set[str],
+) -> str:
+    """Multi-select checkboxes for which treatments to overlay on the chart."""
+    boxes = "".join(
+        f'<label>'
+        f'<input type="checkbox" name="treatments" value="{t}"'
+        f'{" checked" if t in selected else ""} onchange="this.form.submit()">'
+        f'{t}'
+        f"</label>"
+        for t in available
+    )
+    return f"""
+        <article style="padding:0.5rem 1rem;">
+            <form method="get" class="treatment-picker">
+                {boxes}
+            </form>
+        </article>
+    """
+
+
+def _update_button_html() -> str:
+    return """
+        <form method="post" action="/sensor-monitor/soil/forecast/train"
+              style="margin-bottom:0.5rem;">
+            <button type="submit" style="width:100%;">Update</button>
+        </form>
+    """
+
+
+def _status_banner_html(trained: str | None, msg: str | None) -> str:
+    if trained == "ok":
+        return '<article class="success"><strong>Model updated.</strong></article>'
+    if trained == "error":
+        detail = f" {msg}" if msg else ""
+        return f'<article class="warning"><strong>Update failed.</strong>{detail}</article>'
+    return ""
 
 
 def _scan_models() -> list[Path]:
@@ -90,92 +145,143 @@ def _run_predictions(
     return results
 
 
-def _stats_grid_html(
-    results: dict[tuple[str, str], dict[int, float] | str],
-    sensor_type: str,
-    horizon: int,
-    unit: str,
+def _build_forecast_chart(
+    series_map: dict[tuple[str, str], pd.Series],
+    predictions: dict[tuple[str, str], dict[int, float] | str],
+    forecasters: dict[tuple[str, str], SoilForecaster],
+    selected_treatments: set[str],
 ) -> str:
-    """Render a GDD-style stat grid for one sensor type × horizon."""
-    items: list[str] = []
-    for (st, treatment), result in sorted(results.items()):
-        if st != sensor_type:
+    """Two-panel chart: history (solid) + forecast bridge (dashed) per treatment.
+
+    The shaded band around each forecast point is +/- that horizon's
+    validation MAE, giving a visual sense of how trustworthy each forecast is.
+    """
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.12,
+        subplot_titles=tuple(
+            f"{_SENSOR_META[sensor][0]} ({_SENSOR_META[sensor][1]})"
+            for sensor, _ in _SENSOR_ROWS
+        ),
+    )
+    row_by_sensor = dict(_SENSOR_ROWS)
+
+    seen_treatments: set[str] = set()
+
+    for (sensor_type, treatment), series in sorted(series_map.items()):
+        if treatment not in selected_treatments:
             continue
-        if isinstance(result, dict) and horizon in result:
-            value_html = f"{result[horizon]:.1f}&thinsp;{unit}"
-            dim = ""
-        else:
-            value_html = "—"
-            dim = ' style="color:#9ca3af;"'
-        items.append(
-            f'<article>'
-            f'<div class="stat-value"{dim}>{value_html}</div>'
-            f"<small>{treatment}</small>"
-            f"</article>"
-        )
-    if not items:
-        return "<p>No models available for this sensor type.</p>"
-    return f'<div class="stats-grid">{"".join(items)}</div>'
+        row = row_by_sensor.get(sensor_type)
+        if row is None or series.empty:
+            continue
 
+        color = treatment_color(treatment)
+        show = treatment not in seen_treatments
+        if show:
+            seen_treatments.add(treatment)
 
-def _details_table_html(
-    results: dict[tuple[str, str], dict[int, float] | str],
-    horizons: list[int],
-) -> str:
-    """Render a full table with all sensor types and forecast horizons."""
-    temp_headers = "".join(
-        f"<th>Temp {h}d (°C)</th>" for h in horizons
-    )
-    moist_headers = "".join(
-        f"<th>Moisture {h}d (%VWC)</th>" for h in horizons
-    )
-    header = (
-        f"<tr><th>Treatment</th>{temp_headers}{moist_headers}</tr>"
-    )
-
-    treatments = sorted({t for _, t in results})
-    rows: list[str] = []
-    for treatment in treatments:
-        temp_cells = ""
-        moist_cells = ""
-        for horizon in horizons:
-            t_res = results.get(("soilTemperature", treatment))
-            if isinstance(t_res, dict):
-                temp_cells += f"<td>{t_res.get(horizon, '—')}</td>"
-            else:
-                note = t_res or "—"
-                temp_cells += f'<td><em style="color:#9ca3af;">{note}</em></td>'
-
-            m_res = results.get(("soilMoisture", treatment))
-            if isinstance(m_res, dict):
-                moist_cells += f"<td>{m_res.get(horizon, '—')}</td>"
-            else:
-                note = m_res or "—"
-                moist_cells += f'<td><em style="color:#9ca3af;">{note}</em></td>'
-
-        rows.append(
-            f"<tr><td><strong>{treatment}</strong></td>"
-            f"{temp_cells}{moist_cells}</tr>"
+        fig.add_trace(
+            go.Scatter(
+                x=series.index, y=series.values,
+                name=treatment, mode="lines",
+                line={"color": color, "width": 2},
+                legendgroup=treatment, showlegend=show,
+                hovertemplate=(
+                    f"<b>{treatment}</b><br>%{{x}}<br>%{{y:.2f}}<extra></extra>"
+                ),
+            ),
+            row=row, col=1,
         )
 
-    body = "".join(rows)
-    return f"<table><thead>{header}</thead><tbody>{body}</tbody></table>"
+        result = predictions.get((sensor_type, treatment))
+        if not isinstance(result, dict) or not result:
+            continue
+
+        last_date = series.index[-1]
+        last_value = float(series.iloc[-1])
+        horizons = sorted(result)
+        bridge_x = [last_date] + [
+            last_date + pd.Timedelta(days=h) for h in horizons
+        ]
+        bridge_y = [last_value] + [result[h] for h in horizons]
+
+        fig.add_trace(
+            go.Scatter(
+                x=bridge_x, y=bridge_y,
+                name=treatment, mode="lines+markers",
+                line={"color": color, "width": 2, "dash": "dash"},
+                marker={"symbol": "diamond", "size": 6},
+                legendgroup=treatment, showlegend=False,
+                hovertemplate=(
+                    f"<b>{treatment} (forecast)</b><br>"
+                    "%{x}<br>%{y:.2f}<extra></extra>"
+                ),
+            ),
+            row=row, col=1,
+        )
+
+        fc = forecasters.get((sensor_type, treatment))
+        mae_by_horizon: dict[int, float] = {}
+        if fc is not None:
+            summary = fc.summary()
+            mae_by_horizon = dict(
+                zip(summary["horizon_days"], summary["val_mae"], strict=False)
+            )
+
+        upper = [last_value] + [
+            result[h] + mae_by_horizon.get(h, 0.0) for h in horizons
+        ]
+        lower = [last_value] + [
+            result[h] - mae_by_horizon.get(h, 0.0) for h in horizons
+        ]
+        fig.add_trace(
+            go.Scatter(
+                x=bridge_x + bridge_x[::-1],
+                y=upper + lower[::-1],
+                fill="toself", fillcolor=color, opacity=0.15,
+                line={"width": 0}, hoverinfo="skip",
+                legendgroup=treatment, showlegend=False,
+            ),
+            row=row, col=1,
+        )
+
+    for sensor_type, row in _SENSOR_ROWS:
+        fig.update_yaxes(title_text=_SENSOR_META[sensor_type][1], row=row, col=1)
+    fig.update_xaxes(showticklabels=True, tickformat="%d %b", tickangle=-30)
+
+    fig.update_layout(
+        template="plotly_white",
+        height=700,
+        hovermode="x unified",
+        legend={"orientation": "v", "yanchor": "top", "y": 1,
+                "xanchor": "left", "x": 1.02},
+        margin={"r": 140},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+
+    return fig.to_html(full_html=False, include_plotlyjs="cdn")
 
 
 @router.get("/soil/forecast", response_class=HTMLResponse)
 async def soil_forecast(
     provider: Annotated[SensorDataProvider, Depends(get_provider)],
+    treatments: Annotated[
+        list[str] | None, Query(description="Treatments to overlay on the chart"),
+    ] = None,
+    trained: Annotated[str | None, Query()] = None,
+    msg: Annotated[str | None, Query()] = None,
 ) -> str:
-    """7-day and 30-day soil temperature and moisture forecasts per treatment."""
+    """Daily soil temperature and moisture forecast (day+1..7) per treatment."""
+    status_banner = _status_banner_html(trained, msg)
     pkl_paths = _scan_models()
 
     if not pkl_paths:
         content = f"""
             <h1>Soil Forecast</h1>
+            {status_banner}
+            {_update_button_html()}
             <article>
-              <p>No forecast models found in <code>{_MODELS_DIR}</code>.</p>
-              <p>Train models using the <code>soil_forecaster</code> module and save
-                 the <code>.pkl</code> files to that directory.</p>
+              <p>No forecast models found in <code>{_MODELS_DIR}</code> yet.</p>
             </article>
         """
         return render_page(
@@ -222,29 +328,42 @@ async def soil_forecast(
     series_map = _build_series_map(df)
     predictions = _run_predictions(forecasters, series_map)
 
-    all_horizons = sorted({
-        h
-        for r in predictions.values()
-        if isinstance(r, dict)
-        for h in r
-    }) or [7, 30]
+    all_keys = list(series_map) + list(forecasters)
+    available_treatments = sorted({t for _, t in all_keys})
+    if treatments:
+        selected = {t for t in treatments if t in available_treatments}
+    elif _DEFAULT_TREATMENT in available_treatments:
+        selected = {_DEFAULT_TREATMENT}
+    else:
+        selected = set(available_treatments[:1])
 
-    primary_horizon = all_horizons[0]  # typically 7
+    picker_html = _treatment_picker_html(available_treatments, selected)
+    chart_html = _build_forecast_chart(series_map, predictions, forecasters, selected)
 
-    temp_stats = _stats_grid_html(predictions, "soilTemperature", primary_horizon, "°C")
-    moist_stats = _stats_grid_html(predictions, "soilMoisture", primary_horizon, "%VWC")
-    details = _details_table_html(predictions, all_horizons)
+    trained_ats = [
+        t for fc in forecasters.values()
+        if (t := getattr(fc, "trained_at", None)) is not None
+    ]
+    last_trained = (
+        f"models last trained {max(trained_ats).strftime('%Y-%m-%d %H:%M UTC')}"
+        if trained_ats else "model training date unknown"
+    )
 
     generated_at = now.strftime("%Y-%m-%d %H:%M UTC")
     content = f"""
         <h1>Soil Forecast</h1>
+        {status_banner}
+        {_update_button_html()}
         <p style="font-size:0.8rem;opacity:0.7;margin-top:-0.5rem">
-            Ridge regression &mdash; trained on 2025 growing season
-            (March&ndash;October) &mdash; {generated_at}
+            Ridge regression per treatment &mdash; generated {generated_at}
+            &mdash; {last_trained}
         </p>
-        {render_card(f"Soil Temperature &mdash; {primary_horizon}-day forecast (°C)", temp_stats)}
-        {render_card(f"Soil Moisture &mdash; {primary_horizon}-day forecast (%VWC)", moist_stats)}
-        {render_card("All Horizons", details)}
+        {picker_html}
+        {render_card(
+            "History &amp; forecast (dashed = next 7 days, "
+            "shaded = validation MAE)",
+            chart_html,
+        )}
     """
     return render_page(
         PAGE_TITLE,
@@ -254,3 +373,47 @@ async def soil_forecast(
         data_source=provider.data_source_label,
         extra_css=FORECAST_CSS,
     )
+
+
+@router.post("/soil/forecast/train")
+async def soil_forecast_train(
+    provider: Annotated[SensorDataProvider, Depends(get_provider)],
+) -> RedirectResponse:
+    """Fit (or refit) every (sensor, treatment) soil forecast model.
+
+    Fetches all available soil temperature/moisture history — no date range —
+    since `train_all_forecasters` itself restricts training to growing-season
+    (Mar-Oct) months across whatever years are present. Redirects straight
+    back to the forecast page (POST-redirect-GET) with a status banner rather
+    than rendering its own results page.
+    """
+    back_url = "/sensor-monitor/soil/forecast"
+
+    def _failed(message: str) -> RedirectResponse:
+        return RedirectResponse(
+            f"{back_url}?trained=error&msg={quote(message)}", status_code=303,
+        )
+
+    try:
+        df = await provider.fetch_data(sensor_tags=_FORECAST_SENSORS)
+    except Exception as e:
+        return _failed(f"Error fetching data: {e}")
+
+    if df.empty:
+        return _failed("No soil sensor data available.")
+
+    treatment_map = load_device_treatment_map()
+    df = df.copy()
+    df["treatment"] = df["device"].map(treatment_map)
+    df = df.dropna(subset=["treatment"])
+    train_df = df.rename(columns={"time": "timestamp", "sensor": "sensor_type"})
+
+    forecasters = train_all_forecasters(train_df, output_dir=str(_MODELS_DIR))
+
+    if not forecasters:
+        return _failed(
+            "No treatment had enough growing-season data to train a model "
+            "(need at least 60 days of Mar-Oct history).",
+        )
+
+    return RedirectResponse(f"{back_url}?trained=ok", status_code=303)
