@@ -136,6 +136,9 @@
     .card-bg-sun::after {
         background-image: url(/static/cards/sun.svg);
     }
+    .card-bg-growth::after {
+        background-image: url(/static/cards/growth.svg);
+    }
     .card-bg-status::after {
         background-image: url(/static/cards/status.svg);
     }

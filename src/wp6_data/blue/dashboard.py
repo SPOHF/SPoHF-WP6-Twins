@@ -22,6 +22,18 @@ from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 settings = Settings()
 
 
+def _gdd_card() -> str:
+    return render_card(
+        "GDD Tracker",
+        '<a href="/sensor-monitor/gdd" role="button">GDD Dashboard</a>',
+        description=(
+            "Growing Degree Days — track cumulative heat for harvest "
+            "prediction."
+        ),
+        card_class="card-bg card-bg-growth",
+    )
+
+
 def _monitor_card() -> str:
     return render_card(
         "Monitors",
@@ -35,7 +47,7 @@ def _monitor_card() -> str:
             'Unreliable Sensors</a>'
         ),
         description=(
-            "Sensor monitor (GDD, soil, light, microclimate) and manual "
+            "Sensor monitor (soil, light, microclimate) and manual "
             "measurement dashboards for uploaded long_data files."
         ),
     )
@@ -92,7 +104,7 @@ config = TwinConfig(
             render_fertilization_strategies_tab(),
         ),
     },
-    hero_cards=[_monitor_card],
+    hero_cards=[_gdd_card, _monitor_card],
     status_extras=blue_manual.manual_cards(),
     export_sanitise_names=True,
     # Authenticated twin (TwinConfig.require_auth defaults to True): the app
