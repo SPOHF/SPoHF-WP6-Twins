@@ -1,5 +1,8 @@
 """GET /sensor-monitor/soil/forecast — daily soil condition forecast (day+1..7)."""
 
+import asyncio
+import html
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
@@ -8,6 +11,7 @@ from urllib.parse import quote
 import pandas as pd
 import plotly.graph_objects as go
 from fastapi import APIRouter, Depends, Query
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from plotly.subplots import make_subplots
 
@@ -22,6 +26,12 @@ from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.twin import SensorDataProvider
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
+
+# Serialises retraining so two concurrent "Update" clicks don't write the same
+# .pkl files at once; the second click is told training is already running.
+_training_lock = asyncio.Lock()
 
 PAGE_TITLE = "SPoHF Blue - Soil Forecast"
 
@@ -60,9 +70,9 @@ def _treatment_picker_html(
     """Multi-select checkboxes for which treatments to overlay on the chart."""
     boxes = "".join(
         f'<label>'
-        f'<input type="checkbox" name="treatments" value="{t}"'
+        f'<input type="checkbox" name="treatments" value="{html.escape(t, quote=True)}"'
         f'{" checked" if t in selected else ""} onchange="this.form.submit()">'
-        f'{t}'
+        f'{html.escape(t)}'
         f"</label>"
         for t in available
     )
@@ -88,7 +98,7 @@ def _status_banner_html(trained: str | None, msg: str | None) -> str:
     if trained == "ok":
         return '<article class="success"><strong>Model updated.</strong></article>'
     if trained == "error":
-        detail = f" {msg}" if msg else ""
+        detail = f" {html.escape(msg)}" if msg else ""
         return f'<article class="warning"><strong>Update failed.</strong>{detail}</article>'
     return ""
 
@@ -227,22 +237,30 @@ def _build_forecast_chart(
                 zip(summary["horizon_days"], summary["val_mae"], strict=False)
             )
 
-        upper = [last_value] + [
-            result[h] + mae_by_horizon.get(h, 0.0) for h in horizons
-        ]
-        lower = [last_value] + [
-            result[h] - mae_by_horizon.get(h, 0.0) for h in horizons
-        ]
-        fig.add_trace(
-            go.Scatter(
-                x=bridge_x + bridge_x[::-1],
-                y=upper + lower[::-1],
-                fill="toself", fillcolor=color, opacity=0.15,
-                line={"width": 0}, hoverinfo="skip",
-                legendgroup=treatment, showlegend=False,
-            ),
-            row=row, col=1,
-        )
+        # Only shade horizons that actually have a validation MAE. Filling a
+        # missing MAE with 0.0 would draw a width-0 band that reads as
+        # "perfectly certain" — worse than showing no band at all.
+        band_horizons = [h for h in horizons if mae_by_horizon.get(h) is not None]
+        if band_horizons:
+            band_x = [last_date] + [
+                last_date + pd.Timedelta(days=h) for h in band_horizons
+            ]
+            band_upper = [last_value] + [
+                result[h] + mae_by_horizon[h] for h in band_horizons
+            ]
+            band_lower = [last_value] + [
+                result[h] - mae_by_horizon[h] for h in band_horizons
+            ]
+            fig.add_trace(
+                go.Scatter(
+                    x=band_x + band_x[::-1],
+                    y=band_upper + band_lower[::-1],
+                    fill="toself", fillcolor=color, opacity=0.15,
+                    line={"width": 0}, hoverinfo="skip",
+                    legendgroup=treatment, showlegend=False,
+                ),
+                row=row, col=1,
+            )
 
     for sensor_type, row in _SENSOR_ROWS:
         fig.update_yaxes(title_text=_SENSOR_META[sensor_type][1], row=row, col=1)
@@ -304,10 +322,11 @@ async def soil_forecast(
             start=start_dt,
             end=now,
         )
-    except Exception as e:
+    except Exception:
+        logger.exception("Soil forecast: failed to fetch recent data")
         return render_page(
             PAGE_TITLE,
-            f"<h1>Soil Forecast</h1><p>Error fetching recent data: {e}</p>",
+            "<h1>Soil Forecast</h1><p>Error fetching recent data.</p>",
             show_back_link=True,
             back_url="/sensor-monitor",
             data_source=provider.data_source_label,
@@ -394,21 +413,34 @@ async def soil_forecast_train(
             f"{back_url}?trained=error&msg={quote(message)}", status_code=303,
         )
 
-    try:
-        df = await provider.fetch_data(sensor_tags=_FORECAST_SENSORS)
-    except Exception as e:
-        return _failed(f"Error fetching data: {e}")
+    if _training_lock.locked():
+        return _failed("Training is already in progress — try again shortly.")
 
-    if df.empty:
-        return _failed("No soil sensor data available.")
+    async with _training_lock:
+        try:
+            df = await provider.fetch_data(sensor_tags=_FORECAST_SENSORS)
+        except Exception:
+            logger.exception("Soil forecast training: failed to fetch data")
+            return _failed("Could not fetch sensor data.")
 
-    treatment_map = load_device_treatment_map()
-    df = df.copy()
-    df["treatment"] = df["device"].map(treatment_map)
-    df = df.dropna(subset=["treatment"])
-    train_df = df.rename(columns={"time": "timestamp", "sensor": "sensor_type"})
+        if df.empty:
+            return _failed("No soil sensor data available.")
 
-    forecasters = train_all_forecasters(train_df, output_dir=str(_MODELS_DIR))
+        treatment_map = load_device_treatment_map()
+        df = df.copy()
+        df["treatment"] = df["device"].map(treatment_map)
+        df = df.dropna(subset=["treatment"])
+        train_df = df.rename(columns={"time": "timestamp", "sensor": "sensor_type"})
+
+        # train_all_forecasters is CPU-bound (numpy) — run it off the event loop
+        # so a retrain doesn't block every other request while it fits.
+        try:
+            forecasters = await run_in_threadpool(
+                train_all_forecasters, train_df, output_dir=str(_MODELS_DIR),
+            )
+        except Exception:
+            logger.exception("Soil forecast training: model fitting failed")
+            return _failed("Model training failed unexpectedly.")
 
     if not forecasters:
         return _failed(
