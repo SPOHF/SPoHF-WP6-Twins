@@ -16,7 +16,7 @@ from wp6_data.red.dli import (
     OpenMeteoClient,
     get_model,
 )
-from wp6_data.shared import render_page
+from wp6_data.shared import render_page, render_stat_grid
 
 router = APIRouter()
 
@@ -93,31 +93,18 @@ async def dli_model_train() -> str:
             show_back_link=True, back_url="/dli/model",
         )
 
+    stats_grid = render_stat_grid([
+        (f"{stats.r2_score:.3f}", "Combined R²"),
+        (f"{stats.stage1.r2_score:.3f}", "Stage 1 R²"),
+        (f"{stats.stage2.r2_score:.3f}", "Stage 2 R²"),
+        (f"{stats.n_samples:,}", "Days"),
+        (f"{stats.attenuation_factor:.3f}", "Attenuation"),
+    ], cols=5)
+
     content = f"""
         <article style="border: 2px solid var(--pico-ins-color, green)">
             <h1>Two-Stage Model Trained (Daily)</h1>
-            <div class="stats-grid cols-5">
-                <article>
-                    <div class="stat-value">{stats.r2_score:.3f}</div>
-                    <small>Combined R²</small>
-                </article>
-                <article>
-                    <div class="stat-value">{stats.stage1.r2_score:.3f}</div>
-                    <small>Stage 1 R²</small>
-                </article>
-                <article>
-                    <div class="stat-value">{stats.stage2.r2_score:.3f}</div>
-                    <small>Stage 2 R²</small>
-                </article>
-                <article>
-                    <div class="stat-value">{stats.n_samples:,}</div>
-                    <small>Days</small>
-                </article>
-                <article>
-                    <div class="stat-value">{stats.attenuation_factor:.3f}</div>
-                    <small>Attenuation</small>
-                </article>
-            </div>
+            {stats_grid}
                 <p>
                      <strong>Stage 1</strong>: OpenMeteo daily direct_radiation
                      → {WEATHER_STATION_SENSOR} daily lux

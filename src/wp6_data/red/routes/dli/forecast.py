@@ -24,7 +24,7 @@ from wp6_data.red.dli import (
     infer_lamp_schedule_hourly,
     predict_natural_dli_from_weather,
 )
-from wp6_data.shared import make_schedule_chart, render_page, utc_day_bounds
+from wp6_data.shared import make_schedule_chart, render_page, render_stat_grid, utc_day_bounds
 from wp6_data.shared.time import display_tz
 
 router = APIRouter()
@@ -338,26 +338,15 @@ async def dli_forecast(
         </article>
     """
 
-    stats_html = f"""
-        <div class="stats-grid">
-            <article>
-                <div class="stat-value">{format_card_value(yesterday_vals)}</div>
-                <small>Yesterday</small><br>
-                <small>{format_card_sublabel(yesterday_vals)}</small>
-            </article>
-            <article>
-                <div class="stat-value">{format_card_value(today_vals, use_estimated=True)}</div>
-                <small>Today</small><br>
-                <small>{format_card_sublabel(today_vals)}</small>
-            </article>
-            <article>
-                <div class="stat-value">{format_card_value(tomorrow_vals)}</div>
-                <small>Tomorrow</small><br>
-                <small>{format_card_sublabel(tomorrow_vals)}</small>
-            </article>
-        </div>
-        <small>* predicted ~ estimated</small>
-    """
+    stats_html = render_stat_grid([
+        (format_card_value(yesterday_vals), "Yesterday", format_card_sublabel(yesterday_vals)),
+        (
+            format_card_value(today_vals, use_estimated=True),
+            "Today",
+            format_card_sublabel(today_vals),
+        ),
+        (format_card_value(tomorrow_vals), "Tomorrow", format_card_sublabel(tomorrow_vals)),
+    ]) + "<small>* predicted ~ estimated</small>"
 
     content = f"""
         <h1>DLI Forecast</h1>

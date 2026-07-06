@@ -142,6 +142,35 @@ def render_hub_grid(cards: list[str]) -> str:
     return f'<div class="hub-grid">{"".join(cards)}</div>'
 
 
+def render_stat_tile(
+    value: str, label: str, sublabel: str = "", *, value_class: str = "",
+) -> str:
+    """Render one stat tile: a big value with a caption (and optional sub-caption).
+
+    ``value_class`` adds a modifier class on the value (e.g. ``"warning"``).
+    """
+    cls = f' class="stat-value {value_class}"' if value_class else ' class="stat-value"'
+    sub = f"<br><small>{sublabel}</small>" if sublabel else ""
+    return f"<article><div{cls}>{value}</div><small>{label}</small>{sub}</article>"
+
+
+def render_stat_grid(
+    tiles: list[str | tuple[str, ...]], *, cols: int | str | None = None,
+) -> str:
+    """Render a grid of stat tiles (the ``.stats-grid`` pattern).
+
+    Each tile is either a ``(value, label)`` / ``(value, label, sublabel)``
+    tuple, or an already-rendered tile string (see :func:`render_stat_tile`)
+    for tiles needing e.g. a value class. ``cols`` selects a ``cols-N`` /
+    ``cols-auto`` layout modifier.
+    """
+    rendered = "".join(
+        tile if isinstance(tile, str) else render_stat_tile(*tile) for tile in tiles
+    )
+    cls = f"stats-grid cols-{cols}" if cols is not None else "stats-grid"
+    return f'<div class="{cls}">{rendered}</div>'
+
+
 def render_table(
     headers: list[str], rows: list[list[str]], *,
     sortable: bool = True, group_col: int | None = None,

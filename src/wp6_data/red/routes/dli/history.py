@@ -16,7 +16,13 @@ from wp6_data.red.dli import (
     calculate_dli_trendline,
     calculate_lamp_contribution,
 )
-from wp6_data.shared import render_date_filter, render_page, resolve_date_range
+from wp6_data.shared import (
+    render_date_filter,
+    render_page,
+    render_stat_grid,
+    render_table,
+    resolve_date_range,
+)
 
 router = APIRouter()
 
@@ -148,26 +154,12 @@ async def dli_history(
         td, th { text-align: center; }
     """
 
-    stats_html = f"""
-        <div class="stats-grid cols-4">
-            <article>
-                <div class="stat-value">{total_avg:.1f}</div>
-                <small>Avg Total DLI</small>
-            </article>
-            <article>
-                <div class="stat-value">{natural_avg:.1f}</div>
-                <small>Avg Natural DLI</small>
-            </article>
-            <article>
-                <div class="stat-value">{hours_avg:.1f}h</div>
-                <small>Avg Photoperiod</small>
-            </article>
-            <article>
-                <div class="stat-value">{days_count}</div>
-                <small>Days</small>
-            </article>
-        </div>
-    """
+    stats_html = render_stat_grid([
+        (f"{total_avg:.1f}", "Avg Total DLI"),
+        (f"{natural_avg:.1f}", "Avg Natural DLI"),
+        (f"{hours_avg:.1f}h", "Avg Photoperiod"),
+        (f"{days_count}", "Days"),
+    ], cols=4)
 
     # Build data table
     table_df = chart_df.sort_values("date", ascending=False)
@@ -184,33 +176,19 @@ async def dli_history(
         )
         lamp_str = f"{lamp_dli:.1f}" if lamp_dli is not None else "-"
 
-        table_rows.append(f"""
-            <tr>
-                <td>{row['date']}</td>
-                <td>{natural_dli_val}</td>
-                <td>{total_dli_val}</td>
-                <td>{lamp_str}</td>
-                <td>{total_hrs}</td>
-            </tr>
-        """)
+        table_rows.append(
+            [f"{row['date']}", natural_dli_val, total_dli_val, lamp_str, total_hrs]
+        )
 
+    data_table = render_table(
+        ["Date", "Natural DLI", "Total DLI", "Lamp DLI", "Photoperiod"],
+        table_rows,
+        sortable=False,
+    )
     table_html = f"""
         <details>
             <summary>View Data Table</summary>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Natural DLI</th>
-                        <th>Total DLI</th>
-                        <th>Lamp DLI</th>
-                        <th>Photoperiod</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {''.join(table_rows)}
-                </tbody>
-            </table>
+            {data_table}
         </details>
     """
 

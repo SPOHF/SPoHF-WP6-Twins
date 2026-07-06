@@ -17,7 +17,7 @@ from wp6_data.red.dli import (
     get_model,
     subtract_lamp_from_sensor,
 )
-from wp6_data.shared import render_page
+from wp6_data.shared import render_page, render_stat_grid, render_stat_tile
 
 router = APIRouter()
 
@@ -65,23 +65,15 @@ async def dli_model_diagnostic() -> str:
         dates = pd.to_datetime(df[time_col], utc=True)
         return f"{dates.min().date()} to {dates.max().date()}"
 
+    counts_grid = render_stat_grid([
+        (f"{len(indoor_df):,}", f"Above-lamp PAR ({NATURAL_LIGHT_SENSOR})"),
+        (f"{len(plant_level_df):,}", f"Plant-level PAR ({TOTAL_LIGHT_SENSOR})"),
+        (f"{len(outdoor_df):,}", f"{WEATHER_STATION_SENSOR} readings"),
+    ])
     counts_html = f"""
         <article>
             <h3>Raw Data Counts</h3>
-            <div class="stats-grid">
-                <article>
-                    <div class="stat-value">{len(indoor_df):,}</div>
-                    <small>Above-lamp PAR ({NATURAL_LIGHT_SENSOR})</small>
-                </article>
-                <article>
-                    <div class="stat-value">{len(plant_level_df):,}</div>
-                    <small>Plant-level PAR ({TOTAL_LIGHT_SENSOR})</small>
-                </article>
-                <article>
-                    <div class="stat-value">{len(outdoor_df):,}</div>
-                    <small>{WEATHER_STATION_SENSOR} readings</small>
-                </article>
-            </div>
+            {counts_grid}
             <small>
                 Above-lamp: {date_range_str(indoor_df)}<br>
                 Plant-level: {date_range_str(plant_level_df)}<br>
@@ -116,25 +108,17 @@ async def dli_model_diagnostic() -> str:
             else:
                 avg_lamp_hours = 0.0
 
+            lamp_grid = render_stat_grid([
+                (f"{days_with_lamp}/{total_profile_days}", "Days with lamp detected"),
+                (f"{median_lamp_power:.0f}", "Median lamp PAR (μmol/m²/s)"),
+                (f"{avg_lamp_hours:.1f}h", "Avg lamp schedule"),
+            ])
             lamp_html = f"""
                 <article>
                     <h3>Lamp Profile Summary</h3>
                     <p>Derived from {NATURAL_LIGHT_SENSOR} (above lamp) and
                        {TOTAL_LIGHT_SENSOR} (plant level)</p>
-                    <div class="stats-grid">
-                        <article>
-                            <div class="stat-value">{days_with_lamp}/{total_profile_days}</div>
-                            <small>Days with lamp detected</small>
-                        </article>
-                        <article>
-                            <div class="stat-value">{median_lamp_power:.0f}</div>
-                            <small>Median lamp PAR (μmol/m²/s)</small>
-                        </article>
-                        <article>
-                            <div class="stat-value">{avg_lamp_hours:.1f}h</div>
-                            <small>Avg lamp schedule</small>
-                        </article>
-                    </div>
+                    {lamp_grid}
                 </article>
             """
         else:
@@ -243,12 +227,22 @@ async def dli_model_diagnostic() -> str:
                 model = get_model()
                 model_factor_html = ""
                 if model.stats and model.stats.attenuation_factor != 1.0:
-                    model_factor_html = f"""
-                        <article>
-                            <div class="stat-value">{model.stats.attenuation_factor:.3f}</div>
-                            <small>Model factor (stored)</small>
-                        </article>
-                    """
+                    model_factor_html = render_stat_tile(
+                        f"{model.stats.attenuation_factor:.3f}",
+                        "Model factor (stored)",
+                    )
+
+                ratio_grid = render_stat_grid([
+                    (f"{median_ratio:.3f}", "Live median"),
+                    model_factor_html,
+                    (f"{min_ratio:.3f} – {max_ratio:.3f}", "Range (all days)"),
+                    (trend_label, "Rolling median range"),
+                    render_stat_tile(
+                        f"{n_outliers}",
+                        f"Occlusion days ({clean_n} clean)",
+                        value_class="warning",
+                    ),
+                ], cols="auto")
 
                 ratio_html = f"""
                     <article>
@@ -258,25 +252,7 @@ async def dli_model_diagnostic() -> str:
                            Rolling median shows seasonal trend.
                            Red crosses = days &gt;2&sigma; below local trend
                            (likely plant occlusion).</small>
-                        <div class="stats-grid cols-auto">
-                            <article>
-                                <div class="stat-value">{median_ratio:.3f}</div>
-                                <small>Live median</small>
-                            </article>
-                            {model_factor_html}
-                            <article>
-                                <div class="stat-value">{min_ratio:.3f} – {max_ratio:.3f}</div>
-                                <small>Range (all days)</small>
-                            </article>
-                            <article>
-                                <div class="stat-value">{trend_label}</div>
-                                <small>Rolling median range</small>
-                            </article>
-                            <article>
-                                <div class="stat-value warning">{n_outliers}</div>
-                                <small>Occlusion days ({clean_n} clean)</small>
-                            </article>
-                        </div>
+                        {ratio_grid}
                         {ratio_chart_html}
                     </article>
                 """

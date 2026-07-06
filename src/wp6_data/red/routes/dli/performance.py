@@ -23,7 +23,7 @@ from wp6_data.red.dli import (
     predict_natural_dli_from_weather,
     try_infer_lamp_from_day,
 )
-from wp6_data.shared import render_date_filter, render_page, utc_day_bounds
+from wp6_data.shared import render_date_filter, render_page, render_stat_grid, utc_day_bounds
 
 router = APIRouter()
 
@@ -205,25 +205,11 @@ async def dli_performance(
 
         # Stats
         bias_lbl = "overprediction" if bias > 0 else "underprediction"
-        stats = f"""
-            <div class="stats-grid">
-                <article>
-                    <div class="stat-value">{mape:.1f}%</div>
-                    <small>Avg. Error</small><br>
-                    <small>Mean absolute % error</small>
-                </article>
-                <article>
-                    <div class="stat-value">{mae:.2f}</div>
-                    <small>Avg. Absolute Error</small><br>
-                    <small>mol/m²/day off per day</small>
-                </article>
-                <article>
-                    <div class="stat-value">{bias:+.2f}</div>
-                    <small>Bias ({bias_lbl})</small><br>
-                    <small>Systematic over/under trend</small>
-                </article>
-            </div>
-        """
+        stats = render_stat_grid([
+            (f"{mape:.1f}%", "Avg. Error", "Mean absolute % error"),
+            (f"{mae:.2f}", "Avg. Absolute Error", "mol/m²/day off per day"),
+            (f"{bias:+.2f}", f"Bias ({bias_lbl})", "Systematic over/under trend"),
+        ])
 
         # Table
         rows = []

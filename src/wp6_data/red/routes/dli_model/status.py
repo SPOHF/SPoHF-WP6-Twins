@@ -9,7 +9,7 @@ from wp6_data.red.dli import (
     WEATHER_STATION_SENSOR,
     get_model,
 )
-from wp6_data.shared import render_page
+from wp6_data.shared import render_page, render_stat_grid, render_table
 
 router = APIRouter()
 
@@ -30,18 +30,31 @@ async def dli_model_status() -> str:
         s1_features = getattr(s1, "feature_names", list(s1.coefficients.keys()))
         s2_features = getattr(s2, "feature_names", list(s2.coefficients.keys()))
 
-        s1_coef_rows = "".join(
-            f"<tr><td>{name}</td><td>{s1.coefficients.get(name, 0):+.4f}</td></tr>"
-            for name in s1_features
+        # Intercept row first, then per-feature coefficients.
+        s1_coef_table = render_table(
+            ["Feature", "Coefficient"],
+            [["Intercept", f"{s1.intercept:+.4f}"]]
+            + [[name, f"{s1.coefficients.get(name, 0):+.4f}"] for name in s1_features],
+            sortable=False,
         )
-        s2_coef_rows = "".join(
-            f"<tr><td>{name}</td><td>{s2.coefficients.get(name, 0):+.4f}</td></tr>"
-            for name in s2_features
+        s2_coef_table = render_table(
+            ["Feature", "Coefficient"],
+            [["Intercept", f"{s2.intercept:+.4f}"]]
+            + [[name, f"{s2.coefficients.get(name, 0):+.4f}"] for name in s2_features],
+            sortable=False,
         )
 
         # Model version info
         model_version = getattr(stats, "model_version", 4)
         model_type = "Ridge regression" if model_version >= 5 else "Linear regression"
+
+        stats_grid = render_stat_grid([
+            (f"{stats.r2_score:.3f}", "Combined R²"),
+            (f"{s1.r2_score:.3f}", "Stage 1 R²"),
+            (f"{s2.r2_score:.3f}", "Stage 2 R²"),
+            (f"{stats.n_samples:,}", "Days"),
+            (f"{getattr(stats, 'attenuation_factor', 1.0):.3f}", "Attenuation"),
+        ], cols=5)
 
         status_html = f"""
             <article>
@@ -51,49 +64,19 @@ async def dli_model_status() -> str:
                     → indoor PAR ({model_type})
                 </p>
 
-                <div class="stats-grid cols-5">
-                    <article>
-                        <div class="stat-value">{stats.r2_score:.3f}</div>
-                        <small>Combined R²</small>
-                    </article>
-                    <article>
-                        <div class="stat-value">{s1.r2_score:.3f}</div>
-                        <small>Stage 1 R²</small>
-                    </article>
-                    <article>
-                        <div class="stat-value">{s2.r2_score:.3f}</div>
-                        <small>Stage 2 R²</small>
-                    </article>
-                    <article>
-                        <div class="stat-value">{stats.n_samples:,}</div>
-                        <small>Days</small>
-                    </article>
-                    <article>
-                        <div class="stat-value">\
-{getattr(stats, 'attenuation_factor', 1.0):.3f}</div>
-                        <small>Attenuation</small>
-                    </article>
-                </div>
+                {stats_grid}
 
                 <h4>Stage 1: Weather API → Local Lux (Daily)</h4>
                      <p>Calibrates OpenMeteo weather to {WEATHER_STATION_SENSOR} daily lux sum
                    (R²={s1.r2_score:.3f}, RMSE={s1.rmse:.0f} lux/day)</p>
                 <small>Features: {', '.join(s1_features)}</small>
-                <table>
-                    <tr><th>Feature</th><th>Coefficient</th></tr>
-                    <tr><td>Intercept</td><td>{s1.intercept:+.4f}</td></tr>
-                    {s1_coef_rows}
-                </table>
+                {s1_coef_table}
 
                 <h4>Stage 2: Outdoor Lux → Indoor PAR (Daily)</h4>
                 <p>Greenhouse transmission model for daily totals
                    (R²={s2.r2_score:.3f}, RMSE={s2.rmse:.1f} μmol/m²/day)</p>
                 <small>Features: {', '.join(s2_features)}</small>
-                <table>
-                    <tr><th>Feature</th><th>Coefficient</th></tr>
-                    <tr><td>Intercept</td><td>{s2.intercept:+.4f}</td></tr>
-                    {s2_coef_rows}
-                </table>
+                {s2_coef_table}
 
                 <small>
                     Outdoor sensor: <strong>{stats.outdoor_sensor}</strong><br>

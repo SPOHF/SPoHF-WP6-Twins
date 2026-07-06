@@ -18,6 +18,8 @@ from wp6_data.shared.templates import (
     render_date_filter,
     render_explore_tabs,
     render_page,
+    render_stat_grid,
+    render_stat_tile,
     render_unified_chart_page,
     resolve_date_range,
 )
@@ -161,6 +163,22 @@ class TestRenderDateFilter:
     def test_setrange_script_present(self):
         html = render_date_filter(date(2026, 1, 1), date(2026, 1, 8))
         assert "function setRange(days)" in html
+
+
+class TestRenderStatGrid:
+    def test_tuple_tile_with_sublabel_and_cols(self):
+        html = render_stat_grid([("12.3", "Avg DLI", "mol/m²/day")], cols=4)
+        assert '<div class="stats-grid cols-4">' in html
+        assert '<div class="stat-value">12.3</div>' in html
+        assert "<small>Avg DLI</small>" in html
+        assert "<br><small>mol/m²/day</small>" in html
+
+    def test_prerendered_tile_passthrough_with_value_class(self):
+        tile = render_stat_tile("7", "Occlusion days", value_class="warning")
+        html = render_stat_grid([("1.0", "Median"), tile])
+        assert '<div class="stats-grid">' in html
+        assert tile in html
+        assert '<div class="stat-value warning">7</div>' in html
 
 
 class TestRenderPage:
