@@ -1,0 +1,43 @@
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    gap: 1rem;
+}
+.dashboard-card {
+    position: relative;
+}
+.dashboard-card .mini-chart {
+    height: 250px;
+    width: 100%;
+}
+.card-actions {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 1;
+}
+.card-actions .delete-btn {
+    padding: 0.1rem 0.4rem;
+    font-size: 1.2rem;
+    line-height: 1;
+}
+.card-title {
+    cursor: pointer;
+}
+.card-title::after {
+    content: ' \270E';
+    opacity: 0.3;
+    font-size: 0.8em;
+}
+.card-link {
+    display: block;
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+}
+.rename-input {
+    margin-bottom: 0.5rem;
+}
+[data-theme="dark"] .mini-chart {
+    filter: invert(0.88) hue-rotate(180deg);
+}

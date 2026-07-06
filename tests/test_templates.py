@@ -3,6 +3,8 @@
 from datetime import date, timedelta
 from unittest.mock import patch
 
+import pytest
+
 from wp6_data.shared.metadata import (
     DeviceMetadata,
     MetadataRegistry,
@@ -11,6 +13,7 @@ from wp6_data.shared.metadata import (
 )
 from wp6_data.shared.templates import (
     build_explore_tabs,
+    configure_dashboard,
     default_date_range,
     render_date_filter,
     render_explore_tabs,
@@ -18,6 +21,26 @@ from wp6_data.shared.templates import (
     render_unified_chart_page,
     resolve_date_range,
 )
+from wp6_data.shared.templates import config as templates_config
+
+
+@pytest.fixture(autouse=True)
+def _configured_dashboard():
+    """Give page renderers a dashboard identity, restored after each test."""
+    saved = (
+        templates_config._dashboard_id,
+        templates_config._dashboard_title,
+        templates_config._twin_theme_css,
+        templates_config._data_sources,
+    )
+    configure_dashboard("test")
+    yield
+    (
+        templates_config._dashboard_id,
+        templates_config._dashboard_title,
+        templates_config._twin_theme_css,
+        templates_config._data_sources,
+    ) = saved
 
 
 def _registry(
@@ -69,7 +92,7 @@ class TestResolveDateRange:
 
 
 class TestDefaultDateRange:
-    @patch("wp6_data.shared.templates.date")
+    @patch("wp6_data.shared.templates.components.date")
     def test_returns_7_day_window(self, mock_date):
         mock_date.today.return_value = date(2026, 3, 15)
         mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
@@ -101,7 +124,7 @@ class TestRenderDateFilter:
         assert 'value="2026-02-01"' in html
         assert 'value="2026-02-10"' in html
 
-    @patch("wp6_data.shared.templates.date")
+    @patch("wp6_data.shared.templates.components.date")
     def test_active_preset_7d(self, mock_date):
         today = date(2026, 3, 15)
         mock_date.today.return_value = today
@@ -111,7 +134,7 @@ class TestRenderDateFilter:
         # 7d button should have active style (contrast class)
         assert 'class="contrast" onclick="setRange(7)">7d</button>' in html
 
-    @patch("wp6_data.shared.templates.date")
+    @patch("wp6_data.shared.templates.components.date")
     def test_active_preset_all(self, mock_date):
         today = date(2026, 3, 15)
         mock_date.today.return_value = today
@@ -119,7 +142,7 @@ class TestRenderDateFilter:
         html = render_date_filter(date(2024, 1, 1), today)
         assert 'class="contrast" onclick="setRange(null)">All</button>' in html
 
-    @patch("wp6_data.shared.templates.date")
+    @patch("wp6_data.shared.templates.components.date")
     def test_no_active_preset_for_custom_range(self, mock_date):
         today = date(2026, 3, 15)
         mock_date.today.return_value = today
@@ -152,9 +175,14 @@ class TestRenderPage:
         assert "dashboard-nav" in html
         assert "theme-toggle" in html
 
-    def test_dashboard_identity_default(self):
+    def test_dashboard_identity_is_the_configured_one(self):
         html = render_page("T", "content")
-        assert 'data-dashboard="blue"' in html
+        assert 'data-dashboard="test"' in html
+
+    def test_render_without_configuration_fails_loud(self):
+        templates_config._dashboard_id = None
+        with pytest.raises(RuntimeError, match="configure_dashboard"):
+            render_page("T", "content")
 
     def test_footer_shown_by_default(self):
         html = render_page("T", "content")

@@ -20,16 +20,16 @@ BASE = "/api/series?device=herb-box-01&sensor=temp"
 @pytest.fixture(scope="module")
 def client():
     # Importing grey.dashboard runs create_app -> configure_dashboard, which
-    # mutates module globals in shared.templates (dashboard identity). Snapshot
-    # them first and restore on teardown so this module can't pollute others
-    # (e.g. test_templates asserts the default identity).
-    import wp6_data.shared.templates as tmpl
+    # mutates module globals in shared.templates.config (dashboard identity).
+    # Snapshot them first and restore on teardown so this module can't pollute
+    # others (e.g. test_templates asserts the configured identity).
+    from wp6_data.shared.templates import config as tmpl_config
 
     saved = (
-        tmpl._dashboard_id,
-        tmpl._dashboard_title,
-        tmpl._twin_theme_css,
-        tmpl._data_sources,
+        tmpl_config._dashboard_id,
+        tmpl_config._dashboard_title,
+        tmpl_config._twin_theme_css,
+        tmpl_config._data_sources,
     )
     from wp6_data.grey.dashboard import app
 
@@ -38,10 +38,10 @@ def client():
             yield c
     finally:
         (
-            tmpl._dashboard_id,
-            tmpl._dashboard_title,
-            tmpl._twin_theme_css,
-            tmpl._data_sources,
+            tmpl_config._dashboard_id,
+            tmpl_config._dashboard_title,
+            tmpl_config._twin_theme_css,
+            tmpl_config._data_sources,
         ) = saved
 
 
