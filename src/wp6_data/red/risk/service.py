@@ -13,6 +13,7 @@ from datetime import datetime
 from wp6_data.db.pool import get_pool
 from wp6_data.red import deps
 from wp6_data.red.db import wire_physical_id
+from wp6_data.red.multi_height.data import load_wire_readings
 from wp6_data.red.risk import store
 from wp6_data.red.risk.config import load_risk_thresholds
 from wp6_data.red.risk.engine import RiskEvaluation, evaluate
@@ -24,7 +25,7 @@ async def build_range(wire: str, start_utc: datetime, end_utc: datetime) -> Risk
     Replaces the window's episodes and refreshes the wire's state snapshot.
     Returns the evaluation (handy for logging/cron).
     """
-    df = await deps.db.get_wire_sensor_readings(start=start_utc, end=end_utc)
+    df = await load_wire_readings(start=start_utc, end=end_utc)
     if not df.empty:
         df = df[df["device"].map(wire_physical_id) == wire]
 

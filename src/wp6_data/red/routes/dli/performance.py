@@ -23,6 +23,7 @@ from wp6_data.red.dli import (
     predict_natural_dli_from_weather,
     try_infer_lamp_from_day,
 )
+from wp6_data.red.dli import data as dli_data
 from wp6_data.shared import render_date_filter, render_page, render_stat_grid, utc_day_bounds
 
 router = APIRouter()
@@ -35,7 +36,7 @@ async def dli_performance(
     end: Annotated[date | None, Query(description="End date")] = None,
 ) -> str:
     """Compare predicted DLI (model hindcast) with actual sensor readings."""
-    if not deps.db:
+    if not dli_data.is_connected():
         return render_page(PAGE_TITLE, "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
@@ -64,7 +65,7 @@ async def dli_performance(
 
     # Fetch actual PAR data for both sensors (include lamp_ref_day for seed)
     try:
-        par_df = await deps.db.get_par_readings(
+        par_df = await dli_data.get_par_readings(
             device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR], start=lamp_ref_dt, end=end_dt
         )
     except Exception as e:

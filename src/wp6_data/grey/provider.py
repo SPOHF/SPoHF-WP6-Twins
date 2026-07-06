@@ -99,9 +99,10 @@ class GreySensorProvider:
                 continue
             records.extend(_generate_readings(device, sensor, base, amp, start, end))
 
+        if not records:
+            # Contract: even an empty frame carries the documented columns.
+            return pd.DataFrame(columns=["device", "sensor", "time", "value"])
         df = pd.DataFrame(records)
-        if df.empty:
-            return df
         df["time"] = pd.to_datetime(df["time"], utc=True)
         if bucket is not None and agg is not None:
             # Synthetic backend has no SQL engine — use the shared fallback.

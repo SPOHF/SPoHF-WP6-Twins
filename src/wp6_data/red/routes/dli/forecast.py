@@ -24,6 +24,7 @@ from wp6_data.red.dli import (
     infer_lamp_schedule_hourly,
     predict_natural_dli_from_weather,
 )
+from wp6_data.red.dli import data as dli_data
 from wp6_data.shared import make_schedule_chart, render_page, render_stat_grid, utc_day_bounds
 from wp6_data.shared.time import display_tz
 
@@ -37,7 +38,7 @@ async def dli_forecast(
     end_date: Annotated[date | None, Query(description="End date")] = None,
 ) -> str:
     """Analyze light schedule with predictions based on inferred lamp schedule."""
-    if not deps.db:
+    if not dli_data.is_connected():
         return render_page(PAGE_TITLE, "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
@@ -63,7 +64,7 @@ async def dli_forecast(
     lamp_ref_start, lamp_ref_end = utc_day_bounds(lamp_ref_day)
 
     try:
-        lamp_ref_par_df = await deps.db.get_par_readings(
+        lamp_ref_par_df = await dli_data.get_par_readings(
             device_ids=[sensor], start=lamp_ref_start, end=lamp_ref_end
         )
     except Exception as e:
@@ -111,7 +112,7 @@ async def dli_forecast(
     _, range_end = utc_day_bounds(end_date)
 
     try:
-        par_df = await deps.db.get_par_readings(
+        par_df = await dli_data.get_par_readings(
             device_ids=[sensor], start=range_start, end=range_end
         )
     except Exception as e:
@@ -189,7 +190,7 @@ async def dli_forecast(
         yesterday_natural_dli = 0.0
         try:
             y_start, y_end = utc_day_bounds(yesterday)
-            y_par_df = await deps.db.get_par_readings(
+            y_par_df = await dli_data.get_par_readings(
                 device_ids=[sensor], start=y_start, end=y_end
             )
             if not y_par_df.empty:

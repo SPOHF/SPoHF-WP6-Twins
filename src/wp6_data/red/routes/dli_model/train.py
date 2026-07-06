@@ -16,6 +16,7 @@ from wp6_data.red.dli import (
     OpenMeteoClient,
     get_model,
 )
+from wp6_data.red.dli import data as dli_data
 from wp6_data.shared import render_page, render_stat_grid
 
 router = APIRouter()
@@ -77,7 +78,7 @@ PAGE_TITLE = "SPoHF Red - Train DLI Model"
 @router.post("/train", response_class=HTMLResponse)
 async def dli_model_train() -> str:
     """Train the two-stage light prediction model."""
-    if not deps.db:
+    if not dli_data.is_connected():
         return render_page(
             PAGE_TITLE,
             "<h1>Database not connected</h1>",
@@ -85,7 +86,7 @@ async def dli_model_train() -> str:
         )
 
     try:
-        stats = await train_model_from_db(deps.db, deps.get_weather_client())
+        stats = await train_model_from_db(dli_data.require_db(), deps.get_weather_client())
     except Exception as e:
         return render_page(
             PAGE_TITLE,

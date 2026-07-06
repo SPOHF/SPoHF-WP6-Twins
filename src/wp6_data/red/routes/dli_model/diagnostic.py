@@ -7,7 +7,6 @@ import plotly.graph_objects as go
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
-from wp6_data.red import deps
 from wp6_data.red.dli import (
     DEFAULT_TRAINING_START,
     NATURAL_LIGHT_SENSOR,
@@ -17,6 +16,7 @@ from wp6_data.red.dli import (
     get_model,
     subtract_lamp_from_sensor,
 )
+from wp6_data.red.dli import data as dli_data
 from wp6_data.shared import render_page, render_stat_grid, render_stat_tile
 
 router = APIRouter()
@@ -26,7 +26,7 @@ PAGE_TITLE = "SPoHF Red - DLI Model Diagnostic"
 @router.get("/diagnostic", response_class=HTMLResponse)
 async def dli_model_diagnostic() -> str:
     """Diagnostic view to investigate model training data."""
-    if not deps.db:
+    if not dli_data.is_connected():
         return render_page(
             PAGE_TITLE,
             "<h1>Database not connected</h1>",
@@ -44,13 +44,13 @@ async def dli_model_diagnostic() -> str:
 
     # Fetch sensor data (no weather API call needed)
     try:
-        indoor_df = await deps.db.get_par_readings(
+        indoor_df = await dli_data.get_par_readings(
             device_ids=[NATURAL_LIGHT_SENSOR], start=start_dt, end=end_dt
         )
-        plant_level_df = await deps.db.get_par_readings(
+        plant_level_df = await dli_data.get_par_readings(
             device_ids=[TOTAL_LIGHT_SENSOR], start=start_dt, end=end_dt
         )
-        outdoor_df = await deps.db.get_weather_station_readings(start=start_dt, end=end_dt)
+        outdoor_df = await dli_data.get_weather_station_readings(start=start_dt, end=end_dt)
     except Exception as e:
         return render_page(
             PAGE_TITLE,

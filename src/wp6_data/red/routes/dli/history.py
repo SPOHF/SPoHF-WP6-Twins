@@ -8,7 +8,6 @@ import plotly.graph_objects as go
 from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse
 
-from wp6_data.red import deps
 from wp6_data.red.dli import (
     NATURAL_LIGHT_SENSOR,
     TOTAL_LIGHT_SENSOR,
@@ -16,6 +15,7 @@ from wp6_data.red.dli import (
     calculate_dli_trendline,
     calculate_lamp_contribution,
 )
+from wp6_data.red.dli import data as dli_data
 from wp6_data.shared import (
     render_date_filter,
     render_page,
@@ -35,14 +35,14 @@ async def dli_history(
     end: Annotated[date | None, Query(description="End date")] = None,
 ) -> str:
     """DLI chart comparing natural light vs total light over time."""
-    if not deps.db:
+    if not dli_data.is_connected():
         return render_page(PAGE_TITLE, "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
     start, end, start_dt, end_dt = resolve_date_range(start, end)
 
     try:
-        par_df = await deps.db.get_par_readings(
+        par_df = await dli_data.get_par_readings(
             device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR], start=start_dt, end=end_dt
         )
     except Exception as e:

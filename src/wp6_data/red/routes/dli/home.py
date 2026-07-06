@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from wp6_data.red import deps
+from wp6_data.red.dli import data as dli_data
 from wp6_data.red.dli import get_model
 from wp6_data.shared import render_hub_card, render_hub_grid, render_page
 from wp6_data.shared.auth import is_admin
@@ -15,7 +15,7 @@ PAGE_TITLE = "SPoHF Red - DLI Dashboard"
 @router.get("/", response_class=HTMLResponse)
 async def dli_home(request: Request) -> str:
     """DLI dashboard overview page."""
-    if not deps.db:
+    if not dli_data.is_connected():
         return render_page(PAGE_TITLE, "<h1>Database not connected</h1>", show_back_link=True)
 
     # Get model status for the card
