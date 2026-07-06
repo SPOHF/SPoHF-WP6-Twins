@@ -12,18 +12,16 @@ PAGE_TITLE = "SPoHF Blue - Plant Monitor"
 
 @router.get("/", response_class=HTMLResponse)
 async def monitor_home() -> str:
-    """Plant Monitor hub — links to GDD, soil, light, and microclimate views."""
+    """Plant Monitor hub — links to soil, light, and microclimate views.
+
+    GDD is intentionally absent here: it's a top-level feature at ``/gdd``
+    (see ``blue.routes.gdd``), reached from its own home-page card.
+    """
     content = f"""
         <h1>Plant Monitor</h1>
         <p>Agronomic analytics for the SPoHF blueberry farm.</p>
 
         {render_hub_grid([
-            render_hub_card(
-                "GDD Tracker",
-                "Cumulative Growing Degree Days from biofix. Year-over-year "
-                "comparison with harvest threshold annotations.",
-                href="/sensor-monitor/gdd", label="View GDD",
-            ),
             render_hub_card(
                 "Soil Forecast",
                 "7-day and 30-day ridge regression forecasts for soil temperature "

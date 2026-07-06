@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 import pandas as pd
 import plotly.graph_objects as go
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from plotly.subplots import make_subplots
@@ -22,6 +22,7 @@ from wp6_data.blue.treatments import (
 )
 from wp6_data.config import Settings
 from wp6_data.shared import render_card, render_page
+from wp6_data.shared.auth import is_admin, verify_session_admin
 from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.twin import SensorDataProvider
 
@@ -45,7 +46,16 @@ _RECENT_DAYS = 30  # days of history needed for lag features
 _DEFAULT_TREATMENT = "Std"
 
 _settings = Settings()
-_MODELS_DIR = Path(_settings.blue_export_dir) / "models"
+# Models live on ephemeral container storage (default: home dir), mirroring
+# red's DLI model: a restart wipes them and the dashboard retrains on boot (see
+# bootstrap_models_if_missing) rather than persisting to a PVC. Deliberately
+# NOT under blue_export_dir — that PVC is the nightly CSV export, mounted
+# read-only in the dashboard. Override the location with WP6_BLUE_MODEL_DIR.
+_MODELS_DIR = (
+    Path(_settings.blue_model_dir)
+    if _settings.blue_model_dir
+    else Path.home() / ".wp6" / "blue-models"
+)
 
 FORECAST_CSS = """
     .stats-grid { display: flex; gap: 0.5rem; flex-wrap: wrap; }
@@ -282,6 +292,7 @@ def _build_forecast_chart(
 
 @router.get("/soil/forecast", response_class=HTMLResponse)
 async def soil_forecast(
+    request: Request,
     provider: Annotated[SensorDataProvider, Depends(get_provider)],
     treatments: Annotated[
         list[str] | None, Query(description="Treatments to overlay on the chart"),
@@ -291,13 +302,16 @@ async def soil_forecast(
 ) -> str:
     """Daily soil temperature and moisture forecast (day+1..7) per treatment."""
     status_banner = _status_banner_html(trained, msg)
+    # Retraining is admin-only (see the POST route). Hide the Update button from
+    # non-admins so the action isn't exposed — mirrors red's DLI model card.
+    update_button = _update_button_html() if is_admin(request) else ""
     pkl_paths = _scan_models()
 
     if not pkl_paths:
         content = f"""
             <h1>Soil Forecast</h1>
             {status_banner}
-            {_update_button_html()}
+            {update_button}
             <article>
               <p>No forecast models found in <code>{_MODELS_DIR}</code> yet.</p>
             </article>
@@ -372,7 +386,7 @@ async def soil_forecast(
     content = f"""
         <h1>Soil Forecast</h1>
         {status_banner}
-        {_update_button_html()}
+        {update_button}
         <p style="font-size:0.8rem;opacity:0.7;margin-top:-0.5rem">
             Ridge regression per treatment &mdash; generated {generated_at}
             &mdash; {last_trained}
@@ -394,11 +408,64 @@ async def soil_forecast(
     )
 
 
-@router.post("/soil/forecast/train")
+async def _train_from_readings(readings: pd.DataFrame) -> dict:
+    """Map devices→treatments and fit+save every (sensor, treatment) model.
+
+    Shared by the admin Update route and the startup bootstrap so both prepare
+    and write models identically. Returns the {(sensor, treatment):
+    SoilForecaster} map (empty if no treatment had enough growing-season data).
+    """
+    treatment_map = load_device_treatment_map()
+    df = readings.copy()
+    df["treatment"] = df["device"].map(treatment_map)
+    df = df.dropna(subset=["treatment"])
+    train_df = df.rename(columns={"time": "timestamp", "sensor": "sensor_type"})
+    # train_all_forecasters is CPU-bound (numpy) — run it off the event loop so
+    # a retrain doesn't block every other request while it fits.
+    return await run_in_threadpool(
+        train_all_forecasters, train_df, output_dir=str(_MODELS_DIR),
+    )
+
+
+async def bootstrap_models_if_missing(provider: SensorDataProvider) -> None:
+    """Train soil models on startup when none exist on disk.
+
+    Models live on ephemeral container storage (see `_MODELS_DIR`), so a restart
+    wipes them. Mirroring red's DLI model, the dashboard retrains on boot from
+    the DB rather than persisting to a PVC. No-op when models are already present
+    or a manual retrain is already running. Never raises — a failure here must
+    not take down startup; the admin Update button remains a fallback.
+    """
+    if _scan_models():
+        logger.info("Soil forecast: models already on disk, skipping boot training")
+        return
+    if _training_lock.locked():
+        return
+    async with _training_lock:
+        try:
+            df = await provider.fetch_data(sensor_tags=_FORECAST_SENSORS)
+            if df.empty:
+                logger.warning("Soil forecast boot training: no sensor data available")
+                return
+            forecasters = await _train_from_readings(df)
+            logger.info(
+                "Soil forecast boot training: %d model(s) trained", len(forecasters),
+            )
+        except Exception:
+            logger.exception("Soil forecast boot training failed")
+
+
+@router.post(
+    "/soil/forecast/train",
+    dependencies=[Depends(verify_session_admin)],
+)
 async def soil_forecast_train(
     provider: Annotated[SensorDataProvider, Depends(get_provider)],
 ) -> RedirectResponse:
     """Fit (or refit) every (sensor, treatment) soil forecast model.
+
+    Admin-only (see the router dependency): retraining rewrites the on-disk
+    models and hits the DB, so it's gated like red's DLI model train route.
 
     Fetches all available soil temperature/moisture history — no date range —
     since `train_all_forecasters` itself restricts training to growing-season
@@ -426,18 +493,8 @@ async def soil_forecast_train(
         if df.empty:
             return _failed("No soil sensor data available.")
 
-        treatment_map = load_device_treatment_map()
-        df = df.copy()
-        df["treatment"] = df["device"].map(treatment_map)
-        df = df.dropna(subset=["treatment"])
-        train_df = df.rename(columns={"time": "timestamp", "sensor": "sensor_type"})
-
-        # train_all_forecasters is CPU-bound (numpy) — run it off the event loop
-        # so a retrain doesn't block every other request while it fits.
         try:
-            forecasters = await run_in_threadpool(
-                train_all_forecasters, train_df, output_dir=str(_MODELS_DIR),
-            )
+            forecasters = await _train_from_readings(df)
         except Exception:
             logger.exception("Soil forecast training: model fitting failed")
             return _failed("Model training failed unexpectedly.")

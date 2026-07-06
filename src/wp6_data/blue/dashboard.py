@@ -1,5 +1,6 @@
 """WP6 Blue Dashboard - TimescaleDB-backed sensor visualization."""
 
+import asyncio
 from pathlib import Path
 
 from wp6_data.blue import deps
@@ -8,12 +9,14 @@ from wp6_data.blue.explore import render_fertilization_strategies_tab
 from wp6_data.blue.provider import BlueSensorProvider
 from wp6_data.blue.routes import api as blue_api
 from wp6_data.blue.routes import charts as blue_charts
+from wp6_data.blue.routes import gdd as gdd_route
 from wp6_data.blue.routes import ops
 from wp6_data.blue.routes.monitor import broken_sensors as broken_sensors_monitor
 from wp6_data.blue.routes.monitor import legacy_router as legacy_monitor_router
 from wp6_data.blue.routes.monitor import manual as manual_monitor
 from wp6_data.blue.routes.monitor import mixed_views as mixed_views_monitor
 from wp6_data.blue.routes.monitor import router as monitor_router
+from wp6_data.blue.routes.monitor import soil_forecast
 from wp6_data.config import Settings
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
@@ -25,7 +28,7 @@ settings = Settings()
 def _gdd_card() -> str:
     return render_card(
         "GDD Tracker",
-        '<a href="/sensor-monitor/gdd" role="button">GDD Dashboard</a>',
+        '<a href="/gdd" role="button">GDD Dashboard</a>',
         description=(
             "Growing Degree Days — track cumulative heat for harvest "
             "prediction."
@@ -55,8 +58,22 @@ def _monitor_card() -> str:
 YOOKR_PROJECT = "yookr-direct"
 
 
+# Holds the background boot-training task so it isn't garbage-collected before
+# it runs to completion.
+_bootstrap_task: asyncio.Task | None = None
+
+
 async def _startup() -> None:
     await deps.init_db(settings.tsdb_url)
+    # Soil-forecast models live on ephemeral storage (see soil_forecast
+    # ._MODELS_DIR), so a restart wipes them. Retrain on boot if missing —
+    # mirrors red's DLI model. Backgrounded so a slow first fit can't delay
+    # readiness; the admin Update button shares the same lock, so a manual
+    # retrain won't collide with this one.
+    global _bootstrap_task
+    _bootstrap_task = asyncio.create_task(
+        soil_forecast.bootstrap_models_if_missing(config.default_provider),
+    )
 
 
 async def _shutdown() -> None:
@@ -91,6 +108,7 @@ config = TwinConfig(
         ops.router,
         blue_api.router,
         blue_charts.router,
+        gdd_route.router,
         monitor_router,
         legacy_monitor_router,
         manual_monitor.router,

@@ -11,7 +11,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-import wp6_data.blue.routes.monitor.gdd as gdd_route
+import wp6_data.blue.routes.gdd as gdd_route
 
 pytestmark = pytest.mark.e2e
 
@@ -49,7 +49,7 @@ async def test_gdd_page_uses_openmeteo_and_hides_source_toggle(monkeypatch):
     async with app.router.lifespan_context(app), httpx.AsyncClient(
         transport=transport, base_url="http://test", follow_redirects=True,
     ) as client:
-        resp = await client.get("/monitor/gdd")
+        resp = await client.get("/gdd")
 
     assert resp.status_code == 200
     body = resp.text

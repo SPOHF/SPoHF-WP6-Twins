@@ -1,11 +1,16 @@
-"""GET /monitor/gdd — Growing Degree Day tracker for blueberry harvest prediction."""
+"""GET /gdd — Growing Degree Day tracker for blueberry harvest prediction.
+
+A top-level blue feature (surfaced by its own home-page card), not a Plant
+Monitor sub-page — hence it lives outside ``routes/monitor/`` and self-guards
+auth rather than inheriting it from the monitor router.
+"""
 
 from datetime import date, timedelta
 from typing import Annotated
 
 import plotly.graph_objects as go
 import structlog
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 
 from wp6_data.blue.gdd import (
@@ -18,10 +23,11 @@ from wp6_data.blue.gdd import (
 )
 from wp6_data.config import Settings
 from wp6_data.shared import render_card, render_page
+from wp6_data.shared.auth import verify_session_user
 
 log = structlog.get_logger()
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 settings = Settings()
 
@@ -132,7 +138,7 @@ async def gdd_tracker(
     except Exception as e:
         return render_page(
             PAGE_TITLE, f"<h1>Error: {e}</h1>",
-            show_back_link=True, back_url="/sensor-monitor",
+            show_back_link=True, back_url="/",
             show_source_indicator=False)
 
     if df.empty:
@@ -140,7 +146,7 @@ async def gdd_tracker(
             PAGE_TITLE,
             "<h1>GDD Tracker</h1>"
             "<p>No weather data available from OpenMeteo.</p>",
-            show_back_link=True, back_url="/sensor-monitor", extra_css=GDD_CSS,
+            show_back_link=True, back_url="/", extra_css=GDD_CSS,
             show_source_indicator=False)
 
     # Calculate daily GDD for ALL data
@@ -291,7 +297,7 @@ async def gdd_tracker(
 
     return render_page(
         PAGE_TITLE, content,
-        show_back_link=True, back_url="/sensor-monitor", extra_css=GDD_CSS,
+        show_back_link=True, back_url="/", extra_css=GDD_CSS,
         show_source_indicator=False)
 
 
@@ -311,7 +317,7 @@ def _year_toggle_html(
             f"&biofix_day={biofix_md[1]}"
         )
         buttons.append(
-            f'<a href="/sensor-monitor/gdd{params}" class="year-btn {active}">'
+            f'<a href="/gdd{params}" class="year-btn {active}">'
             f'{y}</a>')
 
     return f'<div class="year-toggle">{"".join(buttons)}</div>'
