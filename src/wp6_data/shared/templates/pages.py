@@ -6,15 +6,11 @@ from datetime import date
 
 from wp6_data.shared.templates import config
 from wp6_data.shared.templates.assets import (
-    BASE_CSS,
     DASHBOARD_CSS,
-    DASHBOARD_JS,
     EXPLORE_TABS_JS,
-    SAVE_TO_DASHBOARD_JS,
-    TABLE_SORT_JS,
     THEME_JS,
     TOGGLE_JS,
-    UNIFIED_CHART_JS,
+    asset_url,
 )
 from wp6_data.shared.templates.components import render_date_filter
 
@@ -154,8 +150,8 @@ def render_page(
         <link rel="stylesheet"
               href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css">
         <script>{THEME_JS}</script>
+        <link rel="stylesheet" href="{asset_url('base.css')}">
         <style>
-            {BASE_CSS}
             {config._twin_theme_css}
             {extra_css}
         </style>
@@ -169,7 +165,7 @@ def render_page(
         </main>
         <script>{TOGGLE_JS}</script>
         <script>{_source_toggle_js()}</script>
-        <script>{TABLE_SORT_JS}</script>
+        <script src="{asset_url('table_sort.js')}"></script>
         <script>{EXPLORE_TABS_JS}</script>
     </body>
     </html>
@@ -421,8 +417,8 @@ to {end.isoformat()}</summary>
     </dialog>
     </div>
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-    <script>{UNIFIED_CHART_JS}</script>
-    <script>{SAVE_TO_DASHBOARD_JS}</script>
+    <script src="{asset_url('unified_chart.js')}"></script>
+    <script src="{asset_url('save_to_dashboard.js')}"></script>
     """
 
     title = f"{title_prefix} — Chart"
@@ -454,7 +450,7 @@ def render_dashboard_page(
         the save button to bookmark views here.</p>
     <div class="dashboard-grid" id="dashboard-grid"></div>
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-    <script>{DASHBOARD_JS}</script>
+    <script src="{asset_url('dashboard.js')}"></script>
     """
     return render_page(
         f"{title_prefix} — Dashboard",
