@@ -14,6 +14,23 @@ from wp6_data.shared.templates.assets import (
 )
 from wp6_data.shared.templates.components import render_date_filter
 
+# Inline SVGs for the footer reference links. currentColor lets them inherit the
+# theme text colour and flip in dark mode; the anchor carries the a11y label.
+CODE_ICON_SVG = (
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none"'
+    ' stroke="currentColor" stroke-width="2" stroke-linecap="round"'
+    ' stroke-linejoin="round" aria-hidden="true">'
+    '<polyline points="16 18 22 12 16 6"/>'
+    '<polyline points="8 6 2 12 8 18"/></svg>'
+)
+DOCS_ICON_SVG = (
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none"'
+    ' stroke="currentColor" stroke-width="2" stroke-linecap="round"'
+    ' stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>'
+    '<path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>'
+)
+
 
 def _render_source_indicator(active_source: str | None) -> str:
     """Render a data-source indicator in the nav bar.
@@ -135,8 +152,27 @@ def render_page(
         else ""
     )
 
+    footer_links = []
+    if config._source_url:
+        footer_links.append(
+            f'<a href="{config._source_url}" target="_blank" rel="noopener"'
+            f' class="footer-icon" aria-label="Source code" title="Source code">'
+            f"{CODE_ICON_SVG}</a>",
+        )
+    if config._docs_url:
+        footer_links.append(
+            f'<a href="{config._docs_url}" target="_blank" rel="noopener"'
+            f' class="footer-icon" aria-label="Documentation" title="Documentation">'
+            f"{DOCS_ICON_SVG}</a>",
+        )
+    links_html = (
+        f'<div class="footer-links">{"".join(footer_links)}</div>'
+        if footer_links
+        else ""
+    )
     footer_html = (
-        '<footer><img src="/static/interreg.png" alt="Interreg" class="footer-logo"></footer>'
+        '<footer><img src="/static/interreg.png" alt="Interreg" class="footer-logo">'
+        f"{links_html}</footer>"
         if show_footer
         else ""
     )

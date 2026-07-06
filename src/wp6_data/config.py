@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # Display
     display_timezone: str = "Europe/Amsterdam"
 
+    # External reference links shown in the footer (same for all twins).
+    # Override per-deployment with WP6_DOCS_URL / WP6_SOURCE_URL; empty = hidden.
+    docs_url: str = "https://spohf.github.io/SPoHF-WP6-Twins/"
+    source_url: str = "https://github.com/SPOHF/SPoHF-WP6-Twins"
+
     # Logging
     log_level: str = "INFO"
     log_format: str = "json"  # "json" or "console"

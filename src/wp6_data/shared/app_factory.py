@@ -49,11 +49,16 @@ def _make_provider_dependency(config: TwinConfig):
 
 def create_app(config: TwinConfig) -> FastAPI:
     """Build a complete sensor dashboard app from configuration."""
+    from wp6_data.config import Settings
+
+    settings = Settings()
     configure_dashboard(
         config.twin_id,
         title=config.title,
         theme=config.theme,
         data_sources=config.data_sources,
+        docs_url=settings.docs_url,
+        source_url=settings.source_url,
     )
 
     @asynccontextmanager

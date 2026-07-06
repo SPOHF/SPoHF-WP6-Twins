@@ -231,9 +231,16 @@
     footer {
         margin-top: 40px; padding-top: 20px;
         border-top: 1px solid var(--pico-muted-border-color);
+        display: flex; align-items: center; justify-content: space-between; gap: 16px;
     }
     .footer-logo { max-height: 60px; transition: opacity 0.15s ease; }
     .footer-logo:hover { opacity: 0.7; }
+    .footer-links { display: flex; align-items: center; gap: 14px; }
+    .footer-icon {
+        display: inline-flex; color: var(--pico-muted-color);
+        transition: color 0.15s ease, transform 0.15s ease;
+    }
+    .footer-icon:hover { color: var(--dashboard-primary); transform: translateY(-1px); }
 
     /* --- Collapsible date filter --- */
     .date-filter-collapsible {

@@ -18,6 +18,8 @@ _dashboard_id: str | None = None
 _dashboard_title = "SPoHF"
 _twin_theme_css = ""
 _data_sources: list[DataSource] = []
+_docs_url = ""
+_source_url = ""
 _current_user: ContextVar[str | None] = ContextVar("_current_user", default=None)
 
 
@@ -46,12 +48,17 @@ def configure_dashboard(
     title: str = "SPoHF",
     theme: ThemeColors | None = None,
     data_sources: list[DataSource] | None = None,
+    docs_url: str = "",
+    source_url: str = "",
 ) -> None:
     """Set the dashboard identity and theme. Call once at startup."""
     global _dashboard_id, _dashboard_title, _twin_theme_css, _data_sources
+    global _docs_url, _source_url
     _dashboard_id = dashboard_id
     _dashboard_title = title
     _data_sources = data_sources or []
+    _docs_url = docs_url
+    _source_url = source_url
     if theme is not None:
         _twin_theme_css = _generate_twin_css(dashboard_id, theme)
 
