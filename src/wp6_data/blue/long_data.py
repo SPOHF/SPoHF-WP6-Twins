@@ -26,6 +26,7 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
+from wp6_data.blue.treatments import LONG_DATA_TREATMENT_MAP as TREATMENT_MAP
 from wp6_data.shared.manual_ingest import (
     ManualParseError,
     ManualSource,
@@ -37,22 +38,6 @@ from wp6_data.shared.manual_ingest.parsing import build_report
 
 # Categorical value written to blue's manual-ingest `readings` column.
 SOURCE = "long_data"
-
-# Source treatment labels (2024 English, 2025 Dutch/codes) → canonical code,
-# reused from the automated sensors' `position` vocabulary. The four 2025
-# phenological-stage regimes pass through unchanged (V_=vegetative stage,
-# G_=generative stage); they are first-class treatments, not Ca/K variants.
-TREATMENT_MAP: dict[str, str] = {
-    "Organic 1": "Org1", "Organisch-1": "Org1",
-    "Organic 2": "Org2", "Organisch-2": "Org2",
-    "Standard": "Std", "Standaard": "Std",
-    "Calcium": "Ca", "Ca": "Ca",
-    "Kalium": "K", "K": "K",
-    "G_K": "G_K",
-    "V_CA": "V_CA",
-    "V_CA_G_BrPK": "V_CA_G_BrPK",
-    "V_K_G_CaBrP": "V_K_G_CaBrP",
-}
 
 # Source measure labels (`Meting`) → canonical sensor_tag. Fresh vs
 # after-storage are distinct tags; 2025's single Brix/Firmness map to the fresh
@@ -76,6 +61,39 @@ MEASURE_MAP: dict[str, str] = {
     "Score": "score",
     "Budscore": "budscore",
     "Flowering score": "flowering_score",
+}
+
+# Display names and units per canonical sensor_tag, for chart axes and tables.
+MEASURE_LABELS: dict[str, str] = {
+    "shoot_length": "Shoot length",
+    "brix": "Brix",
+    "brix_after_storage": "Brix (after storage)",
+    "firmness": "Firmness",
+    "firmness_after_storage": "Firmness (after storage)",
+    "berry_weight": "Berry weight",
+    "berry_weight_after_storage": "Berry weight (after storage)",
+    "sample_weight_before_storage": "Sample weight (before storage)",
+    "sample_weight_after_storage": "Sample weight (after storage)",
+    "yield_per_plant": "Yield per plant",
+    "score": "Score",
+    "budscore": "Bud score",
+    "flowering_score": "Flowering score",
+}
+
+MEASURE_UNITS: dict[str, str] = {
+    "shoot_length": "cm",
+    "brix": "deg Brix",
+    "brix_after_storage": "deg Brix",
+    "firmness": "relative units",
+    "firmness_after_storage": "relative units",
+    "berry_weight": "g",
+    "berry_weight_after_storage": "g",
+    "sample_weight_before_storage": "g",
+    "sample_weight_after_storage": "g",
+    "yield_per_plant": "g/plant",
+    "score": "score",
+    "budscore": "score",
+    "flowering_score": "score",
 }
 
 # Cumulative/derived measures we deliberately do not store (silently dropped,

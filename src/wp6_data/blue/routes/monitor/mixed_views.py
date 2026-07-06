@@ -10,13 +10,20 @@ import pandas as pd
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
-from wp6_data.blue.long_data import MEASURE_MAP
-from wp6_data.blue.long_data import TREATMENT_MAP as _LONG_DATA_TREATMENT_MAP
-from wp6_data.blue.routes.monitor._treatment import load_device_treatment_map
-from wp6_data.blue.routes.monitor.manual import (
+from wp6_data.blue.long_data import (
     MEASURE_LABELS,
+    MEASURE_MAP,
     MEASURE_UNITS,
-    render_correlation_explanation,
+)
+from wp6_data.blue.routes.monitor.manual import render_correlation_explanation
+from wp6_data.blue.treatments import (
+    FERTILIZER_XLSX_TREATMENT_MAP as _XLSX_TREATMENT_MAP,
+)
+from wp6_data.blue.treatments import (
+    LONG_DATA_TREATMENT_MAP as _LONG_DATA_TREATMENT_MAP,
+)
+from wp6_data.blue.treatments import (
+    load_device_treatment_map,
 )
 from wp6_data.shared import render_hub_card, render_hub_grid, render_page
 from wp6_data.shared.auth import verify_session_user
@@ -58,18 +65,6 @@ _NUTRIENT_LABELS: dict[str, str] = {
     "MgO": "MgO (kg/ha)",
     "CaO": "CaO (kg/ha)",
     "Br": "Br (kg/ha)",
-}
-
-_XLSX_TREATMENT_MAP: dict[str, str] = {
-    "DCM (Org-1)": "Org1",
-    "Den Ouden (Org-2)": "Org2",
-    "Standaard (3rijen)": "Std",
-    "V_Ca": "V_CA",
-    "Ca": "Ca",
-    "V_Ca_GBrPK": "V_CA_G_BrPK",
-    "G_K": "G_K",
-    "K": "K",
-    "V_K_G_CaBrP": "V_K_G_CaBrP",
 }
 
 _MIN_TREATMENT_OVERLAP = 4  # Spearman ρ is unreliable below n=4 paired observations

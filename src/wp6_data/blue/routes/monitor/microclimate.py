@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 from plotly.subplots import make_subplots
 
-from wp6_data.blue.routes.monitor._treatment import (
+from wp6_data.blue.treatments import (
     load_device_treatment_map,
     treatment_color,
 )

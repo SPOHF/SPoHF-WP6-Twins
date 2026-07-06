@@ -15,11 +15,11 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from plotly.subplots import make_subplots
 
-from wp6_data.blue.routes.monitor._treatment import (
+from wp6_data.blue.soil_forecaster import SoilForecaster, train_all_forecasters
+from wp6_data.blue.treatments import (
     load_device_treatment_map,
     treatment_color,
 )
-from wp6_data.blue.soil_forecaster import SoilForecaster, train_all_forecasters
 from wp6_data.config import Settings
 from wp6_data.shared import render_card, render_page
 from wp6_data.shared.routes.deps import get_provider

@@ -12,7 +12,7 @@ from wp6_data.blue.fertigation import (
     load_fertigation_event_days,
     resolve_fertigation_csv_path,
 )
-from wp6_data.blue.routes.monitor._treatment import (
+from wp6_data.blue.treatments import (
     load_device_treatment_map,
     treatment_color,
 )

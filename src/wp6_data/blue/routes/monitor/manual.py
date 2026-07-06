@@ -8,9 +8,18 @@ import plotly.graph_objects as go
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
-from wp6_data.blue.long_data import MEASURE_MAP
-from wp6_data.blue.long_data import TREATMENT_MAP as _LONG_DATA_TREATMENT_MAP
-from wp6_data.blue.routes.monitor._treatment import treatment_color
+from wp6_data.blue.long_data import (
+    MEASURE_LABELS,
+    MEASURE_MAP,
+    MEASURE_UNITS,
+)
+from wp6_data.blue.treatments import (
+    LONG_DATA_TREATMENT_MAP as _LONG_DATA_TREATMENT_MAP,
+)
+from wp6_data.blue.treatments import (
+    TREATMENT_ORDER,
+    treatment_color,
+)
 from wp6_data.shared import render_hub_card, render_hub_grid, render_page
 from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.routes.deps import get_provider
@@ -57,50 +66,6 @@ _CORR_2025_MEASURE_ORDER: tuple[str, ...] = (
     "budscore",
     "flowering_score",
 )
-
-MEASURE_LABELS: dict[str, str] = {
-    "shoot_length": "Shoot length",
-    "brix": "Brix",
-    "brix_after_storage": "Brix (after storage)",
-    "firmness": "Firmness",
-    "firmness_after_storage": "Firmness (after storage)",
-    "berry_weight": "Berry weight",
-    "berry_weight_after_storage": "Berry weight (after storage)",
-    "sample_weight_before_storage": "Sample weight (before storage)",
-    "sample_weight_after_storage": "Sample weight (after storage)",
-    "yield_per_plant": "Yield per plant",
-    "score": "Score",
-    "budscore": "Bud score",
-    "flowering_score": "Flowering score",
-}
-
-MEASURE_UNITS: dict[str, str] = {
-    "shoot_length": "cm",
-    "brix": "deg Brix",
-    "brix_after_storage": "deg Brix",
-    "firmness": "relative units",
-    "firmness_after_storage": "relative units",
-    "berry_weight": "g",
-    "berry_weight_after_storage": "g",
-    "sample_weight_before_storage": "g",
-    "sample_weight_after_storage": "g",
-    "yield_per_plant": "g/plant",
-    "score": "score",
-    "budscore": "score",
-    "flowering_score": "score",
-}
-
-# Comparable fertilizer strategies kept adjacent for easy visual comparison.
-# The 2025 sub-strategy codes (V_CA, G_K, …) are the canonical device names as
-# stored in the DB by long_data ingest; they are not the same as Ca1/K1 etc.
-TREATMENT_ORDER: tuple[str, ...] = (
-    "Std",
-    "Org1", "Org2",
-    "Ca", "K",
-    "V_CA", "G_K",
-    "V_CA_G_BrPK", "V_K_G_CaBrP",
-)
-
 
 @router.get("/manual-monitor", response_class=HTMLResponse)
 async def manual_home() -> str:

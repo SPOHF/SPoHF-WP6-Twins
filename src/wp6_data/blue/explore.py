@@ -1,12 +1,10 @@
 """Blue-twin Explore card extensions."""
 
-from wp6_data.blue.routes.monitor._treatment import TREATMENT_COLORS
-
-_FALLBACK = "#94a3b8"
+from wp6_data.blue.treatments import treatment_color
 
 
 def _badge(code: str) -> str:
-    color = TREATMENT_COLORS.get(code, _FALLBACK)
+    color = treatment_color(code)
     return (
         f'<span style="display:inline-block;width:10px;height:10px;'
         f'border-radius:50%;background:{color};margin-right:6px;'
