@@ -1,13 +1,8 @@
 import html
-import re
-import xml.etree.ElementTree as ET
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 from typing import Annotated
-from zoneinfo import ZoneInfo
 
 import pandas as pd  # type: ignore[import-untyped]
-import plotly.graph_objects as go  # type: ignore[import-untyped]
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -22,26 +17,47 @@ from ..db import (
     WIRE_SENSOR_HEIGHTS,
     WIRE_SENSOR_MEASUREMENTS,
     wire_device_id,
-    wire_physical_id,
 )
+from ..multi_height.assets import CROP_CLIMATE_JS, CROP_CLIMATE_STYLE
+from ..multi_height.cells import (
+    CROP_ROW_HEIGHT,
+    DERIVED_COLUMNS,
+    DERIVED_HEADER_ACCENTS,
+    MEASUREMENT_COLORS,
+    PLANT_SVG_PATH,
+    WIRE_MEASUREMENT_LABELS,
+    admin_build_panel,
+    audit_table,
+    fmt_local,
+    fungal_cell_from_values,
+    height_dli_cell_from_values,
+    measurement_cell,
+    pill_row,
+    plant_zone_cell,
+    section_label_cell,
+    vpd_cell_from_values,
+)
+from ..multi_height.charts import (
+    detail_chart,
+    make_cumulative_dli_plot,
+    make_mh_greenhouse_plot,
+    make_wire_measurement_plot,
+    risk_gantt,
+)
+from ..multi_height.data import (
+    compute_sensor_metrics,
+    day_window_utc,
+    filter_for_day,
+    latest_wire_date,
+    load_wire_readings,
+    load_wire_sensor_data,
+    wire_ids,
+)
+from ..multi_height.svg import SVG_LAYOUT_PATH, parse_svg
+from ..multi_height.view_model import assemble_crop_climate_day
 from ..risk import service, store
 from ..risk.config import load_risk_thresholds
-from ..risk.metrics import (
-    compute_cumulative_dli,
-    compute_dli,
-    vpd_series,
-    wet_hours_series,
-)
-from ..utils import (
-    PAR_COLORSCALE,
-    svg_rect_to_plotly_rect,
-    svg_to_data_uri,
-    value_to_color,
-)
-
-SVG_BACKGROUND_PATH = Path(__file__).parent.parent / "static/greenhouse.svg"
-SVG_LAYOUT_PATH = Path(__file__).parent.parent / "static/multi_height.svg"
-USE_LATEST_DATE_IN_DATA = False
+from ..utils import svg_to_data_uri
 
 router = APIRouter(dependencies=[Depends(verify_session_user)])
 
@@ -98,42 +114,6 @@ async def multi_height_landing(
         config.title,
         content,
         data_source=provider.data_source_label,
-    )
-
-
-def wire_ids() -> list[str]:
-    """Physical wire ids declared in metadata (devices typed 'wire'), sorted."""
-    ids = {
-        wire_physical_id(device_id)
-        for device_id, meta in deps.metadata.devices.items()
-        if meta.type == "wire"
-    }
-    return sorted(ids)
-
-
-def _pill_row(base_path, param, choices, active, preserve, label):
-    """A labelled segmented toggle that swaps ``param`` (preserving other params).
-
-    Reuses the shared ``.group-toggle`` / ``.group-btn`` styling from the chart
-    page; each segment is a navigation link. ``choices`` is a list of
-    ``(value, text)``; ``preserve`` a dict of other query params (falsy dropped);
-    ``label`` is the row caption (e.g. "Device").
-    """
-    qs = "".join(f"&amp;{key}={val}" for key, val in preserve.items() if val)
-    segments = []
-    for value, text in choices:
-        cls = "group-btn active" if value == active else "group-btn"
-        segments.append(
-            f'<a class="{cls}" style="text-decoration:none;" '
-            f'href="{base_path}?{param}={value}{qs}">{text}</a>'
-        )
-    return (
-        '<div style="display:flex;align-items:center;gap:0.75rem;'
-        'margin-bottom:0.5rem;flex-wrap:wrap;">'
-        f'<span style="font-weight:600;min-width:6rem;">{label}:</span>'
-        '<div class="group-toggle" style="width:fit-content;">'
-        + "".join(segments)
-        + "</div></div>"
     )
 
 
@@ -256,12 +236,12 @@ async def single_simple_page(
 
     base = "/multi_height/single-simple"
     date_str = day.isoformat() if day else None
-    wire_pills = _pill_row(
+    wire_pills = pill_row(
         base, "wire", [(w, w) for w in wires], wire,
         {"measurement": measurement, "date": date_str},
         label="Device",
     )
-    measurement_pills = _pill_row(
+    measurement_pills = pill_row(
         base, "measurement",
         [(m, deps.metadata.sensor_default(m).alias or m) for m in WIRE_SENSOR_MEASUREMENTS],
         measurement,
@@ -298,76 +278,6 @@ async def single_simple_page(
         content,
         data_source=provider.data_source_label,
     )
-
-### Wire Sensor Trends ###
-# One trace colour per height, shared across all four charts so a given height
-# reads as the same colour everywhere. Five colours for the five heights.
-WIRE_HEIGHT_COLORS = ["#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#10b981"]
-
-# Display name + unit per measurement type, keyed by the db measurement key.
-WIRE_MEASUREMENT_LABELS = {
-    "par": ("PAR", "µmol/m²/s"),
-    "temp": ("Temperature", "°C"),
-    "hum": ("Humidity", "%RH"),
-    "co2": ("CO₂", "ppm"),
-}
-
-
-async def load_wire_sensor_data(start, end):
-    """Tidy long wire-sensor readings for a UTC window: time, height, measurement, value."""
-    df = await deps.db.get_wire_sensor_readings(start=start, end=end)
-
-    if df.empty:
-        return df
-
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
-    return df.dropna(subset=["time", "value"])
-
-
-def make_wire_measurement_plot(df, measurement, timezone):
-    """Line chart for one measurement type, one line per height."""
-    label, unit = WIRE_MEASUREMENT_LABELS[measurement]
-    data = df[df["measurement"] == measurement] if not df.empty else df
-
-    fig = go.Figure()
-
-    for height in WIRE_SENSOR_HEIGHTS:
-        d = data[data["height"] == height].sort_values("time") if not data.empty else data
-
-        if d.empty:
-            continue
-
-        color = WIRE_HEIGHT_COLORS[(height - 1) % len(WIRE_HEIGHT_COLORS)]
-
-        fig.add_trace(
-            go.Scatter(
-                # Convert UTC → local wall-clock so the axis matches the picker
-                x=d["time"].dt.tz_convert(timezone).dt.tz_localize(None),
-                y=d["value"],
-                name=f"Height {height}",
-                mode="lines",
-                connectgaps=False,
-                line=dict(color=color, width=2),
-                hovertemplate=(
-                    f"<b>Height {height}</b><br>%{{x|%Y-%m-%d %H:%M}}<br>"
-                    f"{label}: %{{y:.2f}} {unit}<extra></extra>"
-                ),
-            )
-        )
-
-    fig.update_layout(
-        template="plotly_white",
-        height=360,
-        hovermode="x unified",
-        xaxis_title="Time",
-        yaxis_title=f"{label} ({unit})",
-        margin=dict(l=20, r=20, t=30, b=20),
-        legend=dict(orientation="h"),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-    )
-
-    return fig
 
 
 def _wire_range_form(start_day: date, end_day: date, wire: str) -> str:
@@ -435,7 +345,7 @@ async def wire_trends_page(
         label, unit = WIRE_MEASUREMENT_LABELS[measurement]
         charts_html += render_card(f"{label} ({unit})", chart_html, card_class="card")
 
-    wire_pills = _pill_row(
+    wire_pills = pill_row(
         "/multi_height/wire-trends", "wire", [(w, w) for w in wires], wire,
         {"start": start_day.isoformat(), "end": end_day.isoformat()},
         label="Device",
@@ -459,295 +369,6 @@ async def wire_trends_page(
     )
 
 
-### Crop Climate by Height ###
-# A per-growth-section climate table: one row per growth section (H1 top → H5
-# root, ordered from red config), one column per raw measurement type. The grid
-# is dense (5×4 trends), so cells use lightweight inline-SVG sparklines (no
-# per-cell plotly) plus the latest value.
-MEASUREMENT_COLORS = {
-    "par": "#f59e0b",
-    "temp": "#ef4444",
-    "hum": "#06b6d4",
-    "co2": "#8b5cf6",
-}
-
-# The plant rail is a single rowspanned SVG; aligning it to rows means each body
-# row is exactly CROP_ROW_HEIGHT tall and the SVG is len(sections) * that.
-CROP_ROW_HEIGHT = 72
-PLANT_SVG_PATH = Path(__file__).parent.parent / "static/crop_plant.svg"
-
-# Row-expansion: clicking a cell inserts a detail <tr> with an <iframe> chart
-# (lazy-loaded from the chart endpoint). One detail row at a time; clicking the
-# same cell again collapses it. Plain string (no f-string) to keep JS braces.
-CROP_CLIMATE_JS = """
-<script>
-function ccChart(td){
-  var table = td.closest('table'), tr = td.closest('tr');
-  var key = tr.rowIndex + ':' + td.dataset.height + ':' + td.dataset.metric;
-  var open = table.querySelector('tr.cc-detail');
-  var same = open && open.dataset.key === key;
-  if (open) open.remove();
-  if (same) return;
-  var dr = document.createElement('tr');
-  dr.className = 'cc-detail'; dr.dataset.key = key;
-  var cell = document.createElement('td');
-  cell.colSpan = table.rows[0].cells.length; cell.style.padding = '0';
-  var ifr = document.createElement('iframe');
-  ifr.style.cssText = 'width:100%;height:400px;border:0;background:#fff;border-radius:8px;';
-  ifr.srcdoc = '<p style="font:14px sans-serif;padding:1rem;color:#555;">Loading chart…</p>';
-  cell.appendChild(ifr); dr.appendChild(cell);
-  tr.parentNode.insertBefore(dr, tr.nextSibling);
-  var q = new URLSearchParams({wire: table.dataset.wire, date: table.dataset.date,
-                               height: td.dataset.height, metric: td.dataset.metric});
-  fetch('/multi_height/crop-climate/chart?' + q.toString())
-    .then(function(r){ return r.text(); })
-    .then(function(h){ ifr.srcdoc = h; })
-    .catch(function(){ ifr.srcdoc =
-      '<p style="font:14px sans-serif;padding:1rem;color:#b91c1c;">Failed to load chart.</p>'; });
-}
-</script>
-"""
-
-
-def _plant_zone_cell(index: int, total: int, uri: str) -> str:
-    """Left rail: this row's vertical slice of the plant SVG.
-
-    The full SVG is cropped to the row's zone via a negative offset, so the rows
-    together reconstruct the whole plant while each row stays independent (a
-    detail row can expand between rows without breaking a rowspan).
-    """
-    return (
-        '<td style="padding:0;width:90px;vertical-align:middle;">'
-        f'<div style="height:{CROP_ROW_HEIGHT}px;width:80px;overflow:hidden;margin:auto;">'
-        f'<img src="{uri}" width="80" height="{total * CROP_ROW_HEIGHT}" '
-        f'style="display:block;margin-top:-{index * CROP_ROW_HEIGHT}px;"></div></td>'
-    )
-
-
-def _sparkline_svg(values, color, width=96, height=28):
-    """Minimal inline-SVG sparkline (no JS), self-normalised to its own range."""
-    pts = [float(v) for v in values if v is not None and not pd.isna(v)]
-    if len(pts) < 2:
-        return '<span style="color:#9ca3af;">—</span>'
-    lo, hi = min(pts), max(pts)
-    span = (hi - lo) or 1.0
-    last = len(pts) - 1
-    coords = " ".join(
-        f"{(i / last) * (width - 2) + 1:.1f},"
-        f"{height - 1 - ((v - lo) / span) * (height - 2):.1f}"
-        for i, v in enumerate(pts)
-    )
-    return (
-        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
-        'style="display:block;">'
-        f'<polyline points="{coords}" fill="none" stroke="{color}" '
-        'stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>'
-    )
-
-
-def _series_for(df_day, device, measurement):
-    """Time-sorted value list for one height-device + measurement on the day."""
-    if df_day.empty:
-        return []
-    d = df_day[
-        (df_day["device"] == device) & (df_day["measurement"] == measurement)
-    ].sort_values("time")
-    return d["value"].tolist()
-
-
-def _cell_open(height, metric, extra_style="") -> str:
-    """Opening <td> for a clickable cell (expands a line chart on click)."""
-    return (
-        f'<td data-height="{height}" data-metric="{metric}" '
-        'onclick="ccChart(this)" title="Click to expand a chart" '
-        f'style="padding:0.5rem 0.75rem;vertical-align:middle;cursor:pointer;{extra_style}">'
-    )
-
-
-# CO₂ is the one measured quantity with a physically meaningful absolute floor
-# (≈ambient), so its sparkline marks the carbon-limitation floor where the others
-# stay deliberately threshold-free. Red = the depletion zone below the floor.
-CO2_FLOOR_COLOR = "#dc2626"
-
-
-def _co2_sparkline_svg(values, floor, width=96, height=28):
-    """CO₂ sparkline with the depletion floor drawn and the below-floor zone shaded.
-
-    The domain spans the day's CO₂ *and* the floor, so the dashed floor line is
-    always in view; a faint red wash below it reads as "carbon-limited" at a
-    glance. The line itself stays CO₂-purple to match the column. (The actual
-    risk verdict is daylight-gated in the engine; this is a visual aid.)
-    """
-    pts = [float(v) for v in values if v is not None and not pd.isna(v)]
-    if len(pts) < 2:
-        return '<span style="color:#9ca3af;">—</span>'
-    lo, hi = min(min(pts), floor), max(max(pts), floor)
-    span = (hi - lo) or 1.0
-    last = len(pts) - 1
-
-    def _y(val):
-        return height - 1 - ((val - lo) / span) * (height - 2)
-
-    floor_y = _y(floor)
-    coords = " ".join(
-        f"{(i / last) * (width - 2) + 1:.1f},{_y(v):.1f}" for i, v in enumerate(pts)
-    )
-    return (
-        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
-        'style="display:block;">'
-        f'<rect x="0" y="{floor_y:.1f}" width="{width}" '
-        f'height="{height - floor_y:.1f}" fill="{CO2_FLOOR_COLOR}" opacity="0.12"/>'
-        f'<line x1="0" y1="{floor_y:.1f}" x2="{width}" y2="{floor_y:.1f}" '
-        f'stroke="{CO2_FLOOR_COLOR}" stroke-width="0.75" stroke-dasharray="3 2" '
-        'opacity="0.6"/>'
-        f'<polyline points="{coords}" fill="none" stroke="{MEASUREMENT_COLORS["co2"]}" '
-        'stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>'
-    )
-
-
-def _measurement_cell(series, measurement, vmin, vmax, height, co2_floor=None):
-    """A clickable measured cell: latest value (+ unit) above the day's sparkline.
-
-    Background is a relative tint (white→measurement-colour by rank within the
-    column), so colour means "high/low vs the other heights", never an absolute
-    threshold. Clicking expands a line chart for this height + measurement. CO₂ is
-    the exception: when ``co2_floor`` is given its sparkline marks that floor.
-    """
-    _, unit = WIRE_MEASUREMENT_LABELS[measurement]
-    latest = series[-1] if series else None
-    value = "—" if latest is None else f"{_format_reading(latest)} {unit}"
-    scale = [[0.0, "#ffffff"], [1.0, MEASUREMENT_COLORS[measurement]]]
-    bg = value_to_color(latest, vmin, vmax, colorscale=scale, alpha=0.5)
-    spark = (
-        _co2_sparkline_svg(series, co2_floor)
-        if measurement == "co2" and co2_floor is not None
-        else _sparkline_svg(series, MEASUREMENT_COLORS[measurement])
-    )
-    return (
-        _cell_open(height, measurement, f"background:{bg};")
-        + f'<div style="font-weight:600;font-size:0.9rem;">{value}</div>'
-        + spark
-        + "</td>"
-    )
-
-
-### Derived risk columns (issue 016) — threshold-free trends, computed on read ###
-# Derived metrics share their source measurement's colour to show the lineage:
-# DLI ← PAR, Fungal ← Humidity. VPD ← Temp + Humidity, so it gets a red→cyan
-# gradient (two parents) rather than a single colour.
-HEIGHT_DLI_COLOR = MEASUREMENT_COLORS["par"]
-FUNGAL_COLOR = MEASUREMENT_COLORS["hum"]
-VPD_LINE_COLOR = "#0ea5e9"
-DERIVED_COLUMNS = ["Height DLI", "VPD", "Fungal risk"]
-
-# Vertical separator between the measured (left) and derived (right) blocks.
-SEP_BORDER = "border-left:2px solid #cbd5e1;"
-_VPD_GRADIENT = (
-    f"linear-gradient(90deg,{MEASUREMENT_COLORS['temp']},{MEASUREMENT_COLORS['hum']})"
-)
-# Inline style for a derived value's text (its lineage colour).
-DERIVED_VALUE_STYLE = {
-    "dli": f"color:{HEIGHT_DLI_COLOR};",
-    "vpd": f"background:{_VPD_GRADIENT};-webkit-background-clip:text;"
-           "background-clip:text;color:transparent;",
-    "fungal": f"color:{FUNGAL_COLOR};",
-}
-# Coloured header underlines tying each derived column to its source(s).
-DERIVED_HEADER_ACCENTS = {
-    "Height DLI": f"border-bottom:3px solid {HEIGHT_DLI_COLOR};{SEP_BORDER}",
-    "VPD": f"border-width:0 0 3px;border-style:solid;border-image:{_VPD_GRADIENT} 1;",
-    "Fungal risk": f"border-bottom:3px solid {FUNGAL_COLOR};",
-}
-
-
-def _derived_cell(value: str, spark: str, height, metric: str) -> str:
-    # The first derived column (DLI) carries the vertical separator border.
-    td = _cell_open(height, metric, SEP_BORDER if metric == "dli" else "")
-    vstyle = DERIVED_VALUE_STYLE.get(metric, "")
-    return (
-        td
-        + f'<div style="font-weight:600;font-size:0.9rem;{vstyle}">{value}</div>'
-        + f"{spark}</td>"
-    )
-
-
-def _vpd_sparkline_svg(values, band_min, band_max, width=96, height=28):
-    """VPD sparkline on a fixed 0..max scale with the healthy band shaded.
-
-    Unlike the self-normalising raw sparkline, this fixes the y-domain so the
-    band rectangle is stable across cells and excursions read consistently.
-    """
-    pts = [float(v) for v in values if v is not None and not pd.isna(v)]
-    if len(pts) < 2:
-        return '<span style="color:#9ca3af;">—</span>'
-    vmax = (max(max(pts), band_max) * 1.05) or 1.0
-    last = len(pts) - 1
-
-    def _y(val):
-        return height - 1 - (val / vmax) * (height - 2)
-
-    band_top = _y(band_max)
-    band_h = max(0.0, _y(band_min) - band_top)
-    coords = " ".join(
-        f"{(i / last) * (width - 2) + 1:.1f},{_y(v):.1f}" for i, v in enumerate(pts)
-    )
-    return (
-        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
-        'style="display:block;">'
-        f'<rect x="0" y="{band_top:.1f}" width="{width}" height="{band_h:.1f}" '
-        'fill="#16a34a" opacity="0.15"/>'
-        f'<polyline points="{coords}" fill="none" stroke="{VPD_LINE_COLOR}" '
-        'stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>'
-    )
-
-
-def _height_dli_cell(par_df, height):
-    cum = compute_cumulative_dli(par_df)
-    if cum is None or cum.empty:
-        return _derived_cell("—", _sparkline_svg([], HEIGHT_DLI_COLOR), height, "dli")
-    values = cum["cumulative_dli"].tolist()
-    return _derived_cell(
-        f"{values[-1]:.1f} mol", _sparkline_svg(values, HEIGHT_DLI_COLOR), height, "dli"
-    )
-
-
-def _vpd_cell(height_df, band_min, band_max, height):
-    v = vpd_series(height_df)
-    if v.empty:
-        return _derived_cell("—", '<span style="color:#9ca3af;">—</span>', height, "vpd")
-    values = v["value"].tolist()
-    return _derived_cell(
-        f"{values[-1]:.2f} kPa", _vpd_sparkline_svg(values, band_min, band_max),
-        height, "vpd",
-    )
-
-
-def _fungal_cell(hum_df, rh_pct, window_hours, height, day_start=None):
-    """Fungal wet-hours cell. ``hum_df`` may include the pre-day look-back so the
-    trailing window accumulates across the prior night; the displayed series is
-    trimmed back to ``day_start`` (when given) so only the shown day is drawn."""
-    w = wet_hours_series(hum_df, rh_pct, window_hours)
-    if day_start is not None and not w.empty:
-        w = w[w["time"] >= day_start]
-    if w.empty:
-        return _derived_cell("—", _sparkline_svg([], FUNGAL_COLOR), height, "fungal")
-    values = w["value"].tolist()
-    return _derived_cell(
-        f"{values[-1]:.1f} h", _sparkline_svg(values, FUNGAL_COLOR), height, "fungal"
-    )
-
-
-def _section_label_cell(section, state, vpd_band_min, vpd_band_max):
-    """Growth-section label, with any active-risk badges beneath it."""
-    badges = _section_badges(state, vpd_band_min, vpd_band_max)
-    badge_html = f'<div style="margin-top:4px;">{badges}</div>' if badges else ""
-    return (
-        '<td style="padding:0.5rem 0.75rem;font-weight:600;white-space:nowrap;">'
-        f'<span style="color:#6b7280;">H{section.height}</span> · '
-        f"{html.escape(section.label)}{badge_html}</td>"
-    )
-
-
 def _date_form(base_path: str, day: date, wire: str) -> str:
     """Single-date picker that GETs back to this view (keeps the wire)."""
     return f"""
@@ -762,6 +383,7 @@ def _date_form(base_path: str, day: date, wire: str) -> str:
     """
 
 
+### Crop Climate by Height ###
 @router.get("/multi_height/crop-climate", response_class=HTMLResponse)
 async def crop_climate_page(
     request: Request,
@@ -788,20 +410,22 @@ async def crop_climate_page(
     if day is not None:
         target_date = day
     else:
-        target_date = await _latest_wire_date(wire, timezone)
+        target_date = await latest_wire_date(wire, timezone)
 
     # Bound the fetch to the shown day plus the fungal look-back window, so we
     # never scan the whole wire_sensors table per request and wet-hours can
     # accumulate across the prior night.
-    fetch_start, fetch_end = _day_window_utc(
+    fetch_start, fetch_end = day_window_utc(
         target_date or date.today(), timezone, risk_t.fungal.window_hours,
     )
     df = await load_wire_readings(fetch_start, fetch_end)
-    df_day, target_day = filter_for_day(df, timezone, target_date=target_date)
 
-    # Persisted per-section state drives the Status column ("as of last build").
-    state_by_height = {r["height"]: r for r in await store.read_state(get_pool(), wire)}
-    as_of = max((r["built_at"] for r in state_by_height.values()), default=None)
+    # The view-model computes each section's live series once; the persisted
+    # per-section state drives the Status badges ("as of last build").
+    vm = await assemble_crop_climate_day(
+        get_pool(), df, wire, sections, risk_t, timezone, target_date=target_date,
+    )
+    target_day = vm.day_start
 
     measured_headers = "".join(
         f'<th style="padding:0.5rem 0.75rem;text-align:left;'
@@ -815,58 +439,33 @@ async def crop_climate_page(
         for h in DERIVED_COLUMNS
     )
 
-    # Day's series per (height, measurement), computed once; per-column bounds
-    # (latest value across the five heights) drive the relative cell tint.
-    series_map = {
-        (section.height, m): _series_for(df_day, wire_device_id(wire, section.height), m)
-        for section in sections
-        for m in WIRE_SENSOR_MEASUREMENTS
-    }
-    col_bounds = {}
-    for m in WIRE_SENSOR_MEASUREMENTS:
-        latests = [
-            series_map[(section.height, m)][-1]
-            for section in sections
-            if series_map[(section.height, m)]
-        ]
-        col_bounds[m] = (min(latests), max(latests)) if latests else (0.0, 1.0)
-
     plant_uri = svg_to_data_uri(PLANT_SVG_PATH)
 
     # Each row: section label | measured cells | plant zone | derived cells | status.
     rows_html = ""
-    for i, section in enumerate(sections):
+    for i, section in enumerate(vm.sections):
         h = section.height
-        device = wire_device_id(wire, h)
         measured = "".join(
-            _measurement_cell(
-                series_map[(h, m)], m, *col_bounds[m], h,
+            measurement_cell(
+                section.series[m], m, *vm.bounds[m], h,
                 co2_floor=risk_t.co2.floor_ppm,
             )
             for m in WIRE_SENSOR_MEASUREMENTS
         )
-        hdf = df_day[df_day["device"] == device]
-        par_df = hdf[hdf["measurement"] == "par"][["time", "value"]]
-        # Fungal wet-hours read the full window (day + look-back) so the trailing
-        # 24h accumulates across the prior night; the cell trims to the shown day.
-        hum_window = df[(df["device"] == device) & (df["measurement"] == "hum")][
-            ["time", "value"]
-        ]
         derived = (
-            _height_dli_cell(par_df, h)
-            + _vpd_cell(hdf, risk_t.vpd.band_min_kpa, risk_t.vpd.band_max_kpa, h)
-            + _fungal_cell(
-                hum_window, risk_t.fungal.rh_pct, risk_t.fungal.window_hours, h,
-                day_start=target_day,
+            height_dli_cell_from_values(section.height_dli, h)
+            + vpd_cell_from_values(
+                section.vpd, risk_t.vpd.band_min_kpa, risk_t.vpd.band_max_kpa, h,
             )
+            + fungal_cell_from_values(section.fungal, h)
         )
-        label_cell = _section_label_cell(
-            section, state_by_height.get(h),
+        label_cell = section_label_cell(
+            section, vm.state_by_height.get(h),
             risk_t.vpd.band_min_kpa, risk_t.vpd.band_max_kpa,
         )
         rows_html += (
             f"<tr style='border-top:1px solid #e5e7eb;height:{CROP_ROW_HEIGHT}px;'>"
-            f"{_plant_zone_cell(i, len(sections), plant_uri)}"
+            f"{plant_zone_cell(i, len(vm.sections), plant_uri)}"
             f"{label_cell}{measured}{derived}</tr>"
         )
 
@@ -883,14 +482,14 @@ async def crop_climate_page(
         f"<tbody>{rows_html}</tbody></table>"
     )
 
-    wire_pills = _pill_row(
+    wire_pills = pill_row(
         "/multi_height/crop-climate", "wire", [(w, w) for w in wires], wire,
         {"date": day.isoformat() if day else None}, label="Device",
     )
     date_form = _date_form("/multi_height/crop-climate", target_day.date(), wire)
-    admin_panel = _admin_build_panel(wire, target_day.date()) if is_admin(request) else ""
+    admin_panel = admin_build_panel(wire, target_day.date()) if is_admin(request) else ""
     asof_note = (
-        f" · risk as of {_fmt_local(as_of, timezone)}" if as_of is not None
+        f" · risk as of {fmt_local(vm.as_of, timezone)}" if vm.as_of is not None
         else " · risk log not built yet"
     )
 
@@ -902,8 +501,8 @@ async def crop_climate_page(
     episodes = await store.read_episodes_overlapping(
         get_pool(), wire, ep_start_utc, ep_end_utc,
     )
-    gantt_html = _risk_gantt(episodes, timezone, target_day)
-    if as_of is None:
+    gantt_html = risk_gantt(episodes, timezone, target_day)
+    if vm.as_of is None:
         gantt_body = '<p style="color:#6b7280;margin:0;">Risk log not built yet.</p>'
     elif gantt_html is None:
         gantt_body = '<p style="color:#16a34a;margin:0;">No risk episodes — clear day ✓</p>'
@@ -936,110 +535,6 @@ async def crop_climate_page(
         config.title,
         content,
         data_source=provider.data_source_label,
-    )
-
-
-### Risk verdict + admin build (issue 015) ###
-# Instant, styled hover tooltip for badges (native `title` is slow + unstyled).
-CROP_CLIMATE_STYLE = """
-<style>
-.cc-badge{position:relative;cursor:help;}
-.cc-badge .cc-tip{visibility:hidden;opacity:0;position:absolute;left:0;
-  top:calc(100% + 6px);z-index:30;width:220px;white-space:normal;
-  background:#111827;color:#fff;font-weight:400;font-size:0.75rem;line-height:1.35;
-  padding:6px 9px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.25);
-  transition:opacity .12s ease;pointer-events:none;}
-.cc-badge:hover .cc-tip{visibility:visible;opacity:1;}
-</style>
-"""
-
-
-def _badge(text: str, color: str, tip: str = "") -> str:
-    style = (
-        f"background:{color};color:#fff;border-radius:6px;"
-        "padding:2px 8px;font-size:0.8rem;margin-right:4px;"
-    )
-    if not tip:
-        return f'<span style="{style}">{html.escape(text)}</span>'
-    return (
-        f'<span class="cc-badge" style="{style}">{html.escape(text)}'
-        f'<span class="cc-tip">{html.escape(tip)}</span></span>'
-    )
-
-
-def _section_badges(state, vpd_band_min, vpd_band_max) -> str:
-    """Prescriptive active-risk badges for a section from its persisted state.
-
-    Each badge names the *action*, with a tooltip explaining why. Only active
-    risks render (no "OK"), so a healthy section stays clean. Empty when state is
-    absent or nothing is flagged. The VPD badge is directional — the state's
-    latest VPD vs the band decides whether the air is too dry or too humid.
-    """
-    if not state:
-        return ""
-    badges = []
-    if state.get("canopy_deficit"):
-        badges.append(_badge(
-            "Add light", "#b45309",
-            "Canopy DLI below target — add supplemental light or extend the photoperiod",
-        ))
-    if state.get("fungal_active"):
-        badges.append(_badge(
-            "Dry the air", "#7c3aed",
-            "Humidity has stayed high too long — Botrytis/fungal pressure; "
-            "ventilate or add heat to dry the canopy",
-        ))
-    if state.get("co2_depleted"):
-        badges.append(_badge(
-            "Enrich CO₂", "#0d9488",
-            "CO₂ below the floor while the canopy is lit — the crop is "
-            "carbon-limited; enrich CO₂ or reduce venting",
-        ))
-    if state.get("vpd_in_band") is False:
-        vpd = state.get("vpd_latest")
-        if vpd is not None and vpd > vpd_band_max:
-            badges.append(_badge(
-                "Raise humidity", "#b91c1c",
-                "VPD above the healthy band — air too dry; raise humidity "
-                "(misting/fogging) or lower temperature",
-            ))
-        else:
-            badges.append(_badge(
-                "Ventilate", "#b91c1c",
-                "VPD below the healthy band — air too humid; ventilate or "
-                "raise temperature",
-            ))
-    return "".join(badges)
-
-
-def _admin_build_panel(wire: str, day: date) -> str:
-    """Admin-only Update (to now) + Rebuild (date range) build controls."""
-    update_form = (
-        '<form method="post" action="/multi_height/crop-climate/update" '
-        'style="display:inline;">'
-        f'<input type="hidden" name="wire" value="{wire}">'
-        '<button type="submit">Update (to now)</button></form>'
-    )
-    rebuild_form = (
-        '<form method="post" action="/multi_height/crop-climate/rebuild" '
-        'style="display:flex;gap:8px;align-items:flex-end;margin-top:8px;'
-        'flex-wrap:wrap;">'
-        f'<input type="hidden" name="wire" value="{wire}">'
-        f'<label>From<br><input type="date" name="start" value="{day.isoformat()}"></label>'
-        f'<label>To<br><input type="date" name="end" value="{day.isoformat()}"></label>'
-        '<button type="submit">Rebuild range</button></form>'
-    )
-    audit_link = (
-        '<p style="margin-top:10px;">'
-        f'<a href="/multi_height/crop-climate/audit?wire={wire}">Open risk log →</a>'
-        "</p>"
-    )
-    return render_card(
-        "Admin — build risk log",
-        update_form + rebuild_form + audit_link,
-        description="Update extends the log to now; Rebuild recomputes a date "
-        "range from raw data. Runs on demand.",
-        card_class="card",
     )
 
 
@@ -1094,217 +589,6 @@ async def crop_climate_rebuild(
 
 
 ### Risk-episode audit log (issue 018) ###
-RISK_LABELS = {
-    "vpd": "VPD out of band",
-    "fungal": "Fungal risk",
-    "co2": "CO₂ depletion",
-    "canopy": "Canopy light deficit",
-}
-
-# Lane colour per risk — reuse each metric's own hue so the timeline matches the
-# detail charts and column accents (CO₂ uses the floor-marker red).
-RISK_COLORS = {
-    "vpd": VPD_LINE_COLOR,
-    "fungal": FUNGAL_COLOR,
-    "co2": CO2_FLOOR_COLOR,
-    "canopy": HEIGHT_DLI_COLOR,
-}
-# Within a section, lanes read top-down in this order (matches the table columns).
-RISK_LANE_ORDER = {"canopy": 0, "vpd": 1, "fungal": 2, "co2": 3}
-# Compact tick label per lane — the section is carried by the band, not repeated.
-RISK_SHORT = {"vpd": "VPD", "fungal": "Fungal", "co2": "CO₂", "canopy": "Canopy"}
-# Extra y-spacing between height blocks (lanes within a block step by 1.0), so a
-# section's risks hug together while sections stay visually apart.
-GANTT_GROUP_GAP = 0.7
-
-
-def _fmt_local(dt, tz: str) -> str:
-    """Render a tz-aware datetime in the display timezone, e.g. '2026-06-03 20:18 CEST'.
-
-    Cache/audit timestamps are stored as ``TIMESTAMPTZ`` (UTC), so this is a pure
-    presentation convert to ``WP6_DISPLAY_TIMEZONE``; ``%Z`` tracks DST itself.
-    """
-    return dt.astimezone(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M %Z")
-
-
-def _fmt_duration(td) -> str:
-    """Human duration like '1d 3h' / '2h 30m' / '45m'."""
-    total = int(td.total_seconds())
-    days, rem = divmod(total, 86400)
-    hours, rem = divmod(rem, 3600)
-    mins = rem // 60
-    parts = []
-    if days:
-        parts.append(f"{days}d")
-    if hours:
-        parts.append(f"{hours}h")
-    if mins or not parts:
-        parts.append(f"{mins}m")
-    return " ".join(parts)
-
-
-def _audit_table(episodes, tz: str = "UTC") -> str:
-    """Render persisted risk episodes (cache dicts) as an HTML table.
-
-    Episode timestamps are stored in UTC and shown in ``tz`` (the display
-    timezone) so the log reads in local wall-clock like the rest of the view.
-    """
-    if not episodes:
-        return (
-            '<p style="color:#6b7280;">No risk episodes in this range — build the '
-            "log from the Crop Climate page first.</p>"
-        )
-    headers = ("Section", "Risk", "Present from", "Resolved", "Duration", "Peak",
-               "Thresholds")
-    head = "<thead><tr>" + "".join(
-        f'<th style="padding:0.4rem 0.75rem;text-align:left;">{h}</th>'
-        for h in headers
-    ) + "</tr></thead>"
-
-    rows = ""
-    for e in episodes:
-        start, end = e["start_time"], e["end_time"]
-        resolved = (
-            _fmt_local(end, tz) if end is not None
-            else '<em style="color:#b45309;">ongoing</em>'
-        )
-        duration = _fmt_duration(end - start) if end is not None else "—"
-        cells = [
-            f'H{e["height"]} {html.escape(e["label"])}',
-            html.escape(RISK_LABELS.get(e["risk"], e["risk"])),
-            _fmt_local(start, tz),
-            resolved,
-            duration,
-            f'{e["peak"]:.2f}',
-            f'<code style="font-size:0.8rem;">{html.escape(str(e["thresholds"]))}</code>',
-        ]
-        rows += (
-            "<tr style='border-top:1px solid #e5e7eb;'>"
-            + "".join(f'<td style="padding:0.4rem 0.75rem;">{c}</td>' for c in cells)
-            + "</tr>"
-        )
-    return (
-        '<table style="width:100%;border-collapse:collapse;">'
-        f"{head}<tbody>{rows}</tbody></table>"
-    )
-
-
-def _risk_gantt(episodes, timezone: str, day_start) -> str | None:
-    """Gantt-style timeline of one day's risk episodes (inline Plotly HTML).
-
-    One lane per ``(section, risk)`` that actually fired that day — empty lanes
-    are omitted, so a calm day stays short and parallel risks never collide
-    (each risk owns its own lane). Every episode is a thick horizontal bar from
-    start to end; a span that began before midnight or is still ongoing is
-    *clamped* to the day window for drawing, while the hover keeps its true
-    times. Returns ``None`` when there are no episodes (caller shows a note).
-
-    ``day_start`` is the tz-aware local midnight of the shown day.
-    """
-    if not episodes:
-        return None
-
-    day0 = day_start.tz_localize(None)  # naive local midnight (Plotly x-axis space)
-    day1 = day0 + pd.Timedelta(days=1)
-
-    def _local(dt):
-        return pd.Timestamp(dt).tz_convert(timezone).tz_localize(None)
-
-    lanes: dict[tuple, list] = {}
-    for e in episodes:
-        lanes.setdefault((e["height"], e["label"], e["risk"]), []).append(e)
-    # Top-down: by height, then the fixed risk order within a section.
-    keys = sorted(lanes, key=lambda k: (k[0], RISK_LANE_ORDER.get(k[2], 9)))
-
-    # Lanes sit at explicit y-positions (linear axis), not evenly-spaced
-    # categories: a 1.0 step within a section, a wider GANTT_GROUP_GAP between
-    # sections — so a section's lanes (e.g. H1's Canopy + VPD) hug together while
-    # the sections stay clearly apart.
-    pos, prev_h = [], None
-    y = 0.0
-    for height, _label, _risk in keys:
-        if prev_h is None:
-            y = 0.0
-        elif height != prev_h:
-            y += 1.0 + GANTT_GROUP_GAP
-        else:
-            y += 1.0
-        pos.append(y)
-        prev_h = height
-
-    fig = go.Figure()
-    legended: set[str] = set()
-    for idx, (height, label, risk) in enumerate(keys):
-        cat = f"H{height} {label} · {RISK_LABELS[risk]}"
-        color = RISK_COLORS.get(risk, "#6b7280")
-        for e in lanes[(height, label, risk)]:
-            start = max(_local(e["start_time"]), day0)
-            ongoing = e["end_time"] is None
-            end = day1 if ongoing else min(_local(e["end_time"]), day1)
-            ends = "ongoing" if ongoing else _fmt_local(e["end_time"], timezone)
-            fig.add_trace(go.Scatter(
-                x=[start, end], y=[pos[idx], pos[idx]], mode="lines",
-                line=dict(color=color, width=18),
-                legendgroup=risk, name=RISK_LABELS[risk],
-                showlegend=risk not in legended,
-                hovertemplate=(
-                    f"<b>{cat}</b><br>"
-                    f"{_fmt_local(e['start_time'], timezone)} → {ends}"
-                    f"<br>peak {e['peak']:.2f}<extra></extra>"
-                ),
-            ))
-            legended.add(risk)
-
-    # Group lanes into per-height blocks: an alternating band, a separator line
-    # between blocks, and one section label per block — so the heights read as
-    # distinct groups instead of a flat stack of look-alike lanes.
-    shapes, annotations = [], []
-    i, band = 0, 0
-    while i < len(keys):
-        h, label, _ = keys[i]
-        j = i
-        while j < len(keys) and keys[j][0] == h:
-            j += 1
-        top, bot = pos[i] - 0.5, pos[j - 1] + 0.5
-        if band % 2 == 1:  # shade every other block
-            shapes.append(dict(
-                type="rect", xref="paper", x0=0, x1=1, yref="y",
-                y0=top, y1=bot, layer="below", line_width=0,
-                fillcolor="rgba(99,102,241,0.06)",
-            ))
-        if i > 0:  # rule midway between this block and the one above
-            edge = (pos[i - 1] + pos[i]) / 2
-            shapes.append(dict(
-                type="line", xref="paper", x0=0, x1=1, yref="y",
-                y0=edge, y1=edge, line=dict(color="#d1d5db", width=1),
-            ))
-        annotations.append(dict(
-            xref="paper", x=0, xanchor="right", xshift=-54,
-            yref="y", y=(pos[i] + pos[j - 1]) / 2, text=f"<b>H{h}</b> {label}",
-            showarrow=False, font=dict(size=11, color="#374151"),
-        ))
-        i, band = j, band + 1
-
-    span = (pos[-1] - pos[0]) if pos else 0.0
-    fig.update_layout(
-        template="plotly_white",
-        height=int(26 * span + 80),
-        margin=dict(l=150, r=20, t=8, b=36),
-        xaxis=dict(range=[day0, day1], title="Time of day",
-                   tickformat="%H:%M", dtick=3 * 3600 * 1000),
-        yaxis=dict(tickmode="array", tickvals=pos,
-                   ticktext=[RISK_SHORT.get(k[2], k[2]) for k in keys],
-                   range=[pos[-1] + 0.6, pos[0] - 0.6]),  # high→low = top-down
-        shapes=shapes, annotations=annotations,
-        hovermode="closest",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
-    )
-    return fig.to_html(
-        full_html=False, include_plotlyjs="cdn",
-        config={"responsive": True, "displaylogo": False},
-    )
-
-
 @router.get(
     "/multi_height/crop-climate/audit",
     response_class=HTMLResponse,
@@ -1339,7 +623,7 @@ async def crop_climate_audit(
 
     episodes = await store.read_episodes(get_pool(), wire, start_utc, end_utc)
 
-    wire_pills = _pill_row(
+    wire_pills = pill_row(
         "/multi_height/crop-climate/audit", "wire", [(w, w) for w in wires], wire,
         {"start": start_day.isoformat(), "end": end_day.isoformat()}, label="Device",
     )
@@ -1352,7 +636,7 @@ async def crop_climate_audit(
 
     {wire_pills}
     {_wire_range_form(start_day, end_day, wire)}
-    {render_card("Episodes", _audit_table(episodes, tz), card_class="card")}
+    {render_card("Episodes", audit_table(episodes, tz), card_class="card")}
     """
     return render_page(
         config.title,
@@ -1364,76 +648,6 @@ async def crop_climate_audit(
 ### Crop-climate cell detail chart (click-to-expand) ###
 # Metrics the chart endpoint will serve (measured + derived); anything else 400s.
 CROP_CHART_METRICS = (*WIRE_SENSOR_MEASUREMENTS, "dli", "vpd", "fungal")
-
-
-def _detail_chart(hdf, metric, timezone, risk_t, day_start):
-    """Full line chart for one height + metric over the day (row expansion).
-
-    ``hdf`` may include a pre-day look-back; every metric is scoped to the shown
-    day except fungal wet-hours, which integrate the look-back and then trim.
-    """
-    fig = go.Figure()
-    title, ytitle = metric, ""
-
-    def _local(s):
-        return s.dt.tz_convert(timezone).dt.tz_localize(None)
-
-    day_df = hdf[hdf["time"] >= day_start] if not hdf.empty else hdf
-
-    if metric in WIRE_SENSOR_MEASUREMENTS:
-        label, unit = WIRE_MEASUREMENT_LABELS[metric]
-        d = day_df[day_df["measurement"] == metric].sort_values("time")
-        if not d.empty:
-            fig.add_trace(go.Scatter(
-                x=_local(d["time"]), y=d["value"], mode="lines",
-                line=dict(color=MEASUREMENT_COLORS[metric], width=2), name=label,
-            ))
-        if metric == "co2":  # mark the carbon-limitation floor (see sparkline)
-            fig.add_hline(y=risk_t.co2.floor_ppm, line_dash="dot",
-                          line_color=CO2_FLOOR_COLOR, annotation_text="floor")
-        title, ytitle = label, f"{label} ({unit})"
-    elif metric == "dli":
-        cum = compute_cumulative_dli(day_df[day_df["measurement"] == "par"][["time", "value"]])
-        if cum is not None and not cum.empty:
-            fig.add_trace(go.Scatter(
-                x=_local(cum["time"]), y=cum["cumulative_dli"], mode="lines",
-                line=dict(color=HEIGHT_DLI_COLOR, width=2), name="Height DLI",
-            ))
-        fig.add_hline(y=risk_t.canopy_dli.target_mol, line_dash="dot",
-                      line_color=HEIGHT_DLI_COLOR, annotation_text="target")
-        title, ytitle = "Cumulative Height DLI", "mol/m²"
-    elif metric == "vpd":
-        v = vpd_series(day_df)
-        if not v.empty:
-            fig.add_trace(go.Scatter(
-                x=_local(v["time"]), y=v["value"], mode="lines",
-                line=dict(color=VPD_LINE_COLOR, width=2), name="VPD",
-            ))
-        fig.add_hrect(y0=risk_t.vpd.band_min_kpa, y1=risk_t.vpd.band_max_kpa,
-                      fillcolor="#16a34a", opacity=0.12, line_width=0)
-        title, ytitle = "VPD vs healthy band", "kPa"
-    elif metric == "fungal":
-        w = wet_hours_series(
-            hdf[hdf["measurement"] == "hum"][["time", "value"]],
-            risk_t.fungal.rh_pct, risk_t.fungal.window_hours,
-        )
-        if not w.empty:
-            w = w[w["time"] >= day_start]
-        if not w.empty:
-            fig.add_trace(go.Scatter(
-                x=_local(w["time"]), y=w["value"], mode="lines",
-                line=dict(color=FUNGAL_COLOR, width=2), name="Wet-hours",
-            ))
-        fig.add_hline(y=risk_t.fungal.active_wet_hours, line_dash="dot",
-                      line_color=FUNGAL_COLOR, annotation_text="active")
-        title, ytitle = "Fungal risk (wet-hours)", "hours"
-
-    fig.update_layout(
-        template="plotly_white", height=380, title=title,
-        xaxis_title="Time of day", yaxis_title=ytitle, hovermode="x unified",
-        margin=dict(l=50, r=20, t=50, b=40),
-    )
-    return fig
 
 
 @router.get("/multi_height/crop-climate/chart", response_class=HTMLResponse)
@@ -1462,397 +676,17 @@ async def crop_climate_chart(
 
     risk_t = load_risk_thresholds(deps._METADATA_PATH)
     # Bound the fetch to the shown day plus the fungal look-back (no table scan).
-    fetch_start, fetch_end = _day_window_utc(
+    fetch_start, fetch_end = day_window_utc(
         day or date.today(), timezone, risk_t.fungal.window_hours,
     )
     day_start = pd.Timestamp(day or date.today(), tz=timezone)
     df = await load_wire_readings(fetch_start, fetch_end)
     hdf = df[df["device"] == wire_device_id(wire, height)] if not df.empty else df
 
-    fig = _detail_chart(hdf, metric, timezone, risk_t, day_start)
+    fig = detail_chart(hdf, metric, timezone, risk_t, day_start)
     return HTMLResponse(
         fig.to_html(
             full_html=True, include_plotlyjs="cdn",
             config={"responsive": True, "displaylogo": False},
         )
     )
-
-
-### Parse SVG ###
-def parse_viewbox(svg_path: Path):
-    root = ET.parse(svg_path).getroot()
-    viewbox = root.attrib.get("viewBox")
-
-    if viewbox:
-        x, y, w, h = map(float, viewbox.split())
-        return x, y, w, h
-
-    width = float(re.sub(r"[^0-9.]", "", root.attrib["width"]))
-    height = float(re.sub(r"[^0-9.]", "", root.attrib["height"]))
-    return 0.0, 0.0, width, height
-
-
-def parse_svg_rects(svg_path: Path):
-    ns = {"svg": "http://www.w3.org/2000/svg"}
-    root = ET.parse(svg_path).getroot()
-
-    rects = {}
-
-    for rect in root.findall(".//svg:rect", ns):
-        rect_id = rect.attrib.get("id")
-        if not rect_id:
-            continue
-
-        rects[rect_id] = {
-            "x": float(rect.attrib.get("x", 0)),
-            "y": float(rect.attrib.get("y", 0)),
-            "width": float(rect.attrib.get("width", 0)),
-            "height": float(rect.attrib.get("height", 0)),
-            "rx": rect.attrib.get("rx"),
-        }
-
-    return rects
-
-def parse_svg(svg_path: Path):
-    _, _, canvas_w, canvas_h = parse_viewbox(svg_path)
-    rects = parse_svg_rects(svg_path)
-
-    sensor_boxes = {
-        k: v for k, v in rects.items()
-        if k.startswith("height_") and not k.endswith("_bg")
-    }
-
-    sensor_bands = {
-        k.replace("_bg", ""): v for k, v in rects.items()
-        if k.startswith("height_") and k.endswith("_bg")
-    }
-
-    return canvas_w, canvas_h, sensor_boxes, sensor_bands
-
-
-### Load data ###
-async def load_wire_readings(start=None, end=None):
-    # All measurements per height from the wire (devices WS_01_01-h1..h5); the
-    # retired s2100-10..15 sensors are gone (ADR 0001). Keeps the height and
-    # measurement columns so the view can pivot per selected measurement.
-    # ``start``/``end`` (UTC) bound the fetch so a dense day-view never scans the
-    # whole wire_sensors table; unbounded only where a view genuinely needs it.
-    df = await deps.db.get_wire_sensor_readings(start=start, end=end)
-
-    if df.empty:
-        return df
-
-    df["time"] = pd.to_datetime(df["time"], utc=True)
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
-
-    return df.dropna(subset=["time", "device", "value"])
-
-
-async def _latest_wire_date(wire: str, timezone: str) -> date | None:
-    """Most recent local day ``wire`` reported, from the cheap device summary.
-
-    Uses a single GROUP BY aggregate (last-seen per virtual device) rather than
-    pulling readings, so the default "latest day with data" never costs a table
-    scan. ``None`` when the wire has no readings yet.
-    """
-    summary = await deps.db.get_wire_device_summary()
-    seens = [
-        summary[device]["last_seen"]
-        for device in (wire_device_id(wire, h) for h in WIRE_SENSOR_HEIGHTS)
-        if device in summary and summary[device].get("last_seen") is not None
-    ]
-    if not seens:
-        return None
-    ts = pd.Timestamp(max(seens))
-    ts = ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
-    return ts.tz_convert(timezone).date()
-
-
-def _day_window_utc(local_date: date, timezone: str, lookback_hours: float):
-    """UTC (start, end) bounds for the local ``local_date`` plus a pre-day look-back.
-
-    ``end`` is the next local midnight (exclusive); ``start`` reaches back
-    ``lookback_hours`` before local midnight so trailing-window metrics (fungal
-    wet-hours) can accumulate across the prior night.
-    """
-    day_start = pd.Timestamp(local_date, tz=timezone)
-    start = (day_start - pd.Timedelta(hours=lookback_hours)).tz_convert("UTC").to_pydatetime()
-    end = (day_start + pd.Timedelta(days=1)).tz_convert("UTC").to_pydatetime()
-    return start, end
-
-
-### Filter to a single day ###
-def filter_for_day(
-    df, timezone, target_date=None, use_latest_date_in_data=USE_LATEST_DATE_IN_DATA,
-):
-    """Return the readings for one local day plus that day's start timestamp.
-
-    ``target_date`` (a ``datetime.date``) pins an explicit day — used by the
-    ``?date=`` URL param. When it's ``None`` the day defaults to today (or the
-    latest day present in the data when ``use_latest_date_in_data`` is set).
-    """
-    df_local = df.copy()
-    df_local["time_local"] = df_local["time"].dt.tz_convert(timezone)
-
-    if target_date is not None:
-        target_day = pd.Timestamp(target_date, tz=timezone).normalize()
-    elif use_latest_date_in_data:
-        target_day = df_local["time_local"].max().normalize()
-    else:
-        target_day = pd.Timestamp.now(tz=timezone).normalize()
-
-    next_day = target_day + pd.Timedelta(days=1)
-
-    mask = (
-        (df_local["time_local"] >= target_day) &
-        (df_local["time_local"] < next_day)
-    )
-
-    return df_local.loc[mask].drop(columns=["time_local"]), target_day
-
-
-### Metrics ###
-def compute_sensor_metrics(df_day, measurement, wire):
-    """Latest value per height for ``wire``/``measurement`` (+ daily DLI, PAR only).
-
-    ``sensor_id`` is the SVG box id (``height_N``); the wire device it reads is
-    derived from the selected wire and height.
-    """
-    rows = []
-    data = df_day[df_day["measurement"] == measurement] if not df_day.empty else df_day
-
-    for height in WIRE_SENSOR_HEIGHTS:
-        box_id = f"height_{height}"
-        device = wire_device_id(wire, height)
-        d = (
-            data[data["device"] == device].sort_values("time")
-            if not data.empty else data
-        )
-
-        if d.empty:
-            rows.append({
-                "sensor_id": box_id,
-                "latest_value": None,
-                "dli_today": None,
-            })
-            continue
-
-        latest = d.iloc[-1]
-
-        rows.append({
-            "sensor_id": box_id,
-            "latest_value": float(latest["value"]),
-            # DLI is a PAR-only aggregate; left empty for other measurements.
-            "dli_today": compute_dli(d) if measurement == "par" else None,
-        })
-
-    return pd.DataFrame(rows)
-
-
-### Plot ###
-def _format_reading(value: float) -> str:
-    """Box label: whole numbers for large readings, one decimal for small."""
-    return f"{value:.0f}" if abs(value) >= 100 else f"{value:.1f}"
-
-
-def make_mh_greenhouse_plot(
-    metrics,
-    canvas_w,
-    canvas_h,
-    sensor_boxes,
-    sensor_bands,
-    target_day,
-    value_label="PAR",
-    show_bands=True,
-):
-    fig = go.Figure()
-
-    # fix background
-    fig.add_shape(
-        type="rect",
-        x0=0,
-        x1=canvas_w,
-        y0=0,
-        y1=canvas_h,
-        fillcolor="#ffffff",
-        line=dict(width=0),
-        layer="below",
-    )
-
-    latest_vals = metrics["latest_value"].dropna()
-    dli_vals = metrics["dli_today"].dropna()
-
-    latest_min = float(latest_vals.min()) if not latest_vals.empty else 0.0
-    latest_max = float(latest_vals.max()) if not latest_vals.empty else 1.0
-
-    dli_min = float(dli_vals.min()) if not dli_vals.empty else 0.0
-    dli_max = float(dli_vals.max()) if not dli_vals.empty else 1.0
-
-    # background
-    fig.add_layout_image(
-        dict(
-            source=svg_to_data_uri(SVG_BACKGROUND_PATH),
-            xref="x",
-            yref="y",
-            x=0,
-            y=canvas_h,
-            sizex=canvas_w,
-            sizey=canvas_h,
-            sizing="stretch", #bg fix
-            layer="below",
-        )
-    )
-
-    for _, row in metrics.iterrows():
-        sid = row["sensor_id"]
-
-        # --- bands (DLI shading; PAR only) ---
-        if show_bands and sid in sensor_bands:
-            x0, x1, y0, y1 = svg_rect_to_plotly_rect(sensor_bands[sid], canvas_h)
-
-            fig.add_shape(
-                type="rect",
-                x0=x0,
-                x1=x1,
-                y0=y0,
-                y1=y1,
-                fillcolor=value_to_color(row["dli_today"], dli_min, dli_max, alpha=0.4),
-                line=dict(width=0),
-                layer="below",
-            )
-
-        # --- sensor box ---
-        if sid in sensor_boxes:
-            x0, x1, y0, y1 = svg_rect_to_plotly_rect(sensor_boxes[sid], canvas_h)
-
-            fig.add_shape(
-                type="rect",
-                x0=x0,
-                x1=x1,
-                y0=y0,
-                y1=y1,
-                fillcolor=value_to_color(
-                    row["latest_value"], latest_min, latest_max, alpha=0.9,
-                ),
-                line=dict(color="#111111", width=1.5),
-            )
-
-            label = (
-                "—" if pd.isna(row["latest_value"])
-                else _format_reading(row["latest_value"])
-            )
-
-            fig.add_annotation(
-                x=(x0 + x1) / 2,
-                y=(y0 + y1) / 2,
-                text=label,
-                showarrow=False,
-                font=dict(size=11, color="#111111"),
-                xanchor="center",
-                yanchor="middle",
-            )
-
-    fig.add_trace(
-        go.Scatter(
-            x=[None],
-            y=[None],
-            mode="markers",
-            marker=dict(
-                color=[latest_min, latest_max],
-                colorscale=PAR_COLORSCALE,
-                cmin=latest_min,
-                cmax=latest_max,
-                showscale=True,
-                colorbar=dict(
-                    title=dict(
-                        text=value_label,
-                        font=dict(color="#111111"),
-                    ),
-                    tickfont=dict(color="#111111"),
-                    bgcolor="white",
-                )
-            ),
-            showlegend=False,
-            hoverinfo="skip",
-        )
-    )
-    
-    fig.update_layout(
-        template="plotly_white",
-        title=dict(
-            text=f"{target_day.date()}",
-            font=dict(color="#111111"),
-        ),
-
-        width=850,
-        height=760,
-
-        margin=dict(l=20, r=20, t=60, b=20),
-
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-
-        font=dict(
-            color="#111111",
-        ),
-
-        hoverlabel=dict(
-            bgcolor="white",
-            font_color="#111111",
-        )
-    )
-
-    fig.update_xaxes(range=[0, canvas_w], visible=False)
-    fig.update_yaxes(range=[0, canvas_h], visible=False)
-
-    return fig
-
-
-### Cumulative DLI line chart ###
-DLI_LINE_COLORS = [
-    "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#10b981",
-]
-
-
-def make_cumulative_dli_plot(df_day, timezone, target_day, wire):
-    """Line chart of cumulative DLI through the day, one line per height (one wire)."""
-    fig = go.Figure()
-
-    for i, height in enumerate(WIRE_SENSOR_HEIGHTS):
-        device = wire_device_id(wire, height)
-        cum = compute_cumulative_dli(df_day[df_day["device"] == device])
-
-        if cum is None or cum.empty:
-            continue
-
-        label = f"H{height}"
-        color = DLI_LINE_COLORS[i % len(DLI_LINE_COLORS)]
-
-        fig.add_trace(
-            go.Scatter(
-                # Convert UTC → local wall-clock so the axis matches the day shown
-                x=cum["time"].dt.tz_convert(timezone).dt.tz_localize(None),
-                y=cum["cumulative_dli"],
-                name=label,
-                mode="lines",
-                line=dict(color=color, width=2),
-                hovertemplate=(
-                    f"<b>{label}</b><br>%{{x|%H:%M}}<br>"
-                    "DLI: %{y:.2f} mol/m²<extra></extra>"
-                ),
-            )
-        )
-
-    fig.update_layout(
-        template="plotly_white",
-        title=dict(text=f"Cumulative DLI — {target_day.date()}"),
-        height=420,
-        hovermode="x unified",
-        xaxis_title="Time of day",
-        yaxis_title="Cumulative DLI (mol/m²)",
-        margin=dict(l=20, r=20, t=60, b=20),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-    )
-
-    return fig

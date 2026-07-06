@@ -102,7 +102,7 @@ class TestGreenhouseLayout:
         Boxes (latest value) and bands (per-height DLI) are looked up by these
         ids, which `compute_sensor_metrics` reproduces as `height_{n}`.
         """
-        from wp6_data.red.routes.multi_height import SVG_LAYOUT_PATH, parse_svg
+        from wp6_data.red.multi_height.svg import SVG_LAYOUT_PATH, parse_svg
 
         _, _, boxes, bands = parse_svg(SVG_LAYOUT_PATH)
         expected = {f"height_{h}" for h in WIRE_SENSOR_HEIGHTS}
@@ -133,7 +133,7 @@ class TestComputeSensorMetrics:
     def test_selects_chosen_measurement_and_skips_dli(self):
         import pandas as pd
 
-        from wp6_data.red.routes.multi_height import compute_sensor_metrics
+        from wp6_data.red.multi_height.data import compute_sensor_metrics
 
         metrics = compute_sensor_metrics(self._df(), "temp", "WS_01_01")
         h1 = metrics[metrics["sensor_id"] == "height_1"].iloc[0]
@@ -143,7 +143,7 @@ class TestComputeSensorMetrics:
     def test_par_gets_dli_aggregate(self):
         import pandas as pd
 
-        from wp6_data.red.routes.multi_height import compute_sensor_metrics
+        from wp6_data.red.multi_height.data import compute_sensor_metrics
 
         metrics = compute_sensor_metrics(self._df(), "par", "WS_01_01")
         h1 = metrics[metrics["sensor_id"] == "height_1"].iloc[0]
@@ -168,6 +168,6 @@ class TestWireDeviceId:
 class TestWireEnumeration:
     def test_wire_ids_lists_declared_wires(self):
         """Both wires declared in metadata are enumerated, de-duped, sorted."""
-        from wp6_data.red.routes.multi_height import wire_ids
+        from wp6_data.red.multi_height.data import wire_ids
 
         assert wire_ids() == ["WS_01_01", "WS_01_02"]

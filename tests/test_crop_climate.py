@@ -15,19 +15,19 @@ import pandas as pd
 
 from wp6_data.red.db import WIRE_SENSOR_HEIGHTS, wire_device_id
 from wp6_data.red.growth_sections import load_growth_sections
-from wp6_data.red.routes.multi_height import (
-    MULTI_HEIGHT_VIEWS,
-    _admin_build_panel,
-    _audit_table,
+from wp6_data.red.multi_height.cells import (
     _fmt_duration,
-    _fungal_cell,
-    _height_dli_cell,
-    _section_badges,
-    _series_for,
     _sparkline_svg,
-    _vpd_cell,
-    _vpd_sparkline_svg,
+    admin_build_panel,
+    audit_table,
+    fungal_cell,
+    height_dli_cell,
+    section_badges,
+    vpd_cell,
+    vpd_sparkline_svg,
 )
+from wp6_data.red.multi_height.data import series_for
+from wp6_data.red.routes.multi_height import MULTI_HEIGHT_VIEWS
 
 RED_METADATA = (
     Path(__file__).parent.parent / "src/wp6_data/red/metadata.yaml"
@@ -103,29 +103,29 @@ class TestSeriesFor:
         )
 
     def test_returns_time_sorted_values_for_device_and_measurement(self):
-        assert _series_for(self._df(), wire_device_id("WS_01_01", 1), "par") == [1.0, 2.0]
+        assert series_for(self._df(), wire_device_id("WS_01_01", 1), "par") == [1.0, 2.0]
 
     def test_scopes_to_the_right_height(self):
-        assert _series_for(self._df(), wire_device_id("WS_01_01", 2), "par") == [5.0]
+        assert series_for(self._df(), wire_device_id("WS_01_01", 2), "par") == [5.0]
 
     def test_empty_frame_returns_empty(self):
-        assert _series_for(pd.DataFrame(), "WS_01_01-h1", "par") == []
+        assert series_for(pd.DataFrame(), "WS_01_01-h1", "par") == []
 
 
 class TestPlantRail:
     def test_asset_exists_and_height_matches_zones(self):
         import xml.etree.ElementTree as ET
 
-        from wp6_data.red.routes.multi_height import CROP_ROW_HEIGHT, PLANT_SVG_PATH
+        from wp6_data.red.multi_height.cells import CROP_ROW_HEIGHT, PLANT_SVG_PATH
 
         viewbox = ET.parse(PLANT_SVG_PATH).getroot().attrib["viewBox"].split()
         assert int(viewbox[3]) == len(WIRE_SENSOR_HEIGHTS) * CROP_ROW_HEIGHT
 
     def test_zone_cell_crops_to_its_row(self):
-        from wp6_data.red.routes.multi_height import CROP_ROW_HEIGHT, _plant_zone_cell
+        from wp6_data.red.multi_height.cells import CROP_ROW_HEIGHT, plant_zone_cell
 
         total = len(WIRE_SENSOR_HEIGHTS)
-        html = _plant_zone_cell(2, total, "data:image/svg+xml;base64,XYZ")
+        html = plant_zone_cell(2, total, "data:image/svg+xml;base64,XYZ")
         # Full SVG sized to all rows, offset up to show this row's zone.
         assert f'height="{total * CROP_ROW_HEIGHT}"' in html
         assert f"margin-top:-{2 * CROP_ROW_HEIGHT}px" in html
@@ -134,31 +134,31 @@ class TestPlantRail:
 
 class TestMeasurementCell:
     def test_cell_has_relative_background_value_and_is_clickable(self):
-        from wp6_data.red.routes.multi_height import _measurement_cell
+        from wp6_data.red.multi_height.cells import measurement_cell
 
-        html = _measurement_cell([10.0, 20.0], "temp", 0.0, 20.0, 1)
+        html = measurement_cell([10.0, 20.0], "temp", 0.0, 20.0, 1)
         assert "background:rgba(" in html
         assert "20.0" in html  # latest value rendered
         assert 'data-metric="temp"' in html  # clickable for chart expansion
         assert 'data-height="1"' in html
 
     def test_empty_series_renders_placeholder(self):
-        from wp6_data.red.routes.multi_height import _measurement_cell
+        from wp6_data.red.multi_height.cells import measurement_cell
 
-        assert "—" in _measurement_cell([], "par", 0.0, 1.0, 1)
+        assert "—" in measurement_cell([], "par", 0.0, 1.0, 1)
 
 
 class TestDerivedCells:
     def test_height_dli_cell_shows_total_and_sparkline(self):
         # n readings -> n-1 cumulative points; need 3+ for a drawable line.
         df = pd.DataFrame({"time": [_at(0), _at(15), _at(30)], "value": [100.0] * 3})
-        out = _height_dli_cell(df, 1)
+        out = height_dli_cell(df, 1)
         assert "mol" in out
         assert "polyline" in out
         assert 'data-metric="dli"' in out  # clickable
 
     def test_height_dli_cell_empty(self):
-        assert "—" in _height_dli_cell(pd.DataFrame(columns=["time", "value"]), 1)
+        assert "—" in height_dli_cell(pd.DataFrame(columns=["time", "value"]), 1)
 
     def test_vpd_cell_renders_value_and_band(self):
         df = pd.DataFrame({
@@ -166,33 +166,33 @@ class TestDerivedCells:
             "measurement": ["temp", "hum", "temp", "hum"],
             "value": [25.0, 60.0, 26.0, 55.0],
         })
-        out = _vpd_cell(df, 0.4, 1.2, 1)
+        out = vpd_cell(df, 0.4, 1.2, 1)
         assert "kPa" in out
         assert "<rect" in out  # shaded healthy band
 
     def test_vpd_cell_empty(self):
         empty = pd.DataFrame(columns=["time", "measurement", "value"])
-        assert "—" in _vpd_cell(empty, 0.4, 1.2, 1)
+        assert "—" in vpd_cell(empty, 0.4, 1.2, 1)
 
     def test_fungal_cell_shows_hours(self):
         df = pd.DataFrame({"time": [_at(0), _at(15), _at(30)], "value": [90.0, 90.0, 90.0]})
-        out = _fungal_cell(df, 85.0, 24.0, 1)
+        out = fungal_cell(df, 85.0, 24.0, 1)
         assert " h" in out
         assert "polyline" in out
 
     def test_vpd_sparkline_has_band_and_line(self):
-        svg = _vpd_sparkline_svg([0.5, 2.0], 0.4, 1.2)
+        svg = vpd_sparkline_svg([0.5, 2.0], 0.4, 1.2)
         assert "<rect" in svg
         assert "polyline" in svg
 
     def test_vpd_sparkline_too_few_points(self):
-        assert "polyline" not in _vpd_sparkline_svg([0.5], 0.4, 1.2)
+        assert "polyline" not in vpd_sparkline_svg([0.5], 0.4, 1.2)
 
     def test_dli_value_uses_source_colour_and_separator(self):
-        from wp6_data.red.routes.multi_height import HEIGHT_DLI_COLOR
+        from wp6_data.red.multi_height.cells import HEIGHT_DLI_COLOR
 
         df = pd.DataFrame({"time": [_at(0), _at(15), _at(30)], "value": [100.0] * 3})
-        out = _height_dli_cell(df, 1)
+        out = height_dli_cell(df, 1)
         assert HEIGHT_DLI_COLOR in out  # DLI value coloured like its source (PAR)
         assert "border-left" in out     # vertical separator before the derived block
 
@@ -202,38 +202,38 @@ class TestDerivedCells:
             "measurement": ["temp", "hum", "temp", "hum"],
             "value": [25.0, 60.0, 26.0, 55.0],
         })
-        assert "background-clip:text" in _vpd_cell(df, 0.4, 1.2, 1)
+        assert "background-clip:text" in vpd_cell(df, 0.4, 1.2, 1)
 
 
 class TestSectionBadges:
     def test_no_state_is_empty(self):
-        assert _section_badges(None, 0.4, 1.2) == ""
+        assert section_badges(None, 0.4, 1.2) == ""
 
     def test_prescriptive_labels_and_tooltips(self):
         state = {"canopy_deficit": True, "fungal_active": True,
                  "vpd_in_band": True, "vpd_latest": 0.9}
-        out = _section_badges(state, 0.4, 1.2)
+        out = section_badges(state, 0.4, 1.2)
         assert "Add light" in out
         assert "Dry the air" in out
         assert "cc-tip" in out  # supportive hover tooltip present
 
     def test_vpd_high_says_raise_humidity(self):
         state = {"vpd_in_band": False, "vpd_latest": 1.6}  # above 1.2 band -> too dry
-        assert "Raise humidity" in _section_badges(state, 0.4, 1.2)
+        assert "Raise humidity" in section_badges(state, 0.4, 1.2)
 
     def test_vpd_low_says_ventilate(self):
         state = {"vpd_in_band": False, "vpd_latest": 0.2}  # below 0.4 band -> too humid
-        assert "Ventilate" in _section_badges(state, 0.4, 1.2)
+        assert "Ventilate" in section_badges(state, 0.4, 1.2)
 
     def test_healthy_section_has_no_badges(self):
         state = {"canopy_deficit": False, "fungal_active": False,
                  "vpd_in_band": True, "vpd_latest": 0.9}
-        assert _section_badges(state, 0.4, 1.2) == ""
+        assert section_badges(state, 0.4, 1.2) == ""
 
 
 class TestAdminBuildPanel:
     def test_has_update_and_rebuild_actions(self):
-        out = _admin_build_panel("WS_01_01", date(2026, 6, 2))
+        out = admin_build_panel("WS_01_01", date(2026, 6, 2))
         assert "crop-climate/update" in out
         assert "crop-climate/rebuild" in out
         assert "WS_01_01" in out
@@ -241,7 +241,7 @@ class TestAdminBuildPanel:
 
 class TestAuditLog:
     def test_empty_range_message(self):
-        assert "No risk episodes" in _audit_table([])
+        assert "No risk episodes" in audit_table([])
 
     def test_open_episode_shows_ongoing(self):
         ep = {
@@ -249,7 +249,7 @@ class TestAuditLog:
             "start_time": _T0, "end_time": None, "peak": 3.2,
             "thresholds": {"rh_pct": 85},
         }
-        out = _audit_table([ep])
+        out = audit_table([ep])
         assert "Fungal risk" in out
         assert "ongoing" in out
         assert "H2" in out
@@ -260,7 +260,7 @@ class TestAuditLog:
             "height": 1, "label": "Kop", "risk": "vpd",
             "start_time": _T0, "end_time": _at(150), "peak": 1.0, "thresholds": {},
         }
-        assert "2h 30m" in _audit_table([ep])
+        assert "2h 30m" in audit_table([ep])
 
     def test_times_render_in_display_timezone(self):
         # _T0 is 12:00 UTC; in Europe/Amsterdam (CEST in May) that reads 14:00.
@@ -268,7 +268,7 @@ class TestAuditLog:
             "height": 1, "label": "Head", "risk": "vpd",
             "start_time": _T0, "end_time": None, "peak": 1.0, "thresholds": {},
         }
-        out = _audit_table([ep], "Europe/Amsterdam")
+        out = audit_table([ep], "Europe/Amsterdam")
         assert "14:00 CEST" in out
         assert "12:00 UTC" not in out
 

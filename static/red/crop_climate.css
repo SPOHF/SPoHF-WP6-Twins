@@ -1,0 +1,9 @@
+/* Instant, styled hover tooltip for the crop-climate risk badges (native
+   `title` is slow + unstyled). */
+.cc-badge{position:relative;cursor:help;}
+.cc-badge .cc-tip{visibility:hidden;opacity:0;position:absolute;left:0;
+  top:calc(100% + 6px);z-index:30;width:220px;white-space:normal;
+  background:#111827;color:#fff;font-weight:400;font-size:0.75rem;line-height:1.35;
+  padding:6px 9px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.25);
+  transition:opacity .12s ease;pointer-events:none;}
+.cc-badge:hover .cc-tip{visibility:visible;opacity:1;}
