@@ -35,6 +35,11 @@ _PANELS = [
     ("soilConductivity",4, "EC (μS/cm)"),
 ]
 
+# Ideal soil pH band for blueberries — acidic soil, per MSU/UMN/Cornell
+# extension guidance. Permanent (not derived from data).
+_PH_IDEAL_MIN = 4.2
+_PH_IDEAL_MAX = 5.5
+
 _settings = Settings()
 
 
@@ -222,6 +227,12 @@ def _build_chart(df, *, fertigation_days: list[date]) -> str:
                 row=row, col=1,
             )
         fig.update_yaxes(title_text=y_label, row=row, col=1)
+        if sensor_tag == "soil_pH":
+            fig.add_hrect(
+                y0=_PH_IDEAL_MIN, y1=_PH_IDEAL_MAX,
+                row=row, col=1,
+                fillcolor="#16a34a", opacity=0.12, line_width=0,
+            )
 
     fig.update_xaxes(showticklabels=True, tickformat="%d %b %Y", tickangle=-30)
 
