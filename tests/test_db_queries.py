@@ -17,7 +17,6 @@ def sample_readings():
             "sensor_tag": "temperature",
             "value": "21.5",
             "datetime_measure": "2024-06-15T12:00:00+00:00",
-            "api_timestamp": "2024-06-15T12:00:01+00:00",
         }
     ]
 
@@ -70,7 +69,6 @@ class TestUpsertReadings:
                 "sensor_tag": "t",
                 "value": str(i),
                 "datetime_measure": "2024-01-01T00:00:00+00:00",
-                "api_timestamp": "2024-01-01T00:00:00+00:00",
             }
             for i in range(5)
         ]

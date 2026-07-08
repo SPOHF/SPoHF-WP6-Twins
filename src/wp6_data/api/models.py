@@ -20,7 +20,10 @@ class SensorReading(BaseModel):
     value: str  # Coerced to string
     metadata: dict[str, Any] | None = None
     datetime_measure: datetime  # When measurement was taken
-    timestamp: datetime  # When ingested into API
+    # We deliberately ignore the relay's ingestion-time field (sent as `timestamp`,
+    # renamed to `synced_at` ~2026-07-07). It's a datalake internal we never persist or
+    # act on — freshness is derived from datetime_measure instead — so it's dropped here
+    # rather than parsed. Pydantic ignores the extra key, so either API name is fine.
 
     @field_validator("value", mode="before")
     @classmethod

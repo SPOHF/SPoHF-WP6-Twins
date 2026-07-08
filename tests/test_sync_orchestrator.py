@@ -96,7 +96,8 @@ class TestReadingToParams:
         assert params["sensor_tag"] == "temperature"
         assert params["value"] == "21.5"
         assert "datetime_measure" in params
-        assert "api_timestamp" in params
+        # We deliberately drop the relay's ingestion timestamp — not persisted, not used.
+        assert "api_timestamp" not in params
 
 
 # --- _flush_batch ---

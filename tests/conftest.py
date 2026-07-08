@@ -25,7 +25,6 @@ def make_reading(**overrides) -> SensorReading:
         "sensor_tag": "temperature",
         "value": "21.5",
         "datetime_measure": datetime(2024, 6, 15, 12, 0, 0, tzinfo=UTC),
-        "timestamp": datetime(2024, 6, 15, 12, 0, 1, tzinfo=UTC),
     }
     defaults.update(overrides)
     return SensorReading(**defaults)

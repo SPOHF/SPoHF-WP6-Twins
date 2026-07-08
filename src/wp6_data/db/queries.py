@@ -20,7 +20,7 @@ async def upsert_readings(
         conn: psycopg async connection
         readings: List of dicts with keys:
             sensor_id, project, device_name, sensor_tag,
-            value, datetime_measure, api_timestamp
+            value, datetime_measure
 
     Returns:
         Tuple of (total upserted, newly created)

@@ -242,7 +242,10 @@ class SyncOrchestrator:
                             reading.datetime_measure.isoformat(),
                         )
 
-                        reading_ts = ensure_utc(reading.timestamp)
+                        # Watermark tracks how fresh our measurements are, so it keys on
+                        # datetime_measure (also what the API filters windows on) — not the
+                        # relay's ingestion time, which we ignore entirely.
+                        reading_ts = ensure_utc(reading.datetime_measure)
                         if latest_timestamp is None or reading_ts > latest_timestamp:
                             latest_timestamp = reading_ts
 
@@ -356,5 +359,4 @@ class SyncOrchestrator:
             "sensor_tag": reading.sensor_tag,
             "value": reading.value,
             "datetime_measure": reading.datetime_measure.isoformat(),
-            "api_timestamp": reading.timestamp.isoformat(),
         }
