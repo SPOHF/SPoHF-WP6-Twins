@@ -37,12 +37,6 @@ BATCH_SIZE = 1000  # Records per transaction
 INCREMENTAL_LOOKBACK_DAYS = 7
 CONSECUTIVE_DUPE_WINDOW_THRESHOLD = 3
 
-# All SPoHF datalake-relayed readings are tagged with this single project — the
-# toggle-dimension counterpart to yookr-direct's 'yookr-direct' (issue 026). We
-# deliberately ignore the relay API's own `reading.project` (which arrives as
-# 'unknown') so the datalake is one clean, measurable bucket.
-DATALAKE_PROJECT = "spohf-datalake"
-
 
 def _log_window_summary(
     window_start: datetime,
@@ -373,10 +367,13 @@ class SyncOrchestrator:
         return None, None, str(exc)[:200]
 
     def _reading_to_params(self, reading: SensorReading) -> dict[str, Any]:
-        """Convert SensorReading to query parameters."""
+        """Convert SensorReading to query parameters.
+
+        The relay's own `reading.project` is ignored — it arrives as 'unknown'
+        and the column no longer exists. Automated rows take `source`'s default.
+        """
         return {
             "sensor_id": reading.sensor_id,
-            "project": DATALAKE_PROJECT,
             "device_name": reading.device_name,
             "sensor_tag": reading.sensor_tag,
             "value": reading.value,

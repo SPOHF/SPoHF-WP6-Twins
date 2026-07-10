@@ -1,7 +1,7 @@
 """Blue sensor data provider — satisfies SensorDataProvider protocol.
 
-Wraps the blue deps module functions, parameterised by project filter.
-Each DataSource in blue's config gets its own provider instance.
+Wraps the blue deps module functions. The SPoHF datalake is blue's only
+automated source, so there is nothing to filter on: one provider instance.
 """
 
 from __future__ import annotations
@@ -15,15 +15,9 @@ from wp6_data.blue import deps
 
 
 class BlueSensorProvider:
-    """SensorDataProvider backed by TimescaleDB, filtered by project."""
+    """SensorDataProvider backed by TimescaleDB."""
 
-    def __init__(
-        self,
-        *,
-        project: str | None = None,
-        source_key: str | None = None,
-    ) -> None:
-        self._project = project
+    def __init__(self, *, source_key: str | None = None) -> None:
         self._source_key = source_key
 
     @property
@@ -47,19 +41,18 @@ class BlueSensorProvider:
             start=start,
             end=end,
             limit=limit,
-            project=self._project,
             bucket=bucket,
             agg=agg,
         )
 
     async def fetch_available_sensors(self) -> list[dict[str, Any]]:
-        return await deps.fetch_available_sensors(project=self._project)
+        return await deps.fetch_available_sensors()
 
     async def fetch_sync_metrics(self) -> list[dict[str, Any]]:
-        return await deps.fetch_sync_metrics(project=self._project)
+        return await deps.fetch_sync_metrics()
 
     async def fetch_daily_coverage(self) -> list[dict[str, Any]]:
-        return await deps.fetch_daily_coverage(project=self._project)
+        return await deps.fetch_daily_coverage()
 
     async def fetch_device_data(self) -> dict[str, dict]:
         sensors = await self.fetch_available_sensors()

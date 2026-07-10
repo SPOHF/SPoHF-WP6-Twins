@@ -111,7 +111,7 @@ def blue_case(
         AsyncMock(return_value={"uploads": {}, "measurements": {}}),
     )
 
-    provider = BlueSensorProvider(project=None, source_key="test-source")
+    provider = BlueSensorProvider(source_key="test-source")
     return provider, Expectations()
 
 

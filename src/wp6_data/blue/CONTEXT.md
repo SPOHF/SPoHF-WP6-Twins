@@ -62,24 +62,24 @@ A kind of manual measurement. In source files this is a free-text column
 
 ## Data sources
 
-### Automated sensor sources — SPoHF datalake & yookr-direct
+### Automated sensor source — the SPoHF datalake
 The automated blue sensors (soil, leaf, PAR, pH, row climate, weather station)
-are the **same physical yookr sensors**, ingested two ways:
+are physical **yookr sensors**, but blue never talks to yookr. It reads them
+relayed through SPoHF's backoffice platform (`yookr-data`), which is the single
+canonical automated source. There is no data-source toggle: the nav bar shows a
+static "SPoHF Datalake" badge.
 
-- **SPoHF datalake** — the readings relayed through SPoHF's backoffice platform.
-  Becoming the single canonical source; `yookr-direct` is being retired.
-- **yookr-direct** — the same readings pulled straight from the yookr API,
-  without the SPoHF platform in between.
+Until 2026-07 a second pipeline, `yookr-direct`, pulled the same sensors straight
+from `api.yookr.org` as a cross-check while the relay matured, and a `project`
+column on `readings` told the two apart. Both are gone; blue now matches red's
+single-categorical model, where `readings.source` distinguishes manual uploads
+from automated ingest (which keeps the `'unknown'` default). History and the one
+surviving gap (December 2025) are in `docs/blue/yookr-direct-retirement.md`.
 
-These are not independent feeds of different sensors — they are alternate
-pipelines for one set of sensors, so their coverage is expected to overlap. A
-data-source toggle lets a viewer switch which pipeline the dashboard reads.
-
-As of 2026-07-10 the datalake is a verified **series-level superset** of
-yookr-direct (no sensor exists only in the direct feed), which unblocks the
-retirement. It is *not* a row-level superset: see
-`docs/blue/yookr-direct-retirement.md`. Once yookr-direct is gone, `project`
-disappears and blue matches red's single-categorical `source` model.
+**The relay caps a query at 10,000 records** (Elasticsearch `max_result_window`).
+`SpoHFClient.fetch_window` bisects any time window that overflows, because offset
+paging silently stops there — which once cost ~280k readings. Re-fetching means
+the sync re-emits rows, so every ingest path must stay idempotent.
 
 ### long_data
 Manual, lab/field-recorded blueberry measurements delivered as yearly Excel

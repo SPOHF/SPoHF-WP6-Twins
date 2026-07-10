@@ -1,8 +1,8 @@
 """Blue dashboard dependencies: config, TimescaleDB helpers.
 
-All query functions accept an optional ``project`` parameter:
-- ``None`` (default) → exclude "yookr-direct" (SPoHF Datalake view)
-- A string → include only that project (used by the Yookr view)
+The SPoHF datalake is the single automated source, so reads are unfiltered:
+every row in ``readings`` is visible. ``source`` distinguishes manual uploads
+from automated ingest, mirroring red.
 """
 
 from datetime import datetime, timedelta
@@ -18,14 +18,11 @@ from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.export import get_export_metadata as _get_export_metadata
 from wp6_data.shared.metadata import MetadataRegistry
 
-YOOKR_PROJECT = "yookr-direct"
-
 metadata = MetadataRegistry(Path(__file__).parent / "metadata.yaml")
 
-# Manual-source values written to readings.`source` (e.g. "insects").
-# Manual data is farm-level — not an automated pipeline — so it stays visible
-# regardless of the yookr-vs-datalake `project` toggle. Derived from metadata
-# (single source of truth: sensors whose metadata declares a `source`).
+# Manual-source values written to readings.`source` (e.g. "insects"). Derived
+# from metadata (single source of truth: sensors whose metadata declares a
+# `source`). Automated rows keep the 'unknown' default.
 MANUAL_SOURCES: tuple[str, ...] = tuple(sorted({
     m.source for m in metadata.sensor_defaults.values() if m.source
 }))
@@ -47,41 +44,12 @@ async def close_db() -> None:
     await close_pool()
 
 
-def _project_filter(project: str | None) -> tuple[str, dict[str, Any]]:
-    """WHERE fragment for the automated-source (``project``) view only.
-
-    - project=None  → exclude yookr-direct (the SPoHF Datalake view)
-    - project=<str> → only that project (the Yookr view)
-    """
-    if project is not None:
-        return "project = %(project)s", {"project": project}
-    return "project != %(excluded_project)s", {"excluded_project": YOOKR_PROJECT}
-
-
-def _visible_filter(project: str | None) -> tuple[str, dict[str, Any]]:
-    """Rows visible under a data-source view.
-
-    Automated rows are filtered by ``project`` (the toggle); manually-
-    uploaded rows carry a non-default ``source`` and are farm-level, so they
-    are always included — insect data shows under either view.
-    """
-    proj_clause, params = _project_filter(project)
-    if MANUAL_SOURCES:
-        params["manual_sources"] = list(MANUAL_SOURCES)
-        return (
-            f"({proj_clause} OR source = ANY(%(manual_sources)s))",
-            params,
-        )
-    return proj_clause, params
-
-
 async def fetch_data(
     sensor_tags: list[str] | None = None,
     device_names: list[str] | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
     limit: int = 500000,
-    project: str | None = None,
     *,
     bucket: timedelta | None = None,
     agg: str | None = None,
@@ -94,9 +62,9 @@ async def fetch_data(
     for the contract the fallback backends mirror.
     """
     pool = get_pool()
-    proj_clause, params = _visible_filter(project)
+    params: dict[str, Any] = {}
 
-    conditions = [proj_clause]
+    conditions: list[str] = []
     if sensor_tags:
         conditions.append("sensor_tag = ANY(%(tags)s)")
         params["tags"] = sensor_tags
@@ -110,7 +78,8 @@ async def fetch_data(
         conditions.append("time <= %(end)s")
         params["end"] = end
 
-    where = " AND ".join(conditions)
+    # No source filter remains, so an unconstrained fetch has no conditions at all.
+    where = " AND ".join(conditions) if conditions else "TRUE"
     params["limit"] = limit
     columns = ["device", "sensor", "time", "value"]
 
@@ -168,27 +137,22 @@ async def fetch_data(
     return df
 
 
-async def _fetch_sensors_from_cagg(project: str | None = None) -> list[dict[str, Any]]:
+async def _fetch_sensors_from_cagg() -> list[dict[str, Any]]:
     """Sensor list + counts: automated rows from the cagg, manual rows direct.
 
-    The continuous aggregate groups by ``project`` only (it has no ``source``
-    column — adding one would mean recreating the cagg, a heavier migration).
-    So automated sensors come from the cagg filtered by the toggle, and
-    manually-uploaded sensors are read straight from ``readings`` and merged
-    in unconditionally — making manual data visible under either view without
-    touching the cagg. Manual ``(device, sensor)`` pairs override any cagg
-    row (manual rows land in the cagg under the default ``project`` too).
+    Manual rows land in the cagg too, but the cagg's per-day counts are summed
+    while the manual query counts raw rows, so manual ``(device, sensor)`` pairs
+    are read straight from ``readings`` and override the cagg row.
     """
     pool = get_pool()
-    proj_clause, params = _project_filter(project)
+    params: dict[str, Any] = {}
 
-    cagg_query = f"""
+    cagg_query = """
         SELECT device_name AS device, sensor_tag AS sensor,
                sum(reading_count)  AS readings,
                min(first_reading)  AS earliest,
                max(last_reading)   AS latest
         FROM sensors_daily_summary
-        WHERE {proj_clause}
         GROUP BY device_name, sensor_tag
         ORDER BY readings DESC
     """
@@ -221,42 +185,35 @@ async def _fetch_sensors_from_cagg(project: str | None = None) -> list[dict[str,
     return automated + manual_rows
 
 
-async def fetch_available_sensors(project: str | None = None) -> list[dict[str, Any]]:
+async def fetch_available_sensors() -> list[dict[str, Any]]:
     """Get list of sensors with reading counts and date range (cached, via cagg)."""
     from wp6_data.shared.sensor_summary import get_sensor_summary
 
-    cache_key = f"blue:{project or 'default'}"
-    return await get_sensor_summary(cache_key, _fetch_sensors_from_cagg, project=project)
+    return await get_sensor_summary("blue", _fetch_sensors_from_cagg)
 
 
-async def fetch_daily_coverage(project: str | None = None) -> list[dict[str, Any]]:
+async def fetch_daily_coverage() -> list[dict[str, Any]]:
     """Distinct days with data per device+sensor, tagged manual vs automated.
 
-    Manual coverage (``source`` is a manual slug) is always visible and flagged
-    ``manual=True`` straight from the ``daily_coverage.source`` column — no
-    ``readings`` access.
+    Manual coverage (``source`` is a manual slug) is flagged ``manual=True``
+    straight from the ``daily_coverage.source`` column — no ``readings`` access.
 
-    Automated coverage is matched against the ``sensors_daily_summary`` cagg at
-    **day granularity** — ``(device, sensor, day)``, not just ``(device,
-    sensor)``. ``daily_coverage`` has no ``project`` column, so a pair-level
-    match would show a day under a source-view whenever the *pair* appeared
-    anywhere in that view — leaking the other source's days (e.g.
-    ``weatherstation:airTemperature`` looked fresh under the Datalake view
-    because ``yookr-direct`` wrote those days). The cagg *does* group by
-    ``project``, so joining on the day (``bucket::date``, UTC — consistent with
-    how ``daily_coverage.day`` derives from ``readings.time``) keeps only the
-    days the active source actually owns. The cagg can lag a freshly-ingested
-    day by one refresh cycle (~15 min), acceptable for a status view.
+    Automated coverage is still matched against the ``sensors_daily_summary``
+    cagg at ``(device, sensor, day)``. That join was introduced to stop one
+    source's days leaking into the other's view (issue 022); with a single
+    source it instead guards drift — ``daily_coverage`` rows are only ever
+    inserted, never removed, so a day whose readings were deleted would keep
+    claiming coverage. The cagg is derived from ``readings``, so it tells the
+    truth. It can lag a freshly-ingested day by one refresh cycle (~15 min),
+    acceptable for a status view.
     """
     pool = get_pool()
-    proj_clause, params = _project_filter(project)
-    params["manual_sources"] = list(MANUAL_SOURCES)
+    params: dict[str, Any] = {"manual_sources": list(MANUAL_SOURCES)}
 
-    query = f"""
+    query = """
         WITH visible_auto AS (
             SELECT DISTINCT device_name, sensor_tag, bucket::date AS day
             FROM sensors_daily_summary
-            WHERE {proj_clause}
         )
         SELECT dc.device_name AS device, dc.sensor_tag AS sensor, dc.day,
                (dc.source = ANY(%(manual_sources)s)) AS manual
@@ -272,22 +229,11 @@ async def fetch_daily_coverage(project: str | None = None) -> list[dict[str, Any
         return await cur.fetchall()
 
 
-async def fetch_sync_metrics(project: str | None = None) -> list[dict[str, Any]]:
-    """Fetch sync metadata, filtered by data-source view.
-
-    - project=None  → exclude yookr-direct endpoint (SPoHF Datalake view)
-    - project=<str> → include only that endpoint
-    """
+async def fetch_sync_metrics() -> list[dict[str, Any]]:
+    """Fetch sync metadata for every endpoint (only the datalake sync remains)."""
     pool = get_pool()
 
-    if project is not None:
-        where = "WHERE endpoint = %(endpoint)s"
-        params: dict[str, Any] = {"endpoint": project}
-    else:
-        where = "WHERE endpoint != %(excluded)s"
-        params = {"excluded": YOOKR_PROJECT}
-
-    query = f"""
+    query = """
         SELECT endpoint,
                last_run_at,
                last_run_success,
@@ -300,11 +246,10 @@ async def fetch_sync_metrics(project: str | None = None) -> list[dict[str, Any]]
                total_failures,
                last_timestamp AS last_data_timestamp
         FROM sync_metadata
-        {where}
     """
 
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(query, params)
+        await cur.execute(query)
         return await cur.fetchall()
 
 

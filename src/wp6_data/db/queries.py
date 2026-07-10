@@ -19,8 +19,7 @@ async def upsert_readings(
     Args:
         conn: psycopg async connection
         readings: List of dicts with keys:
-            sensor_id, project, device_name, sensor_tag,
-            value, datetime_measure
+            sensor_id, device_name, sensor_tag, value, datetime_measure
 
     Returns:
         Tuple of (total upserted, newly created)
@@ -29,19 +28,18 @@ async def upsert_readings(
         return 0, 0
 
     query = (
-        "INSERT INTO readings (time, device_name, sensor_tag, value, raw_value, project)"
+        "INSERT INTO readings (time, device_name, sensor_tag, value, raw_value)"
         " VALUES ("
         "  %(datetime_measure)s, %(device_name)s, %(sensor_tag)s,"
         r"  CASE WHEN %(value)s ~ '^-?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$'"
         "       THEN %(value)s::double precision"
         "       ELSE NULL"
         "  END,"
-        "  %(value)s, %(project)s"
+        "  %(value)s"
         " )"
-        # `project` is part of the dedup key (idx_readings_dedup_v2), so rows from
-        # different sources (yookr-direct vs spohf-datalake) for the same
-        # (device, sensor, time) coexist instead of one absorbing the other.
-        " ON CONFLICT (device_name, sensor_tag, time, project)"
+        # Matches idx_readings_dedup_v3. Re-syncing a window (the client bisects
+        # and re-emits) must update in place, never duplicate.
+        " ON CONFLICT (device_name, sensor_tag, time)"
         " DO UPDATE SET value = EXCLUDED.value,"
         "              raw_value = EXCLUDED.raw_value,"
         "              synced_at = NOW()"

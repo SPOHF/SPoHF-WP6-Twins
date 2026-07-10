@@ -17,11 +17,7 @@ from wp6_data.shared.export import clear_export_dir
 log = structlog.get_logger()
 
 
-async def export_device(
-    device_name: str,
-    output_dir: Path,
-    project_exclude: str = "yookr-direct",
-) -> Path | None:
+async def export_device(device_name: str, output_dir: Path) -> Path | None:
     """Export all readings for a device to a wide-format CSV.
 
     Pivots sensor_tags into columns so each row is a timestamp.
@@ -33,12 +29,11 @@ async def export_device(
         SELECT time, sensor_tag, value
         FROM readings
         WHERE device_name = %(device)s
-          AND project != %(excluded_project)s
         ORDER BY time
     """
 
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(query, {"device": device_name, "excluded_project": project_exclude})
+        await cur.execute(query, {"device": device_name})
         rows = await cur.fetchall()
 
     if not rows:
@@ -63,19 +58,18 @@ async def export_device(
     return output_path
 
 
-async def get_device_names(project_exclude: str = "yookr-direct") -> list[str]:
+async def get_device_names() -> list[str]:
     """Get all distinct device names from the readings table."""
     pool = get_pool()
 
     query = """
         SELECT DISTINCT device_name
         FROM readings
-        WHERE project != %(excluded_project)s
         ORDER BY device_name
     """
 
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(query, {"excluded_project": project_exclude})
+        await cur.execute(query)
         rows = await cur.fetchall()
 
     return [row[0] for row in rows]

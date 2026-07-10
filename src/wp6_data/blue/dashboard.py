@@ -55,9 +55,6 @@ def _monitor_card() -> str:
         ),
     )
 
-YOOKR_PROJECT = "yookr-direct"
-
-
 # Holds the background boot-training task so it isn't garbage-collected before
 # it runs to completion.
 _bootstrap_task: asyncio.Task | None = None
@@ -83,19 +80,13 @@ async def _shutdown() -> None:
 config = TwinConfig(
     twin_id="blue",
     title="SPoHF Blue Digital Twin",
+    # One automated source. The shared layer renders a static badge (no toggle)
+    # and `get_provider` short-circuits to the default when there is only one.
     data_sources=[
         DataSource(
             key="spohf-datalake",
             label="SPoHF Datalake",
             provider=BlueSensorProvider(source_key="spohf-datalake"),
-        ),
-        DataSource(
-            key="yookr",
-            label="Yookr API",
-            provider=BlueSensorProvider(
-                project=YOOKR_PROJECT,
-                source_key="yookr",
-            ),
         ),
     ],
     metadata=deps.metadata,

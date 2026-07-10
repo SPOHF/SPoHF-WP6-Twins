@@ -1,15 +1,15 @@
 """Blue dashboard operations endpoints: metrics, maintenance."""
 
 from datetime import datetime
-from types import ModuleType
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from wp6_data.blue import deps
-from wp6_data.blue.datasource import GetActiveSource
 from wp6_data.shared import render_card, render_page
+from wp6_data.shared.routes.deps import get_provider
+from wp6_data.shared.twin import SensorDataProvider
 
 router = APIRouter()
 
@@ -80,13 +80,10 @@ async def metrics() -> str:
 
 @router.get("/maintenance", response_class=HTMLResponse)
 async def maintenance(
-    active_source: Annotated[tuple[ModuleType, str], GetActiveSource],
+    provider: Annotated[SensorDataProvider, Depends(get_provider)],
     rebuilt: int | None = Query(default=None),
 ) -> str:
     """Hidden maintenance page for ops tools."""
-    _source, source_name = active_source
-    is_yookr = source_name == "yookr"
-
     rebuilt_msg = ""
     if rebuilt is not None:
         rebuilt_msg = (
@@ -94,24 +91,15 @@ async def maintenance(
             f"Coverage index rebuilt: {rebuilt:,} entries.</p>"
         )
 
-    coverage_card = (
-        render_card(
-            "Coverage Index",
-            "<p>Not available — direct API mode.</p>",
-        )
-        if is_yookr
-        else render_card(
+    content = f"""
+        <h1>Maintenance</h1>
+        {rebuilt_msg}
+        {render_card(
             "Coverage Index",
             '<form method="post" action="/rebuild-coverage">'
             '<button type="submit">Rebuild Coverage Index</button></form>',
             description="Rebuild daily_coverage table from all existing readings.",
-        )
-    )
-
-    content = f"""
-        <h1>Maintenance</h1>
-        {rebuilt_msg}
-        {coverage_card}
+        )}
         {render_card(
             "Metrics",
             '<p><a href="/metrics">Prometheus metrics</a></p>',
@@ -120,7 +108,7 @@ async def maintenance(
 
     return render_page(
         "SPoHF Blue - Maintenance", content,
-        show_back_link=True, data_source=source_name,
+        show_back_link=True, data_source=provider.data_source_label,
     )
 
 

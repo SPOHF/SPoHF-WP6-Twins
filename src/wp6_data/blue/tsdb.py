@@ -1,14 +1,14 @@
 """TimescaleDB schema bootstrap for the blue twin.
 
-Blue's `readings` has a different column shape than red's: a `project`
-column (the automated yookr-vs-datalake view) plus a `source` column for
-manual-ingest provenance (mirroring red's `source` — distinct concepts, not
-a rename; see ``project_blue_project_vs_red_source`` memo) and a nullable
-`upload_id` FK to `manual_uploads` for rows that came from a manual upload.
+Blue's `readings` carries a `source` column for provenance (manual-ingest slug,
+or 'unknown' for automated datalake rows) and a nullable `upload_id` FK to
+`manual_uploads`. This matches red's single-categorical model: the `project`
+column that once distinguished the yookr-direct and spohf-datalake pipelines
+was dropped once the datalake became the only automated source.
 
 The cagg + `sync_metadata` + `daily_coverage` infrastructure is twin-agnostic
 and lives in `wp6_data.db.schema`/`queries`; `ensure_schema_blue` delegates to
-`ensure_aggregates(pool, project_column="project")` after creating blue's
+`ensure_aggregates(pool, project_column="source")` after creating blue's
 readings hypertable.
 
 Mirrors `wp6_data.red.tsdb`: each twin owns its own readings DDL +
@@ -32,7 +32,6 @@ CREATE TABLE IF NOT EXISTS readings (
     sensor_tag  TEXT             NOT NULL,
     value       DOUBLE PRECISION,
     raw_value   TEXT,
-    project     TEXT             NOT NULL DEFAULT 'unknown',
     source      TEXT             NOT NULL DEFAULT 'unknown',
     synced_at   TIMESTAMPTZ      NOT NULL DEFAULT NOW()
 );
@@ -42,20 +41,25 @@ SELECT create_hypertable('readings', 'time', if_not_exists => TRUE);
 CREATE INDEX IF NOT EXISTS idx_readings_device_tag
     ON readings (device_name, sensor_tag, time DESC);
 
--- Dedup key includes `project` so the datalake (project='spohf-datalake') and
--- yookr-direct (project='yookr-direct') rows for the same (device, sensor, time)
--- coexist instead of one absorbing the other on upsert (issue 026). Manual rows
--- are distinct devices, so `project` alone suffices in the key.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_readings_dedup_v2
-    ON readings (device_name, sensor_tag, time, project);
+-- One automated source, so (device, sensor, time) identifies a reading. Manual
+-- rows live on their own synthetic devices and cannot collide with it.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_readings_dedup_v3
+    ON readings (device_name, sensor_tag, time);
 """
 
-# Migration for existing blue DBs: drop the old 3-column dedup index once the
-# 4-column one above exists. Idempotent — a no-op after the first run, and on a
-# fresh DB (which never had the 3-column index). Ordered after the table DDL so
-# the replacement index is already in place before the old one is removed.
+# Drop the superseded dedup indexes. Idempotent, and a no-op on a fresh DB.
+# Ordered after the table DDL so the replacement index exists first.
 _BLUE_DEDUP_MIGRATION_SQL = """
 DROP INDEX IF EXISTS idx_readings_dedup;
+DROP INDEX IF EXISTS idx_readings_dedup_v2;
+"""
+
+# `project` is dropped by scripts/migrate_blue_drop_project.sql, not here: the
+# purge + cagg rebuild it requires are far too heavy for a startup path, and a
+# half-applied schema is worse than a refusal to boot.
+_PROJECT_COLUMN_EXISTS_SQL = """
+SELECT 1 FROM information_schema.columns
+WHERE table_name = 'readings' AND column_name = 'project'
 """
 
 # Blue's readings gains the same nullable FK red's readings has, added
@@ -81,6 +85,10 @@ CREATE INDEX IF NOT EXISTS idx_readings_manual_source
 """
 
 
+class UnmigratedSchemaError(RuntimeError):
+    """Raised when `readings.project` still exists — refuse to boot."""
+
+
 async def ensure_schema_blue(pool: AsyncConnectionPool) -> None:
     """Ensure blue's full TSDB schema (manual_uploads + readings + FK + cagg).
 
@@ -88,13 +96,26 @@ async def ensure_schema_blue(pool: AsyncConnectionPool) -> None:
     is added to ``readings``. All idempotent — safe to run on every startup,
     including on a pre-existing blue database (the ALTER is a no-op once the
     column exists).
+
+    Refuses to run against a database that still has ``readings.project``. This
+    code reads and upserts without it; proceeding would silently write to the
+    wrong dedup key and, worse, the 3-column unique index below cannot even be
+    built while both projects' rows coexist.
     """
     async with pool.connection() as conn:
+        cur = await conn.execute(_PROJECT_COLUMN_EXISTS_SQL)
+        if await cur.fetchone():
+            raise UnmigratedSchemaError(
+                "readings.project still exists — run "
+                "scripts/migrate_blue_drop_project.sql before deploying this version "
+                "(see docs/blue/yookr-direct-retirement.md)."
+            )
+
         await conn.execute(MANUAL_UPLOADS_SQL)
         await conn.execute(_READINGS_BLUE_SQL)
         await conn.execute(_BLUE_UPLOAD_ID_SQL)
         await conn.execute(_BLUE_SOURCE_SQL)
         await conn.execute(_BLUE_DEDUP_MIGRATION_SQL)
         await conn.commit()
-    await ensure_aggregates(pool, project_column="project")
+    await ensure_aggregates(pool, project_column="source")
     logger.info("blue_tsdb_schema_ensured")

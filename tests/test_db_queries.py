@@ -12,7 +12,6 @@ def sample_readings():
     return [
         {
             "sensor_id": "d1",
-            "project": "p1",
             "device_name": "Dev1",
             "sensor_tag": "temperature",
             "value": "21.5",
@@ -64,7 +63,6 @@ class TestUpsertReadings:
         readings = [
             {
                 "sensor_id": f"d{i}",
-                "project": "p",
                 "device_name": "D",
                 "sensor_tag": "t",
                 "value": str(i),

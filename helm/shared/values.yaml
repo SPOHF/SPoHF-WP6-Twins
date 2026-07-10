@@ -10,7 +10,7 @@ image:
 timescaledb:
   enabled: true
 
-# Combined sync CronJob (SPoHF API + Yookr API, sequential)
+# SPoHF datalake sync CronJob (the single automated source)
 sync:
   enabled: true
   schedule: "*/15 * * * *"

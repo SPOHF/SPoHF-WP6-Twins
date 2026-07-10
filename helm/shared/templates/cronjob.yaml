@@ -35,17 +35,6 @@ spec:
                     secretKeyRef:
                       name: {{ .Values.secrets.existingSecret | default "wp6-data-secrets" }}
                       key: api-token
-                # Yookr API
-                - name: WP6_YOOKR_EMAIL
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ .Values.secrets.existingSecret | default "wp6-data-secrets" }}
-                      key: yookr-email
-                - name: WP6_YOOKR_PASSWORD
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ .Values.secrets.existingSecret | default "wp6-data-secrets" }}
-                      key: yookr-password
                 # Blue TSDB connection (sync writes to wp6_blue)
                 - name: WP6_TSDB_URL
                   valueFrom:

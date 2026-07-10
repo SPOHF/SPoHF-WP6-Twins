@@ -1,12 +1,10 @@
 """Entry point for wp6-data sync job.
 
-Runs the SPoHF API sync, and optionally the Yookr direct-API sync
-when WP6_YOOKR_EMAIL / WP6_YOOKR_PASSWORD are configured.
+Runs the SPoHF datalake sync — the single automated source for the blue twin
+since `yookr-direct` was retired.
 
 Usage:
-    uv run python -m wp6_data              # run all configured syncs
-    uv run python -m wp6_data --yookr      # run only Yookr sync
-    uv run python -m wp6_data --spohf      # run only SPoHF sync
+    uv run python -m wp6_data
 """
 
 import logging
@@ -18,6 +16,11 @@ import structlog
 from wp6_data.config import Settings
 from wp6_data.shared.compat import run_async
 from wp6_data.sync import SyncOrchestrator
+
+# `--spohf` used to select between two syncs. Only one remains, so it is a no-op
+# kept so existing CronJob/Job specs keep working. Anything else is a mistake we
+# would rather surface than silently reinterpret as "sync the datalake".
+_ACCEPTED_ARGS = frozenset({"--spohf"})
 
 
 def configure_logging(settings: Settings) -> None:
@@ -69,74 +72,32 @@ def _run_spohf_sync(settings: Settings, logger: Any) -> int:
     return 0
 
 
-def _run_yookr_sync(settings: Settings, logger: Any) -> int:
-    """Run the Yookr API → TimescaleDB sync."""
-    from wp6_data.sync.yookr_orchestrator import YookrSyncOrchestrator
-
-    logger.info(
-        "yookr_sync_starting",
-        yookr_base_url=settings.yookr_base_url,
-        sync_mode=settings.sync_mode,
-    )
-    orchestrator = YookrSyncOrchestrator(settings)
-    stats = run_async(orchestrator.run())
-
-    if stats["errors"]:
-        logger.error("yookr_sync_failed", errors=stats["errors"])
-        return 1
-
-    if stats.get("warnings"):
-        logger.warning("yookr_sync_completed_with_warnings", warnings=stats["warnings"])
-
-    logger.info(
-        "yookr_sync_success",
-        total_records=stats["total_records"],
-        total_created=stats["total_created"],
-        sensors_synced=stats["sensors_synced"],
-        duration_seconds=round(stats.get("duration_seconds", 0), 2),
-    )
-    return 0
-
-
 def main() -> int:
     """Main entry point for sync job."""
     settings = Settings()
     configure_logging(settings)
     logger = structlog.get_logger()
 
-    args = sys.argv[1:]
-    run_spohf = "--spohf" in args or not args
-    run_yookr = "--yookr" in args or not args
-
-    yookr_configured = bool(settings.yookr_email and settings.yookr_password)
+    unknown = set(sys.argv[1:]) - _ACCEPTED_ARGS
+    if unknown:
+        logger.error("sync_job_failed", reason=f"unrecognised arguments: {sorted(unknown)}")
+        return 1
 
     logger.info(
         "sync_job_starting",
         tsdb_url=settings.tsdb_url.split("@")[-1],  # hide credentials
         sync_mode=settings.sync_mode,
-        run_spohf=run_spohf,
-        run_yookr=run_yookr and yookr_configured,
     )
 
-    exit_code = 0
+    if not settings.api_token:
+        logger.error("spohf_sync_failed", reason="WP6_API_TOKEN is required for SPoHF sync")
+        return 1
 
     try:
-        if run_spohf:
-            if not settings.api_token:
-                logger.error("spohf_sync_failed", reason="WP6_API_TOKEN is required for SPoHF sync")
-                return 1
-            exit_code |= _run_spohf_sync(settings, logger)
-
-        if run_yookr and yookr_configured:
-            exit_code |= _run_yookr_sync(settings, logger)
-        elif run_yookr and not yookr_configured:
-            logger.info("yookr_sync_skipped", reason="WP6_YOOKR_EMAIL/PASSWORD not set")
-
+        return _run_spohf_sync(settings, logger)
     except Exception as e:
         logger.exception("sync_job_failed", error=str(e))
         return 1
-
-    return exit_code
 
 
 if __name__ == "__main__":

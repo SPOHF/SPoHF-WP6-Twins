@@ -110,14 +110,14 @@ class TestReadingToParams:
         reading = make_reading()
         params = orch._reading_to_params(reading)
         assert params["sensor_id"] == "device-001"
-        # The datalake sync forces the single 'spohf-datalake' project, ignoring
-        # the relay API's reading.project ('test-project' here) — issue 026.
-        assert params["project"] == "spohf-datalake"
         assert params["sensor_tag"] == "temperature"
         assert params["value"] == "21.5"
         assert "datetime_measure" in params
         # We deliberately drop the relay's ingestion timestamp — not persisted, not used.
         assert "api_timestamp" not in params
+        # `readings.project` is gone; the relay's own reading.project ('test-project')
+        # must not leak back in as a column that no longer exists.
+        assert "project" not in params
 
 
 # --- _flush_batch ---

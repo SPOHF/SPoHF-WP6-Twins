@@ -25,7 +25,7 @@ async def get_sensor_summary(
     """Return cached sensor summary, calling *fetcher* on cache miss.
 
     Args:
-        key: Cache key, e.g. "blue" or "blue:yookr-direct" or "red".
+        key: Cache key, e.g. "blue" or "red".
         fetcher: Async callable that returns the raw sensor list.
         **kwargs: Forwarded to *fetcher* on cache miss.
     """
