@@ -1,9 +1,25 @@
-# Retiring yookr-direct — exit criteria & sequence
+# Retiring yookr-direct — what happened, and why
 
-**Status: UNBLOCKED as of 2026-07-10.** Goal: make the SPoHF datalake the single canonical
-automated source and remove the `yookr-direct` ingest, the dual-source toggle, and the
-`project` column — converging blue on red's single-categorical (`source`) model. See the
-coverage snapshot: [`yookr-vs-datalake-coverage.md`](./yookr-vs-datalake-coverage.md).
+**Status: ✅ DONE — migrated on prod 2026-07-10.** The SPoHF datalake is now the single
+canonical automated source. The `yookr-direct` ingest, the dual-source toggle and the
+`readings.project` column are gone; blue matches red's single-categorical (`source`)
+model. Coverage snapshot: [`yookr-vs-datalake-coverage.md`](./yookr-vs-datalake-coverage.md).
+
+## Outcome
+
+| | before | after |
+|---|--:|--:|
+| `readings` rows | 9,032,000 (2 projects + manual) | **5,328,472** (datalake + manual) |
+| automated series | 59 direct / 92 relayed | **92** |
+| dedup key | `(device, sensor, time, project)` | `(device, sensor, time)` |
+| cagg groups by | `project` | `source` |
+| `daily_coverage` rows | 44,930 | **40,607** (stale days pruned) |
+
+Before purging, a truncation bug in our own client was fixed and the affected window
+re-synced, cutting the yookr-only rows from **337,081 → 59,493** — so the purge cost only
+December 2025 (see below) plus ~660 stragglers, instead of 337k readings.
+
+A CSV of every purged `yookr-direct` row was taken first (4,104,095 rows, 491 MB).
 
 ## ✅ The hard blocker is resolved
 
@@ -23,20 +39,36 @@ The secondary problems recorded earlier are all closed too: the 401 token revoca
 (restored 2026-06-15), the `/status` coverage attribution leak (fixed at day granularity),
 GDD's dependency on yookr weather (decoupled to OpenMeteo), and the dedup race (issue 026).
 
-## ⚠️ What retiring yookr-direct actually costs
+## ⚠️ The "missing" rows were mostly our own bug
 
-The datalake is a superset by *series* but not by *rows*: **337,081 yookr-only rows** (8.2%
-of yookr-direct's 4.10 M), all within 2024-11 → 2025-12.
+The datalake was a superset by *series* but not by *rows*: **337,081 yookr-only rows** (8.2%
+of yookr-direct's 4.10 M), all within 2024-11 → 2025-12. Investigating that window turned up
+two different causes.
 
-- **2024-11 → 2025-11 — thinning.** The relay dropped 3–16% of samples; every series is
-  still present every day. Harmless.
-- **2025-12 — a hole.** 36 of 59 series have zero datalake rows (56,805 readings). The
-  datalake kept exactly one sensor per device that month: December 2025 is the relay bug
-  preserved in the data.
+**~280,000 rows: we were truncating.** The relay is Elasticsearch-backed and refuses
+`from + size > max_result_window` (10,000). `SpoHFClient.fetch_window` paged by offset until
+a short page, so once a day held more than 10,000 records the relay returned empty and we
+read that as "no more data". The two `Natte bol` test rigs (931k rows) ran **2024-11-15 →
+2025-12-31** and pushed daily volume over the cap for *exactly* the deficit window.
 
-Attempt a targeted relay backfill of that window *before* purging. The 2026-06-16 full
-backfill already re-pulled it and still got the subset, so the gap is probably in SPoHF's
-stored history — in which case the fix is an upstream backfill request, not more syncing.
+`fetch_window` now bisects an overflowing window until each half fits. Re-syncing
+2024-11-01 → 2025-12-01 with the fixed client recovered the rows: **330 of 396 days (83%)
+needed a split**. Yookr-only rows fell **337,081 → 59,493**.
+
+Because bisection re-fetches, and the relay's offset pagination returns duplicates of its
+own, ingest must be idempotent — hence the `ON CONFLICT DO UPDATE` and its e2e test.
+
+**58,826 rows: December 2025 is genuinely gone.** The relay still serves one sensor per
+device for that month — verified by querying the endpoint directly (a Dec-2025 day returns
+22 devices / 22 series / **0** devices with >1 sensor, while neighbouring months return 60
+series across 18 multi-sensor devices). Its *stored* history was never repaired, so no
+re-sync can recover it. yookr-direct held the only complete copy, and the purge destroyed
+it. Backfill requested upstream: [`spohf-relay-bug-report.md`](./spohf-relay-bug-report.md),
+ask (a). The remaining ~660 rows are scattered singletons the relay never received.
+
+> **`/status` could not have caught any of this.** `fetch_daily_coverage` matches the cagg at
+> `(device, sensor, day)` — a day counts as covered if the series has ≥1 row. Losing the tail
+> of every day is invisible at that granularity. Only a row-level anti-join sees it.
 
 ## The purge: why it is still needed, and why the old reason expired
 
@@ -60,32 +92,47 @@ exists under `spohf-datalake`) would satisfy it while preserving the 337 k yookr
 **Decision (2026-07-10): full purge**, so every surviving automated row provably came from
 the datalake. Safe now that no series is yookr-only; the cost is the row deficit above.
 
-## Retirement sequence
+## Retirement sequence (as executed, 2026-07-10)
 
 `ensure_aggregates` cannot perform this migration: `CAGG_SQL_TEMPLATE` is
 `CREATE MATERIALIZED VIEW IF NOT EXISTS`, so changing `project_column` on an existing
 database is a **silent no-op**. The cagg must be explicitly dropped and rebuilt.
 
-Ordering is forced by a deploy trap — the **old image crashes on the new schema**
-(`CREATE UNIQUE INDEX … (…, project)` on a dropped column) and the **new image crashes on
-the old schema** (a 3-column unique index cannot be built while both projects' rows
-coexist). So the migration runs *between* the two deploys.
+Ordering is forced by a deploy trap. The **old image breaks on the new schema** (it SELECTs
+`project`), and the **new image refuses to boot on the old schema** — `ensure_schema_blue`
+raises `UnmigratedSchemaError`, because its 3-column unique index cannot be built while both
+projects' rows coexist. So the migration runs *between* the two deploys, and the guard makes
+that safe: a premature deploy crash-loops with an actionable message instead of corrupting
+anything.
 
-1. Backfill 2024-11 → 2026-01 from the relay; re-audit December 2025.
-2. Disable the sync CronJob via `sync.enabled: false` in `helm/shared/values.yaml`
-   (a manual `kubectl patch --suspend` is reverted by argocd).
-3. Back up: `COPY (SELECT * FROM readings WHERE project='yookr-direct') TO … CSV HEADER`.
-4. `DROP MATERIALIZED VIEW sensors_daily_summary CASCADE` (it depends on `project`).
-5. Purge `project='yookr-direct'` in monthly batches.
-6. Pre-check uniqueness on `(device_name, sensor_tag, time)` — must return zero duplicates.
-7. Swap `idx_readings_dedup_v2` → `idx_readings_dedup_v3` on the 3-column key.
-8. `ALTER TABLE readings DROP COLUMN project`.
-9. Deploy the new image; startup recreates the cagg on `source` `WITH NO DATA`.
-10. `CALL refresh_continuous_aggregate('sensors_daily_summary', NULL, NULL)`, rebuild
-    `daily_coverage`, re-enable the sync.
+1. Fix the truncation bug; backfill 2024-11-01 → 2025-12-01; re-audit.
+2. `COPY (SELECT * FROM readings WHERE project='yookr-direct') TO STDOUT CSV HEADER` → local
+   file. Verify the row count. **This is the only way back.**
+3. Push `sync.enabled: false` (a manual `kubectl patch --suspend` is reverted by argocd).
+   The old image's flagless entrypoint also ran the yookr sync, which would otherwise
+   re-insert rows behind the purge.
+4. Run [`scripts/migrate_blue_drop_project.sql`](../../scripts/migrate_blue_drop_project.sql):
+   orphan-series guard → drop cagg → monthly purge → uniqueness pre-check → index swap →
+   `DROP COLUMN project` → drop the `yookr-direct` `sync_metadata` row.
+5. The new pod clears its boot guard and recreates the cagg on `source` `WITH NO DATA`.
+6. `CALL refresh_continuous_aggregate('sensors_daily_summary', NULL, NULL)` and rebuild
+   `daily_coverage` (it is insert-only, so it still claimed the purged days).
+7. Push `sync.enabled: true`.
 
-Expect a ~2-minute dashboard outage between steps 8 and 9 (the running old image queries a
-dropped column). Blue is single-replica by design.
+Blue is single-replica by design; the rolling update kept the old pod serving until the new
+one passed its guard, so the outage spanned the migration itself (~35 min, dominated by the
+purge and the unique-index build).
+
+### Two traps, if you ever run something like this again
+
+- **Killing `psql` does not stop the server.** Terminating the local `kubectl exec` client
+  leaves the backend running its current statement. The migration ran to completion after the
+  client was killed. Check `pg_stat_activity` before assuming an abort worked.
+- **`count(*) FILTER (WHERE NOT EXISTS (...))` is not an anti-join.** It defeats the planner's
+  rewrite and re-runs the subquery per row: 14+ minutes on 4.1M rows, versus seconds for the
+  same predicate in a `WHERE` clause. Likewise, a `DO $$ … $$` block is *one statement* — the
+  monthly `DELETE` loop needs an explicit `COMMIT` or it is still one giant transaction. Both
+  are fixed in the script.
 
 ## Code to delete
 

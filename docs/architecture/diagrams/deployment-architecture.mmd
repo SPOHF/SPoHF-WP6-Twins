@@ -21,7 +21,6 @@ graph TB
     visitor["Public Visitor
     [Browser]"]:::external
     spohf_ext["backoffice.spohf.com"]:::external
-    yookr_ext["api.yookr.org"]:::external
     openmeteo_ext["api.open-meteo.com"]:::external
     oidc_ext["OIDC Provider"]:::external
     mysql_ext[("Fontys GTL MySQL 8
@@ -54,7 +53,7 @@ graph TB
         sync_cron["wp6-data Sync
         [CronJob: */15 * * * *]
         python -m wp6_data:
-        SPoHF + Yookr (sequential)
+        SPoHF datalake ingest
         (uses wp6-data-blue image)"]:::cronjob
 
         blue_export_cron["Blue CSV Export
@@ -88,7 +87,7 @@ graph TB
         [Secret, externally provisioned]
         OIDC client/session,
         TSDB superuser password,
-        SPoHF + Yookr API tokens"]:::k8s
+        SPoHF API token"]:::k8s
 
         secret_blue["wp6-data-blue-secrets
         [Secret, externally provisioned]
@@ -128,9 +127,8 @@ graph TB
     %% ── Bootstrap hook provisions the red database ──
     red_bootstrap -->|"psql\nport 5432"| tsdb_sts
 
-    %% ── Sync job (single process, runs both ingests sequentially) ──
+    %% ── Sync job (datalake only) ──
     sync_cron -->|"HTTPS"| spohf_ext
-    sync_cron -->|"HTTPS"| yookr_ext
     sync_cron -->|"port 5432"| db_blue
 
     %% ── Export jobs ──

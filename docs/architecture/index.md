@@ -68,10 +68,11 @@ graph TB
     AppComm DataLake — aggregates
     sensor data from field devices"]:::external
 
-    yookr["Yookr API
+    yookr["Yookr
     [External System]
-    Direct sensor data access
-    for blueberry field devices"]:::external
+    Sensor platform for the blueberry
+    field devices; readings reach WP6
+    only via the SPoHF datalake relay"]:::external
 
     openmeteo["Open-Meteo
     [External System]
@@ -103,12 +104,12 @@ graph TB
     visitor -->|"Views Grey demo\n(HTTPS, public)"| wp6
     wp6 -->|"Authenticates user\n(OIDC)"| oidc
     wp6 -->|"Fetches sensor readings\n(REST API)"| spohf
-    wp6 -->|"Fetches sensor readings\n(REST API)"| yookr
     wp6 -->|"Fetches greenhouse readings\n(MySQL)"| greentechlab
     wp6 -->|"Fetches weather data\n(REST API)"| openmeteo
     greenhouse -->|"Publishes readings"| greentechlab
     field -->|"Publishes readings"| spohf
     field -->|"Publishes readings"| yookr
+    yookr -->|"Relays readings"| spohf
 ```
 
 ### Container view (C4 L2)
@@ -158,8 +159,8 @@ graph TB
             blue_dash["Blue Dashboard
             [Container: FastAPI]
             Chart compare, GDD tracker,
-            soil forecast, manual uploads,
-            and SPoHF / Yookr source toggle"]:::container
+            soil forecast, manual uploads
+            (single SPoHF datalake source)"]:::container
             blue_uploads[("Blue Manual Uploads
             [PVC]
             Raw insect / long-data /
@@ -190,8 +191,8 @@ graph TB
             sync_job["wp6-data Sync Job
             [Container: Python CronJob]
             python -m wp6_data:
-            SPoHF + Yookr ingest
-            (sequential, every 15 min)"]:::cronjob
+            SPoHF datalake ingest
+            (every 15 min)"]:::cronjob
 
             blue_export["Blue CSV Export Job
             [Container: Python CronJob]
@@ -224,8 +225,9 @@ graph TB
 
     spohf["SPoHF Backoffice
     [External: REST API]"]:::external
-    yookr["Yookr API
-    [External: REST API]"]:::external
+    yookr["Yookr
+    [External: REST API]
+    upstream of the datalake"]:::external
     openmeteo["Open-Meteo
     [External: REST API]"]:::external
     oidc["OIDC Provider
@@ -246,7 +248,7 @@ graph TB
     grey_dash -.->|"built from"| app_factory
 
     %% Blue data access
-    blue_dash -->|"Async queries\n(psycopg3 pool)\nproject filter:\nspohf-datalake | yookr"| tsdb_blue
+    blue_dash -->|"Async queries\n(psycopg3 pool)"| tsdb_blue
     blue_dash -->|"Daily weather\n(HTTPS, GDD)"| openmeteo
     blue_dash -->|"Stores uploads"| blue_uploads
 
@@ -257,10 +259,10 @@ graph TB
     red_dash -->|"Stores uploads"| red_uploads
     %% grey_dash has no datastore (in-memory)
 
-    %% Sync job (single process runs both ingests sequentially)
+    %% Sync job (datalake only; bisects windows past the relay's 10k result cap)
     sync_job -->|"Paginated fetch\n(httpx)"| spohf
-    sync_job -->|"Per-sensor fetch\n(httpx)"| yookr
     sync_job -->|"Batch upsert"| tsdb_blue
+    yookr -->|"Relays readings"| spohf
 
     %% Export jobs
     blue_export -->|"Read readings"| tsdb_blue
@@ -298,8 +300,6 @@ graph TB
 
     %% ── External systems ──
     spohf_api["SPoHF REST API
-    [External]"]:::external
-    yookr_api["Yookr REST API
     [External]"]:::external
     openmeteo_api["Open-Meteo API
     [External]"]:::external
@@ -394,16 +394,13 @@ graph TB
     subgraph blue_layer["Blue Twin (wp6_data.blue)"]
         blue_config["dashboard.config
         [TwinConfig instance]
-        2 DataSources: spohf-datalake
-        and yookr"]:::component
+        1 DataSource: spohf-datalake"]:::component
         blue_provider["BlueSensorProvider
-        [Component, x2]
-        TSDB-backed, project-filtered
-        (one per DataSource)"]:::component
-        blue_deps["deps / tsdb / yookr
         [Component]
-        wp6_blue queries, schema,
-        project-scoped fetch"]:::component
+        TSDB-backed, unfiltered"]:::component
+        blue_deps["deps / tsdb
+        [Component]
+        wp6_blue queries + schema"]:::component
         blue_routes_x["Blue Extra Routes
         [Components]
         ops | api | charts | monitor
@@ -508,26 +505,18 @@ graph TB
     subgraph sync_layer["Sync Orchestration (wp6_data.sync)"]
         spohf_orch["SyncOrchestrator
         [Component]
-        Windowed sync with
-        early-stop on duplicates"]:::component
-        yookr_orch["YookrSyncOrchestrator
-        [Component]
-        Per-sensor ingestion
-        via SensorRegistry (CSV)"]:::component
+        Windowed sync; bisects a window
+        past the relay's 10k result cap"]:::component
     end
 
     %% ────────────────────────────────────────────────
     %% API client + DB layers
     %% ────────────────────────────────────────────────
-    subgraph api_layer["API Clients (wp6_data.api, wp6_data.yookr)"]
+    subgraph api_layer["API Clients (wp6_data.api)"]
         spohf_client["SpoHFClient
         [Component]
-        Paginated async fetcher
-        with timestamp windowing"]:::component
-        yookr_client["YookrClient
-        [Component]
-        Session auth, per-sensor
-        monthly-windowed fetcher"]:::component
+        Paginated async fetcher;
+        bisects past the 10k cap"]:::component
     end
 
     subgraph db_layer["Database Layer (wp6_data.db)"]
@@ -625,15 +614,11 @@ graph TB
     %% Sync (separate processes — not the dashboards)
     spohf_orch --> spohf_client
     spohf_orch --> queries
-    yookr_orch --> yookr_client
-    yookr_orch --> queries
     queries --> pool
     spohf_client -->|"GET /api/v1/data"| spohf_api
-    yookr_client -->|"POST /login\nGET /sensor/read"| yookr_api
 
     %% Config flows everywhere
     config -.->|"configures"| spohf_orch
-    config -.->|"configures"| yookr_orch
     config -.->|"configures"| pool
     config -.->|"configures"| blue_config
     config -.->|"configures"| red_config
@@ -677,7 +662,6 @@ graph TB
     visitor["Public Visitor
     [Browser]"]:::external
     spohf_ext["backoffice.spohf.com"]:::external
-    yookr_ext["api.yookr.org"]:::external
     openmeteo_ext["api.open-meteo.com"]:::external
     oidc_ext["OIDC Provider"]:::external
     mysql_ext[("Fontys GTL MySQL 8
@@ -710,7 +694,7 @@ graph TB
         sync_cron["wp6-data Sync
         [CronJob: */15 * * * *]
         python -m wp6_data:
-        SPoHF + Yookr (sequential)
+        SPoHF datalake ingest
         (uses wp6-data-blue image)"]:::cronjob
 
         blue_export_cron["Blue CSV Export
@@ -744,7 +728,7 @@ graph TB
         [Secret, externally provisioned]
         OIDC client/session,
         TSDB superuser password,
-        SPoHF + Yookr API tokens"]:::k8s
+        SPoHF API token"]:::k8s
 
         secret_blue["wp6-data-blue-secrets
         [Secret, externally provisioned]
@@ -784,9 +768,8 @@ graph TB
     %% ── Bootstrap hook provisions the red database ──
     red_bootstrap -->|"psql\nport 5432"| tsdb_sts
 
-    %% ── Sync job (single process, runs both ingests sequentially) ──
+    %% ── Sync job (datalake only) ──
     sync_cron -->|"HTTPS"| spohf_ext
-    sync_cron -->|"HTTPS"| yookr_ext
     sync_cron -->|"port 5432"| db_blue
 
     %% ── Export jobs ──

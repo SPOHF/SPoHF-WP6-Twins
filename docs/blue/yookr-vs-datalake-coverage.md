@@ -1,17 +1,21 @@
 # Blue automated-sensor coverage: yookr-direct vs SPoHF datalake
 
-**Snapshot: 2026-07-10** (prod `wp6-data-timescaledb`, db `postgres`).
+**Historical record. Snapshot taken 2026-07-10, immediately before the retirement**
+(prod `wp6-data-timescaledb`, db `postgres`).
 
-The two automated blue sources are the **same underlying yookr sensors**, fetched two
-ways: `yookr-direct` (straight from `api.yookr.org`) and the SPoHF datalake relay
-(`backoffice.spohf.com/api/v1/data/yookr-data`, landing under `project='spohf-datalake'`
-since issue 026). This table exists to guarantee we don't silently lose a sensor when
-retiring `yookr-direct`.
+`yookr-direct` no longer exists: its rows were purged and `readings.project` dropped on
+2026-07-10 — see [`yookr-direct-retirement.md`](./yookr-direct-retirement.md). The queries
+below **will not run** against the current schema. This document is kept because it is the
+evidence on which the purge decision rested: it shows exactly what was, and was not, lost.
 
 > **Supersedes the 2026-06-12 snapshot**, which showed the datalake universally stale with
 > 5 devices absent. That was the combined effect of a revoked API token (401), the dedup
 > race (fixed in issue 026), and the upstream one-sensor-per-device relay bug. All three
-> are resolved.
+> were resolved.
+>
+> **What this snapshot did *not* yet know:** most of the row-level deficit below was our own
+> 10,000-record truncation bug, not the relay. Fixing `fetch_window` and re-syncing the
+> window cut the yookr-only rows from 337,081 to 59,493 before the purge ran.
 
 ## Headline
 

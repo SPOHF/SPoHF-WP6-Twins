@@ -52,17 +52,22 @@ BEGIN
 END $$;
 
 -- Record what we are about to destroy, so it lands in the operator's transcript.
-SELECT count(*) AS yookr_rows_to_purge,
-       count(*) FILTER (
-           WHERE NOT EXISTS (
-               SELECT 1 FROM readings d
-               WHERE d.project = 'spohf-datalake'
-                 AND d.device_name = y.device_name
-                 AND d.sensor_tag  = y.sensor_tag
-                 AND d.time        = y.time)
-       ) AS rows_with_no_datalake_counterpart
+--
+-- Keep the `NOT EXISTS` in the WHERE clause. Moving it into a `count(*) FILTER
+-- (WHERE NOT EXISTS ...)` stops the planner from rewriting it as a hash anti-join
+-- and re-runs the correlated subquery once per row — 14+ minutes on 4.1M rows,
+-- versus seconds here.
+SELECT count(*) AS yookr_rows_to_purge FROM readings WHERE project = 'yookr-direct';
+
+SELECT count(*) AS rows_with_no_datalake_counterpart
 FROM readings y
-WHERE y.project = 'yookr-direct';
+WHERE y.project = 'yookr-direct'
+  AND NOT EXISTS (
+      SELECT 1 FROM readings d
+      WHERE d.project = 'spohf-datalake'
+        AND d.device_name = y.device_name
+        AND d.sensor_tag  = y.sensor_tag
+        AND d.time        = y.time);
 
 -- ---------------------------------------------------------------------------
 -- 1. Drop the cagg. It SELECTs `project`, so the column cannot be dropped while
@@ -72,9 +77,13 @@ WHERE y.project = 'yookr-direct';
 DROP MATERIALIZED VIEW IF EXISTS sensors_daily_summary CASCADE;
 
 -- ---------------------------------------------------------------------------
--- 2. Purge yookr-direct, one month at a time. A single 4.1M-row DELETE on a
---    hypertable builds one enormous transaction; monthly chunks keep each
---    commit bounded and let a failure resume cheaply.
+-- 2. Purge yookr-direct, one month at a time, committing after each month.
+--    A single 4.1M-row DELETE on a hypertable builds one enormous transaction.
+--
+--    The COMMIT is what makes these real batches: a DO block is ONE statement,
+--    so without it the whole loop shares a single transaction and the monthly
+--    chunking buys nothing but progress notices. COMMIT inside DO requires that
+--    psql is NOT already in an explicit transaction — do not wrap this in BEGIN.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -92,6 +101,7 @@ BEGIN
           AND time >= lo AND time < lo + interval '1 month';
         GET DIAGNOSTICS gone = ROW_COUNT;
         RAISE NOTICE 'purged % rows from %', gone, lo::date;
+        COMMIT;
         lo := lo + interval '1 month';
     END LOOP;
 END $$;

@@ -33,8 +33,8 @@ graph TB
             blue_dash["Blue Dashboard
             [Container: FastAPI]
             Chart compare, GDD tracker,
-            soil forecast, manual uploads,
-            and SPoHF / Yookr source toggle"]:::container
+            soil forecast, manual uploads
+            (single SPoHF datalake source)"]:::container
             blue_uploads[("Blue Manual Uploads
             [PVC]
             Raw insect / long-data /
@@ -65,8 +65,8 @@ graph TB
             sync_job["wp6-data Sync Job
             [Container: Python CronJob]
             python -m wp6_data:
-            SPoHF + Yookr ingest
-            (sequential, every 15 min)"]:::cronjob
+            SPoHF datalake ingest
+            (every 15 min)"]:::cronjob
 
             blue_export["Blue CSV Export Job
             [Container: Python CronJob]
@@ -99,8 +99,9 @@ graph TB
 
     spohf["SPoHF Backoffice
     [External: REST API]"]:::external
-    yookr["Yookr API
-    [External: REST API]"]:::external
+    yookr["Yookr
+    [External: REST API]
+    upstream of the datalake"]:::external
     openmeteo["Open-Meteo
     [External: REST API]"]:::external
     oidc["OIDC Provider
@@ -121,7 +122,7 @@ graph TB
     grey_dash -.->|"built from"| app_factory
 
     %% Blue data access
-    blue_dash -->|"Async queries\n(psycopg3 pool)\nproject filter:\nspohf-datalake | yookr"| tsdb_blue
+    blue_dash -->|"Async queries\n(psycopg3 pool)"| tsdb_blue
     blue_dash -->|"Daily weather\n(HTTPS, GDD)"| openmeteo
     blue_dash -->|"Stores uploads"| blue_uploads
 
@@ -132,10 +133,10 @@ graph TB
     red_dash -->|"Stores uploads"| red_uploads
     %% grey_dash has no datastore (in-memory)
 
-    %% Sync job (single process runs both ingests sequentially)
+    %% Sync job (datalake only; bisects windows past the relay's 10k result cap)
     sync_job -->|"Paginated fetch\n(httpx)"| spohf
-    sync_job -->|"Per-sensor fetch\n(httpx)"| yookr
     sync_job -->|"Batch upsert"| tsdb_blue
+    yookr -->|"Relays readings"| spohf
 
     %% Export jobs
     blue_export -->|"Read readings"| tsdb_blue

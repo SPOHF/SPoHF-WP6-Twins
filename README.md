@@ -12,16 +12,19 @@
 
 Both dashboards serve interactive Plotly charts via FastAPI.
 
-### Blue Data Sources
+### Blue Data Source
 
-The Blue dashboard supports two data sources, switchable via a cookie (`wp6_blue_source`):
+Blue's automated sensors are physical Yookr devices, read through the **SPoHF
+datalake** relay (`backoffice.spohf.com`, endpoint `yookr-data`) — the single
+canonical source. Blue does not talk to `api.yookr.org`; the `yookr-direct`
+ingest and its `readings.project` column were retired in July 2026 (see
+[`docs/blue/yookr-direct-retirement.md`](docs/blue/yookr-direct-retirement.md)).
 
-| Source | Description | Sync |
-|--------|-------------|------|
-| **SPoHF Datalake** (`spohf-datalake`) | Bulk data from `backoffice.spohf.com` | `WP6_ENDPOINTS=yookr-data` sync job |
-| **Yookr API** (`yookr`) | Per-sensor data from `api.yookr.org` | `--yookr` sync job |
+Manual uploads (long_data, insects, fertigation) live in the same `readings`
+table and are distinguished by the `source` column, matching the Red twin.
 
-Both sources store data in the same TimescaleDB instance, separated by the `project` column in the `readings` table.
+> The relay caps a single query at 10,000 records. `SpoHFClient.fetch_window`
+> bisects any window that overflows — offset paging silently stops at the cap.
 
 ## Quick Start
 
@@ -35,8 +38,9 @@ uv sync --extra dev                    # with dev tools
 
 # 3. Run sync (populates the database)
 uv run python -m wp6_data                             # SPoHF datalake sync (incremental)
-WP6_SYNC_MODE=full uv run python -m wp6_data          # SPoHF historical sync (full, may take hours)
-uv run python -m wp6_data --yookr                     # Yookr direct sync
+WP6_SYNC_MODE=full uv run python -m wp6_data          # historical sync (full, may take hours)
+WP6_SYNC_MODE=full WP6_SYNC_START=2025-01-01 WP6_SYNC_END=2025-03-01 \
+  uv run python -m wp6_data                           # backfill one window
 
 # 4. Start dashboards
 uv run python -m wp6_data.blue.dashboard  # Blue dashboard (port 8000)
@@ -61,10 +65,10 @@ All via `WP6_*` environment variables — see `.env.example` for the full list.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WP6_TSDB_URL` | `postgresql://wp6:wp6dev@localhost:5433/wp6_blue` | TimescaleDB connection string |
-| `WP6_SYNC_MODE` | `incremental` | `full` (all history from 2024-01-01) or `incremental` (recent data) |
+| `WP6_SYNC_MODE` | `incremental` | `full` (bounded by `WP6_SYNC_START`/`END`) or `incremental` (recent data) |
+| `WP6_SYNC_START` | `2024-01-01` | First day of a full sync |
+| `WP6_SYNC_END` | — | Last day of a full sync (default: tomorrow). Ignored when incremental |
 | `WP6_ENDPOINTS` | `yookr-data` | SPoHF API endpoints to sync |
-| `WP6_YOOKR_EMAIL` | — | Yookr API credentials (for `--yookr` sync) |
-| `WP6_YOOKR_PASSWORD` | — | Yookr API credentials (for `--yookr` sync) |
 
 ## TimescaleDB Schema
 

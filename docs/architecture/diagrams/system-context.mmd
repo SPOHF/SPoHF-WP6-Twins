@@ -30,10 +30,11 @@ graph TB
     AppComm DataLake — aggregates
     sensor data from field devices"]:::external
 
-    yookr["Yookr API
+    yookr["Yookr
     [External System]
-    Direct sensor data access
-    for blueberry field devices"]:::external
+    Sensor platform for the blueberry
+    field devices; readings reach WP6
+    only via the SPoHF datalake relay"]:::external
 
     openmeteo["Open-Meteo
     [External System]
@@ -65,9 +66,9 @@ graph TB
     visitor -->|"Views Grey demo\n(HTTPS, public)"| wp6
     wp6 -->|"Authenticates user\n(OIDC)"| oidc
     wp6 -->|"Fetches sensor readings\n(REST API)"| spohf
-    wp6 -->|"Fetches sensor readings\n(REST API)"| yookr
     wp6 -->|"Fetches greenhouse readings\n(MySQL)"| greentechlab
     wp6 -->|"Fetches weather data\n(REST API)"| openmeteo
     greenhouse -->|"Publishes readings"| greentechlab
     field -->|"Publishes readings"| spohf
     field -->|"Publishes readings"| yookr
+    yookr -->|"Relays readings"| spohf

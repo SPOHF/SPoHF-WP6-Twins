@@ -14,8 +14,6 @@ graph TB
     %% ── External systems ──
     spohf_api["SPoHF REST API
     [External]"]:::external
-    yookr_api["Yookr REST API
-    [External]"]:::external
     openmeteo_api["Open-Meteo API
     [External]"]:::external
     oidc_provider["OIDC Provider
@@ -109,16 +107,13 @@ graph TB
     subgraph blue_layer["Blue Twin (wp6_data.blue)"]
         blue_config["dashboard.config
         [TwinConfig instance]
-        2 DataSources: spohf-datalake
-        and yookr"]:::component
+        1 DataSource: spohf-datalake"]:::component
         blue_provider["BlueSensorProvider
-        [Component, x2]
-        TSDB-backed, project-filtered
-        (one per DataSource)"]:::component
-        blue_deps["deps / tsdb / yookr
         [Component]
-        wp6_blue queries, schema,
-        project-scoped fetch"]:::component
+        TSDB-backed, unfiltered"]:::component
+        blue_deps["deps / tsdb
+        [Component]
+        wp6_blue queries + schema"]:::component
         blue_routes_x["Blue Extra Routes
         [Components]
         ops | api | charts | monitor
@@ -223,26 +218,18 @@ graph TB
     subgraph sync_layer["Sync Orchestration (wp6_data.sync)"]
         spohf_orch["SyncOrchestrator
         [Component]
-        Windowed sync with
-        early-stop on duplicates"]:::component
-        yookr_orch["YookrSyncOrchestrator
-        [Component]
-        Per-sensor ingestion
-        via SensorRegistry (CSV)"]:::component
+        Windowed sync; bisects a window
+        past the relay's 10k result cap"]:::component
     end
 
     %% ────────────────────────────────────────────────
     %% API client + DB layers
     %% ────────────────────────────────────────────────
-    subgraph api_layer["API Clients (wp6_data.api, wp6_data.yookr)"]
+    subgraph api_layer["API Clients (wp6_data.api)"]
         spohf_client["SpoHFClient
         [Component]
-        Paginated async fetcher
-        with timestamp windowing"]:::component
-        yookr_client["YookrClient
-        [Component]
-        Session auth, per-sensor
-        monthly-windowed fetcher"]:::component
+        Paginated async fetcher;
+        bisects past the 10k cap"]:::component
     end
 
     subgraph db_layer["Database Layer (wp6_data.db)"]
@@ -340,15 +327,11 @@ graph TB
     %% Sync (separate processes — not the dashboards)
     spohf_orch --> spohf_client
     spohf_orch --> queries
-    yookr_orch --> yookr_client
-    yookr_orch --> queries
     queries --> pool
     spohf_client -->|"GET /api/v1/data"| spohf_api
-    yookr_client -->|"POST /login\nGET /sensor/read"| yookr_api
 
     %% Config flows everywhere
     config -.->|"configures"| spohf_orch
-    config -.->|"configures"| yookr_orch
     config -.->|"configures"| pool
     config -.->|"configures"| blue_config
     config -.->|"configures"| red_config

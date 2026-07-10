@@ -12,9 +12,7 @@ timescaledb:
 
 # SPoHF datalake sync CronJob (the single automated source)
 sync:
-  # TEMPORARILY DISABLED for the drop-project migration window (2026-07-10).
-  # Re-enable immediately after scripts/migrate_blue_drop_project.sql completes.
-  enabled: false
+  enabled: true
   schedule: "*/15 * * * *"
   pageSize: 1000
   endpoints: "yookr-data"
