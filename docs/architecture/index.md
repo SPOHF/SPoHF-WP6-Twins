@@ -448,6 +448,11 @@ graph TB
         Excel phenotyping upload
         (source='sijia')"]:::component
         red_metadata[("red/metadata.yaml")]:::component
+        red_wires["wires
+        [Component]
+        Metadata-driven wire enumeration
+        seam; flags wires reporting but
+        undeclared (views, risk, export)"]:::component
 
         subgraph dli_layer["DLI sub-package (red.dli)"]
             dli_model["TwoStageLightModel
@@ -590,6 +595,10 @@ graph TB
     red_routes_x --> dli_model
     red_routes_x --> red_db
     red_routes_x -->|"risk views"| risk_service
+    red_routes_x -->|"which wires"| red_wires
+    risk_service -->|"which wires"| red_wires
+    red_wires -->|"declared (type=wire)"| red_metadata
+    red_wires -->|"reporting vs declared"| red_db
     red_sijia -->|"register via"| mi_routes
     dli_model --> dli_calc
     dli_model --> dli_lamp
@@ -791,6 +800,141 @@ graph TB
     secret_red -.->|"mounted"| red_export_cron
     secret_red -.->|"mounted"| red_bootstrap
     %% grey_deploy needs no secrets — it's stateless and public
+```
+
+
+### Data model
+
+Where the data lives. Two physical stores feed **one logical reading shape**.
+TimescaleDB (a `wp6_blue` and a `wp6_red` database) persists the canonical
+`readings` hypertable — `(device_name, sensor_tag, time, value, source)` — plus
+the `manual_uploads` audit trail, the derived `daily_coverage` index and
+`sensors_daily_summary` continuous aggregate, and (Red only) the rebuildable
+`risk_episodes` / `risk_state` cache. The Fontys GreenTechLab MySQL holds Red's
+live greenhouse feed: nine per-sensor tables plus the wide `wire_sensors` table
+(`par1…co25` and a single `rad`), which the federated Red provider **unpivots
+into the same reading shape at query time** — that data is never written into
+TimescaleDB. The only true foreign key is `readings.upload_id →
+manual_uploads.id`; every other edge is a derivation or a read-time projection,
+labelled as such. `readings` has no primary key (a hypertable); a unique index
+on `(source, device_name, sensor_tag, time)` — dropping `source` for Blue's
+single automated pipeline — enforces dedup.
+
+```mermaid
+---
+title: "WP6 Digital Twins - Data Model"
+---
+erDiagram
+    %% SSOT — also embedded in docs/architecture/index.md.
+    %% Edit this file first, then mirror into index.md.
+    %% Two physical stores feed ONE logical reading shape:
+    %%   TimescaleDB (wp6_blue / wp6_red) — persisted readings + audit/derived/risk
+    %%   Fontys GTL MySQL — Red's live greenhouse feed, unpivoted at read time
+    %% Edge label conventions:
+    %%   "FK"        real foreign key
+    %%   "derived"   built from the source table
+    %%   "read-time" projected into the reading shape by the provider, NOT persisted
+
+    manual_uploads {
+        bigserial   id PK
+        text        source "upload slug (not readings.source)"
+        text        filename
+        text        file_hash "sha256, content-addressed"
+        text        file_path "nulled when pruned"
+        boolean     file_pruned
+        timestamptz uploaded_at
+        integer     row_count
+        text        error
+    }
+
+    readings {
+        timestamptz time "hypertable partition key"
+        text        device_name
+        text        sensor_tag
+        double      value
+        text        raw_value
+        text        source "categorical / provenance"
+        timestamptz synced_at
+        bigint      upload_id FK "manual rows only; NULL when automated"
+    }
+
+    sync_metadata {
+        text        endpoint PK
+        timestamptz last_timestamp
+        timestamptz last_run_at
+        boolean     last_run_success
+        integer     last_run_records
+        integer     total_runs
+        integer     total_failures
+    }
+
+    daily_coverage {
+        text device_name PK
+        text sensor_tag PK
+        date day PK
+        text source "mirrors readings.source"
+    }
+
+    sensors_daily_summary {
+        timestamptz bucket "time_bucket 1 day"
+        text        device_name
+        text        sensor_tag
+        text        project "aliased categorical column"
+        integer     reading_count
+        timestamptz first_reading
+        timestamptz last_reading
+    }
+
+    risk_episodes {
+        bigserial   id PK
+        text        wire
+        integer     height
+        text        label
+        text        risk
+        timestamptz start_time
+        timestamptz end_time
+        double      peak
+        jsonb       thresholds "threshold-set that produced the row"
+        timestamptz built_at
+    }
+
+    risk_state {
+        text    wire PK
+        integer height PK
+        text    label
+        double  height_dli
+        double  vpd_latest
+        boolean vpd_in_band
+        double  wet_hours_latest
+        boolean fungal_active
+        double  co2_latest
+        boolean co2_depleted
+        boolean canopy_deficit
+        timestamptz built_at
+    }
+
+    wire_sensors {
+        text        device_id "physical wire, e.g. WS_01_01"
+        timestamptz received_at "relay INSERT time, not measurement time"
+        text        gateway_id
+        decimal     par1_to_co25 "20 wide cols par1..co25 (measure x height)"
+        decimal     rad "single col; sensor hangs above H1"
+    }
+
+    gtl_sensor_table {
+        text        device_id
+        timestamptz received_at
+        text        gateway_id
+        double      measurements "per-table cols (dendro/lht65/s2100/...)"
+    }
+
+    manual_uploads ||--o{ readings : "id to upload_id (FK, manual rows)"
+    readings ||--o{ daily_coverage : "derived (rebuild_daily_coverage)"
+    readings ||--o{ sensors_daily_summary : "derived (continuous aggregate)"
+    wire_sensors ||--o{ readings : "unpivot wide-to-long (read-time, not persisted)"
+    gtl_sensor_table ||--o{ readings : "table:device_id (read-time, not persisted)"
+    wire_sensors ||--o{ risk_episodes : "evaluated by Red risk engine"
+    risk_episodes }o--|| risk_state : "same (wire,height); state is latest verdict"
 ```
 
 

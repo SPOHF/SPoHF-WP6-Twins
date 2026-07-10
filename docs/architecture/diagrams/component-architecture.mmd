@@ -161,6 +161,11 @@ graph TB
         Excel phenotyping upload
         (source='sijia')"]:::component
         red_metadata[("red/metadata.yaml")]:::component
+        red_wires["wires
+        [Component]
+        Metadata-driven wire enumeration
+        seam; flags wires reporting but
+        undeclared (views, risk, export)"]:::component
 
         subgraph dli_layer["DLI sub-package (red.dli)"]
             dli_model["TwoStageLightModel
@@ -303,6 +308,10 @@ graph TB
     red_routes_x --> dli_model
     red_routes_x --> red_db
     red_routes_x -->|"risk views"| risk_service
+    red_routes_x -->|"which wires"| red_wires
+    risk_service -->|"which wires"| red_wires
+    red_wires -->|"declared (type=wire)"| red_metadata
+    red_wires -->|"reporting vs declared"| red_db
     red_sijia -->|"register via"| mi_routes
     dli_model --> dli_calc
     dli_model --> dli_lamp
