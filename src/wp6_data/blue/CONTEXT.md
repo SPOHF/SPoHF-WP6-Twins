@@ -67,13 +67,19 @@ The automated blue sensors (soil, leaf, PAR, pH, row climate, weather station)
 are the **same physical yookr sensors**, ingested two ways:
 
 - **SPoHF datalake** — the readings relayed through SPoHF's backoffice platform.
-  Intended to become the single canonical source as it matures.
+  Becoming the single canonical source; `yookr-direct` is being retired.
 - **yookr-direct** — the same readings pulled straight from the yookr API,
   without the SPoHF platform in between.
 
 These are not independent feeds of different sensors — they are alternate
 pipelines for one set of sensors, so their coverage is expected to overlap. A
 data-source toggle lets a viewer switch which pipeline the dashboard reads.
+
+As of 2026-07-10 the datalake is a verified **series-level superset** of
+yookr-direct (no sensor exists only in the direct feed), which unblocks the
+retirement. It is *not* a row-level superset: see
+`docs/blue/yookr-direct-retirement.md`. Once yookr-direct is gone, `project`
+disappears and blue matches red's single-categorical `source` model.
 
 ### long_data
 Manual, lab/field-recorded blueberry measurements delivered as yearly Excel

@@ -1,94 +1,111 @@
-# Retiring yookr-direct — blockers & exit criteria
+# Retiring yookr-direct — exit criteria & sequence
 
-**Status: deferred — BLOCKED ON UPSTREAM (SPoHF) as of 2026-06-15.** Goal: make the
-SPoHF datalake the single canonical automated source and remove the `yookr-direct`
-ingest + the dual-source toggle + the `project` column. See the coverage snapshot:
-[`yookr-vs-datalake-coverage.md`](./yookr-vs-datalake-coverage.md).
+**Status: UNBLOCKED as of 2026-07-10.** Goal: make the SPoHF datalake the single canonical
+automated source and remove the `yookr-direct` ingest, the dual-source toggle, and the
+`project` column — converging blue on red's single-categorical (`source`) model. See the
+coverage snapshot: [`yookr-vs-datalake-coverage.md`](./yookr-vs-datalake-coverage.md).
 
-## ⛔ Hard blocker (confirmed 2026-06-15): the relay serves one sensor per device
+## ✅ The hard blocker is resolved
 
-A direct comparison of the `yookr-data` relay API against yookr-direct (both pull
-the same yookr sensors) shows the **relay exposes only ONE sensor per device**:
+The retirement was deferred on 2026-06-15 because the `yookr-data` relay exposed only
+**one sensor per device** (21 of yookr-direct's 58 series; `weatherstation:airTemperature`
+absent). SPoHF has fixed it. Verified against prod on 2026-07-10:
 
-| source | series (3-day window) | rows | weatherstation:airTemperature |
-|---|---|---|---|
-| yookr-direct | **58** (full sensor set per device) | 8,738 | present, fresh |
-| `yookr-data` relay | **21** (one sensor per device) | 2,362 | **absent** |
+| exit criterion | status |
+|---|---|
+| Relay exposes every sensor per device | ✅ **0 yookr-only series** (59 shared, 33 datalake-only, 92 total) |
+| The 5 previously-absent devices (`366D`, `366E`, `3670`, `3672`, `PH1 \| 4D1D`) | ✅ present, fresh to today |
+| `weatherstation:airTemperature` | ✅ present (50,351 rows), fresh |
+| `sync_metadata.yookr-data` healthy, recent, non-zero | ✅ |
+| Datalake freshness | ✅ `max(time)` 10:31 UTC vs yookr's 11:25; 3,385 vs 3,507 rows/24 h |
 
-Non-artifactual: a single 6-hour page returns 47 rows / 10 devices with **zero**
-devices reporting >1 sensor (soil → only `soilMoisture`, row sensors → only
-`temperature`, `weatherstation` → only `windspeedGust`). This is an **upstream bug
-in `backoffice.spohf.com/api/v1/data/yookr-data`** — not fixable on our side, and
-not fixable by any amount of re-syncing or re-tagging.
+The secondary problems recorded earlier are all closed too: the 401 token revocation
+(restored 2026-06-15), the `/status` coverage attribution leak (fixed at day granularity),
+GDD's dependency on yookr weather (decoupled to OpenMeteo), and the dedup race (issue 026).
 
-⇒ **yookr-direct cannot be retired until SPoHF fixes the relay to expose every
-sensor per device.** This supersedes the issues below (all real, but secondary).
+## ⚠️ What retiring yookr-direct actually costs
 
-## Why it's deferred (the secondary problems)
+The datalake is a superset by *series* but not by *rows*: **337,081 yookr-only rows** (8.2%
+of yookr-direct's 4.10 M), all within 2024-11 → 2025-12.
 
-1. **~~The datalake relay sync is failing.~~** *(RESOLVED 2026-06-15: the API token
-   had been revoked → `401 Unauthorized`; restored, sync recovered — 6,803 records,
-   fresh. But it only ingests the one-sensor-per-device subset above.)*
-2. **The datalake is stale across every automated sensor.** Was a symptom of the
-   401 outage (and, for absorbed series, of the dedup race below) — not a fixed
-   property. With the token restored the relay is fresh, but still incomplete.
-3. **Five automated devices appeared entirely absent from the datalake** (`366D`,
-   `366E`, `3670`, `3672` row sensors; `PH1 | 4D1D` soil-pH). Mostly the 401
-   outage; the relay now returns them — but only their single exposed sensor.
-4. **The dedup race makes a naive resync ineffective.** `readings`' unique key is
-   `(device_name, sensor_tag, time)` — no `project` — and the upsert's
-   `ON CONFLICT … DO UPDATE` rewrites `value`/`raw_value` but **never `project`**.
-   So any key first inserted by `yookr-direct` stays `project='yookr-direct'`
-   forever; a datalake resync overwrites its *value* but can't reclaim ownership.
-   ⇒ retirement must be ordered: **stop yookr-direct → purge `project='yookr-direct'`
-   rows (frees the keys) → resync/let the datalake re-own them.**
-5. **`project` can only be dropped once there's a single ingest.** While both syncs
-   write the shared table, `project` is the only thing distinguishing them, and the
-   dedup race persists. So "drop the `project` column" is a *consequence* of
-   retiring `yookr-direct`, not an independent step. (Blue would then mirror red's
-   single-categorical model.)
+- **2024-11 → 2025-11 — thinning.** The relay dropped 3–16% of samples; every series is
+  still present every day. Harmless.
+- **2025-12 — a hole.** 36 of 59 series have zero datalake rows (56,805 readings). The
+  datalake kept exactly one sensor per device that month: December 2025 is the relay bug
+  preserved in the data.
 
-## Already handled (so they're NOT blockers)
+Attempt a targeted relay backfill of that window *before* purging. The 2026-06-16 full
+backfill already re-pulled it and still got the subset, so the gap is probably in SPoHF's
+stored history — in which case the fix is an upstream backfill request, not more syncing.
 
-- **GDD's dependency on `yookr-direct` weather** — removed by decoupling GDD to
-  OpenMeteo modeled weather at the farm location (separate work). GDD no longer
-  reads `readings` for temperature, so it survives yookr-direct removal.
-- **`/status` masking the staleness** — the coverage grid showed the datalake as
-  healthy because `daily_coverage` has no `project` column, so it leaked
-  yookr-direct's fresh days into the datalake view. Fixed separately (cagg join at
-  day granularity).
+## The purge: why it is still needed, and why the old reason expired
 
-## Exit criteria — retire only when ALL hold
+The previous version of this document justified step 2 ("purge `project='yookr-direct'`")
+as *"frees the dedup keys"*: the unique index was `(device_name, sensor_tag, time)` with no
+`project`, and `upsert_readings`' `ON CONFLICT … DO UPDATE` rewrote `value` but never
+`project`. Whichever source inserted a key first owned it forever, so a datalake resync
+could overwrite a row's *value* but never reclaim its *ownership*.
 
-- [ ] **(BLOCKING, upstream) The `yookr-data` relay exposes every sensor per
-      device.** Verify with the relay-API diff: enumerate distinct
-      `(device, sensor)` from `GET /api/v1/data/yookr-data` over a recent window
-      and confirm it matches yookr-direct's full set (58 series, incl.
-      `weatherstation:airTemperature`) — not one sensor per device. Owned by SPoHF.
-- [ ] `sync_metadata.yookr-data` shows `last_run_success = true` with recent,
-      non-zero records over several consecutive runs.
-- [ ] Re-running the coverage query (below) shows **every** automated
-      `(device, sensor)` fresh (last day ≈ today) under the datalake filter
-      (`project <> 'yookr-direct'`), with **no missing devices**.
+**Issue 026 removed that constraint** by putting `project` into the dedup key
+(`idx_readings_dedup_v2` on `(device_name, sensor_tag, time, project)`). The two sources now
+coexist as separate rows and the datalake already owns its own data. The purge no longer
+makes the datalake canonical — it is already canonical.
 
-> Note: the third check can only pass *after* yookr-direct stops owning the dedup
-> keys (it absorbs the datalake's identical-timestamp rows — see problem 4). So in
-> practice: confirm the relay is complete via the **API diff** (check 1), then the
-> retirement sequence below frees the keys and the in-DB check becomes meaningful.
+What the purge is still needed for is narrower and purely mechanical: **`ALTER TABLE readings
+DROP COLUMN project` requires uniqueness on `(device_name, sensor_tag, time)`**, which means
+removing one row from every duplicated pair. That is a de-duplication requirement, not a
+"delete everything yookr wrote" requirement — a dedupe-merge (drop only rows whose key also
+exists under `spohf-datalake`) would satisfy it while preserving the 337 k yookr-only rows.
 
-```sql
-SELECT device_name, sensor_tag,
-  max(time) FILTER (WHERE project <> 'yookr-direct')::date AS dl_last
-FROM readings GROUP BY device_name, sensor_tag
-ORDER BY dl_last NULLS FIRST;   -- NULL/old rows at top = still-missing/stale
-```
+**Decision (2026-07-10): full purge**, so every surviving automated row provably came from
+the datalake. Safe now that no series is yookr-only; the cost is the row deficit above.
 
-## Retirement sequence (once exit criteria met)
+## Retirement sequence
 
-1. Stop the `yookr-direct` sync (cronjob).
-2. Purge `project = 'yookr-direct'` rows (frees the dedup keys).
-3. Resync / let the datalake re-own the keys; re-verify coverage.
-4. Collapse the dashboard to a single datalake source; remove the toggle,
-   `datasource.py`, `yookr.py`, and the `is_yookr` branch in `ops.py`.
-5. Drop the `project` column (blue → single-categorical, like red).
-6. Delete `sync/yookr_orchestrator.py`, `yookr/` client, and related config.
+`ensure_aggregates` cannot perform this migration: `CAGG_SQL_TEMPLATE` is
+`CREATE MATERIALIZED VIEW IF NOT EXISTS`, so changing `project_column` on an existing
+database is a **silent no-op**. The cagg must be explicitly dropped and rebuilt.
+
+Ordering is forced by a deploy trap — the **old image crashes on the new schema**
+(`CREATE UNIQUE INDEX … (…, project)` on a dropped column) and the **new image crashes on
+the old schema** (a 3-column unique index cannot be built while both projects' rows
+coexist). So the migration runs *between* the two deploys.
+
+1. Backfill 2024-11 → 2026-01 from the relay; re-audit December 2025.
+2. Disable the sync CronJob via `sync.enabled: false` in `helm/shared/values.yaml`
+   (a manual `kubectl patch --suspend` is reverted by argocd).
+3. Back up: `COPY (SELECT * FROM readings WHERE project='yookr-direct') TO … CSV HEADER`.
+4. `DROP MATERIALIZED VIEW sensors_daily_summary CASCADE` (it depends on `project`).
+5. Purge `project='yookr-direct'` in monthly batches.
+6. Pre-check uniqueness on `(device_name, sensor_tag, time)` — must return zero duplicates.
+7. Swap `idx_readings_dedup_v2` → `idx_readings_dedup_v3` on the 3-column key.
+8. `ALTER TABLE readings DROP COLUMN project`.
+9. Deploy the new image; startup recreates the cagg on `source` `WITH NO DATA`.
+10. `CALL refresh_continuous_aggregate('sensors_daily_summary', NULL, NULL)`, rebuild
+    `daily_coverage`, re-enable the sync.
+
+Expect a ~2-minute dashboard outage between steps 8 and 9 (the running old image queries a
+dropped column). Blue is single-replica by design.
+
+## Code to delete
+
+- `src/wp6_data/sync/yookr_orchestrator.py`, `src/wp6_data/yookr/` (client + sensors).
+  ⚠️ **Keep `src/wp6_data/blue/sensor_overview_SPoHF.csv`** — `blue/treatments.py` reads it
+  through its own path.
+- `src/wp6_data/blue/datasource.py`, `src/wp6_data/blue/yookr.py`, and the `is_yookr` branch
+  in `blue/routes/ops.py` (this is issue 029, folded in).
+- The second `DataSource` in `blue/dashboard.py`. The shared layer already handles a
+  single-source twin: static badge, no toggle, no cookie dispatch.
+- `project` filtering throughout `blue/deps.py`; the `--yookr` flag in `__main__.py`; the
+  `yookr_*` settings; the `WP6_YOOKR_*` env in `helm/shared/templates/cronjob.yaml`.
+
+## After: what becomes visible
+
+Removing the toggle exposes 33 datalake-only series it was hiding — two dead test rigs
+(931 k rows), a 19-series *forecast* feed under the device name
+`Grubbenvorst, Limburg, Nederland`, 10 stray rows under a raw IMEI, and the dead `366F` row
+sensor. Decide per series: enumerate in `blue/metadata.yaml` or filter out.
+
+Still open upstream: the `0Exx` vs `SPoHF_EC-BV_rijN` device-name duplication — the same
+physical soil probes under two names, both now fully populated. See
+[`spohf-relay-bug-report.md`](./spohf-relay-bug-report.md).

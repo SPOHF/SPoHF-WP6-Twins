@@ -2,6 +2,16 @@
 
 **To:** SPoHF backoffice / datalake team  •  **From:** WP6 Blue twin  •  **2026-06-15**
 
+> ## ✅ RESOLVED for live data — 2026-07-10
+>
+> The relay now serves **every sensor per device**. Verified in prod: the datalake carries
+> **92 distinct `(device, sensor)` series** against the direct feed's 59 — a strict superset,
+> with **zero** series exclusive to the direct feed. `weatherstation:airTemperature` is back,
+> and freshness is at parity (relay `max(time)` within ~1 h of the direct feed).
+>
+> Thank you. Two asks remain — see **[Still open](#still-open-2026-07-10)** at the bottom:
+> a **backfill of December 2025**, and the **device-name duplication** question.
+
 ## Summary
 
 The `GET /api/v1/data/yookr-data` endpoint on `backoffice.spohf.com` returns only
@@ -76,3 +86,40 @@ If (b), please point us at the endpoint list; if (a), we'd appreciate a fix or E
 - Separately: the API token we use for this endpoint was revoked and restored on
   2026-06-15 (it had been returning `401 Unauthenticated`). It's working now — flag
   if that was intentional.
+
+## Still open (2026-07-10)
+
+### (a) Please backfill December 2025
+
+The live fix does not appear to have repaired the *stored* history. For **2025-12-01 →
+2025-12-31**, the relay still returns only one sensor per device — the exact signature of
+the original bug, preserved. 36 of 59 series have **zero** rows that month:
+
+| Device | Relay returns | Relay still missing |
+|---|---|---|
+| `weatherstation` | `windspeedGust` | `airTemperature`, `solarRadiation`, `precipitation`, `windSpeed`, `windDirection`, `atmosphericPressure`, `vaporPressure`, `battery`, `inputVoltage`, `lightningStrikes` |
+| `01 \| 0E5E`, `03 \| 0E09`, `04 \| 0E69` | `soilMoisture` | `soilConductivity`, `soilTemperature` |
+| `02 \| 0E4F` | `soilTemperature` | `soilConductivity`, `soilMoisture` |
+| `BV + BT + EC \| Nr. 6` | `soilConductivity` | `soilMoisture`, `soilTemperature` |
+| `SPoHF_EC-BV_rij1` … `rij5` | one of the three | the other two |
+| `366D`/`366E`/`3670`/`3671`/`3672 \| LT + LV` | `temperature` | `humidity` |
+| `DF1C`, `DF1D \| BN + BT` | one of the pair | `leaf_temperature` / `leaf_moisture` |
+
+We re-ran a full historical sync on 2026-06-16 and again after the fix; December 2025 comes
+back the same both times, while 2026-01 onward returns complete. That points at the stored
+data rather than the serving path.
+
+**Impact:** we are about to retire our direct-Yookr ingest, which currently holds the only
+complete copy of those 56,805 readings. Once retired, that month is gone unless the relay
+can serve it. A backfill on your side would let us keep an unbroken record; otherwise we
+will carry a documented one-month gap across most sensors.
+
+There is also a milder deficit from **2024-11 → 2025-11**: the relay carries 84–97% of the
+readings the direct feed has for the same series. No days are missing, only samples within
+them, so this is low priority for us.
+
+### (b) Are `0Exx` and `SPoHF_EC-BV_rijN` the same physical probes?
+
+Both naming schemes are now fully populated, so the same soil probes appear to be carried
+twice under different device names. We would like to de-duplicate rather than display both.
+Please confirm the mapping (or tell us they are genuinely distinct hardware).

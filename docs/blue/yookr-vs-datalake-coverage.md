@@ -1,119 +1,145 @@
 # Blue automated-sensor coverage: yookr-direct vs SPoHF datalake
 
-**Snapshot: 2026-06-12** (prod `wp6-data-timescaledb`, db `postgres`).
-Source of truth for this table:
-
-```sql
-SELECT device_name, sensor_tag,
-  count(*) FILTER (WHERE project='yookr-direct')           AS yk_rows,
-  max(time) FILTER (WHERE project='yookr-direct')::date     AS yk_last,
-  count(*) FILTER (WHERE project<>'yookr-direct')           AS dl_rows,
-  max(time) FILTER (WHERE project<>'yookr-direct')::date    AS dl_last
-FROM readings GROUP BY device_name, sensor_tag;
-```
+**Snapshot: 2026-07-10** (prod `wp6-data-timescaledb`, db `postgres`).
 
 The two automated blue sources are the **same underlying yookr sensors**, fetched two
 ways: `yookr-direct` (straight from `api.yookr.org`) and the SPoHF datalake relay
-(`backoffice.spohf.com/api/v1/data/yookr-data`, landing under `project='unknown'`).
-This table exists to guarantee we don't silently lose a sensor when retiring
-`yookr-direct`.
+(`backoffice.spohf.com/api/v1/data/yookr-data`, landing under `project='spohf-datalake'`
+since issue 026). This table exists to guarantee we don't silently lose a sensor when
+retiring `yookr-direct`.
+
+> **Supersedes the 2026-06-12 snapshot**, which showed the datalake universally stale with
+> 5 devices absent. That was the combined effect of a revoked API token (401), the dedup
+> race (fixed in issue 026), and the upstream one-sensor-per-device relay bug. All three
+> are resolved.
 
 ## Headline
 
-- **The datalake is currently NOT a superset of yookr-direct.** Every automated
-  sensor is fresh-to-today in `yookr-direct`; in the datalake the same sensors are
-  **universally stale** (newest automated datalake point is 2026-05-12; most are
-  2025-12-31 → 2026-03-20). The datalake relay sync is currently failing
-  (`sync_metadata.yookr-data`: `last_run_success=false`, 316 total failures).
-- **Five automated devices are entirely ABSENT from the datalake** (0 rows):
-  `366D`, `366E`, `3670`, `3672` (LT+LV row sensors), and `PH1 | 4D1D` (soil pH).
-- **One device exists ONLY in the datalake** and is itself stale:
-  `366F | Rij 1 Boven | 6` (last 2025-07-21).
-- ⇒ Retiring `yookr-direct` today would drop live coverage for **all** automated
-  blue sensors, not just the weather station. The datalake must be repaired/backfilled
-  first (and GDD repointed to OpenMeteo — see the cleanup plan).
+- **The datalake is now a strict superset of yookr-direct at the series level.**
+  **Zero** `(device, sensor)` series exist only in yookr-direct. 59 series are shared,
+  33 are datalake-only (92 total).
+- **All five previously-absent devices are present and fresh**: `366D`, `366E`, `3670`,
+  `3672` (LT+LV row sensors) and `PH1 | 4D1D` (soil pH).
+- **`weatherstation:airTemperature` is present and fresh** (50,351 rows) — the specific
+  series whose absence blocked the retirement.
+- **Freshness is at parity**: datalake `max(time)` = 2026-07-10 10:31 UTC vs yookr-direct
+  11:25 UTC; 3,385 vs 3,507 rows in the last 24 h.
+- **But the datalake is NOT a row-level superset.** 337,081 yookr-only rows remain (8.2%
+  of yookr-direct's 4.10 M), entirely within 2024-11 → 2025-12. See below.
 
-Status legend: 🔴 datalake absent · 🟠 datalake present but stale (>30d behind) ·
-🟢 datalake fresh & sufficient · ⚪ not a yookr sensor (unaffected by removal)
+| project | rows | series | first | last |
+|---|--:|--:|---|---|
+| `spohf-datalake` | 4,912,026 | 92 | 2024-03-21 | 2026-07-10 |
+| `yookr-direct` | 4,103,669 | 59 | 2024-03-21 | 2026-07-10 |
+| `unknown` (manual) | 6,114 | 133 | 2024-04-23 | 2026-05-29 |
 
-## Automated sensors (the coverage-risk set)
+## The row-level deficit
 
-| Device | Sensor | yk rows | yk last | dl rows | dl last | Status |
-|---|---|--:|---|--:|---|:--:|
-| weatherstation | airTemperature | 52720 | 2026-06-12 | 793 | 2026-03-20 | 🟠 |
-| weatherstation | atmosphericPressure | 52732 | 2026-06-12 | 781 | 2025-12-31 | 🟠 |
-| weatherstation | battery | 52725 | 2026-06-12 | 793 | 2026-03-20 | 🟠 |
-| weatherstation | inputVoltage | 52723 | 2026-06-12 | 793 | 2026-03-20 | 🟠 |
-| weatherstation | lightningStrikes | 52720 | 2026-06-12 | 793 | 2026-03-20 | 🟠 |
-| weatherstation | precipitation | 52730 | 2026-06-12 | 781 | 2025-12-31 | 🟠 |
-| weatherstation | solarRadiation | 52732 | 2026-06-12 | 781 | 2025-12-31 | 🟠 |
-| weatherstation | vaporPressure | 52732 | 2026-06-12 | 781 | 2025-12-31 | 🟠 |
-| weatherstation | windDirection | 52733 | 2026-06-12 | 781 | 2025-12-31 | 🟠 |
-| weatherstation | windSpeed | 52732 | 2026-06-12 | 781 | 2025-12-31 | 🟠 |
-| weatherstation | windspeedGust | 52732 | 2026-06-12 | 781 | 2025-12-31 | 🟠 |
-| 366D \| LT + LV \| Rij 1 Onder \| 5 | humidity | 184543 | 2026-06-12 | 0 | – | 🔴 |
-| 366D \| LT + LV \| Rij 1 Onder \| 5 | temperature | 184543 | 2026-06-12 | 0 | – | 🔴 |
-| 366E \| LT + LV \| Rij 5 boven \| 2 | humidity | 178281 | 2026-06-12 | 0 | – | 🔴 |
-| 366E \| LT + LV \| Rij 5 boven \| 2 | temperature | 178281 | 2026-06-12 | 0 | – | 🔴 |
-| 3670 \| LT + LV \| Rij 3 Onder \| 3 | humidity | 184999 | 2026-06-11 | 0 | – | 🔴 |
-| 3670 \| LT + LV \| Rij 3 Onder \| 3 | temperature | 185002 | 2026-06-11 | 0 | – | 🔴 |
-| 3671 \| LT + LV \| Rij 3 Boven \| 4 | humidity | 138740 | 2026-06-12 | 47113 | 2026-03-20 | 🟠 |
-| 3671 \| LT + LV \| Rij 3 Boven \| 4 | temperature | 185840 | 2026-06-12 | 13 | 2026-03-20 | 🟠 |
-| 3672 \| LT + LV \| Rij 5 onder \| 1 | humidity | 185696 | 2026-06-11 | 0 | – | 🔴 |
-| 3672 \| LT + LV \| Rij 5 onder \| 1 | temperature | 185699 | 2026-06-11 | 0 | – | 🔴 |
-| 366F \| LT + LV \| Rij 1 Boven \| 6 | humidity | 0 | – | 93073 | 2025-07-21 | ⚪ dl-only |
-| 366F \| LT + LV \| Rij 1 Boven \| 6 | temperature | 0 | – | 93270 | 2025-07-21 | ⚪ dl-only |
-| 3672 \| PAR | par | 19837 | 2026-06-12 | 87478 | 2025-12-31 | 🟠 |
-| 01 \| 0E5E \| BV + EC + BT | soilConductivity | 26546 | 2026-06-12 | 734 | 2025-12-31 | 🟠 |
-| 01 \| 0E5E \| BV + EC + BT | soilMoisture | 26546 | 2026-06-12 | 734 | 2025-12-31 | 🟠 |
-| 01 \| 0E5E \| BV + EC + BT | soilTemperature | 26545 | 2026-06-12 | 734 | 2025-12-31 | 🟠 |
-| 02 \| 0E4F \| BV + EC + BT | soilConductivity | 26470 | 2026-06-12 | 746 | 2026-03-20 | 🟠 |
-| 02 \| 0E4F \| BV + EC + BT | soilMoisture | 26470 | 2026-06-12 | 746 | 2026-03-20 | 🟠 |
-| 02 \| 0E4F \| BV + EC + BT | soilTemperature | 26471 | 2026-06-12 | 746 | 2026-03-20 | 🟠 |
-| 03 \| 0E09 \| BV + EC + BT | soilConductivity | 26453 | 2026-06-12 | 740 | 2025-12-31 | 🟠 |
-| 03 \| 0E09 \| BV + EC + BT | soilMoisture | 26454 | 2026-06-12 | 740 | 2025-12-31 | 🟠 |
-| 03 \| 0E09 \| BV + EC + BT | soilTemperature | 26453 | 2026-06-12 | 740 | 2025-12-31 | 🟠 |
-| 04 \| 0E69 \| BV + EC + BT | soilConductivity | 26607 | 2026-06-12 | 742 | 2025-12-31 | 🟠 |
-| 04 \| 0E69 \| BV + EC + BT | soilMoisture | 26607 | 2026-06-12 | 742 | 2025-12-31 | 🟠 |
-| 04 \| 0E69 \| BV + EC + BT | soilTemperature | 26605 | 2026-06-12 | 742 | 2025-12-31 | 🟠 |
-| BV + BT + EC \| Nr. 6 | soilConductivity | 48747 | 2026-06-12 | 746 | 2026-03-20 | 🟠 |
-| BV + BT + EC \| Nr. 6 | soilMoisture | 48747 | 2026-06-12 | 746 | 2026-03-20 | 🟠 |
-| BV + BT + EC \| Nr. 6 | soilTemperature | 48420 | 2026-06-12 | 746 | 2026-03-20 | 🟠 |
-| SPoHF_EC-BV_rij1 | soilConductivity | 27803 | 2026-06-12 | 26652 | 2026-03-20 | 🟠 |
-| SPoHF_EC-BV_rij1 | soilMoisture | 7436 | 2026-06-12 | 47019 | 2026-03-20 | 🟠 |
-| SPoHF_EC-BV_rij1 | soilTemperature | 10409 | 2026-06-12 | 44049 | 2026-02-18 | 🟠 |
-| SPoHF_EC-BV_rij2 | soilConductivity | 52844 | 2026-06-11 | 1337 | 2026-03-20 | 🟠 |
-| SPoHF_EC-BV_rij2 | soilMoisture | 52846 | 2026-06-11 | 1337 | 2026-03-20 | 🟠 |
-| SPoHF_EC-BV_rij2 | soilTemperature | 52847 | 2026-06-11 | 1336 | 2026-03-20 | 🟠 |
-| SPoHF_EC-BV_rij3 | soilConductivity | 10174 | 2026-06-12 | 39384 | 2025-12-31 | 🟠 |
-| SPoHF_EC-BV_rij3 | soilMoisture | 8068 | 2026-06-12 | 41493 | 2026-03-20 | 🟠 |
-| SPoHF_EC-BV_rij3 | soilTemperature | 7745 | 2026-06-12 | 41816 | 2025-12-31 | 🟠 |
-| SPoHF_EC-BV_rij4 | soilConductivity | 48348 | 2026-06-12 | 696 | 2025-12-31 | 🟠 |
-| SPoHF_EC-BV_rij4 | soilMoisture | 48339 | 2026-06-12 | 708 | 2026-03-20 | 🟠 |
-| SPoHF_EC-BV_rij4 | soilTemperature | 48336 | 2026-06-12 | 708 | 2026-03-20 | 🟠 |
-| SPoHF_EC-BV_rij5 | soilConductivity | 48633 | 2026-06-11 | 738 | 2025-12-31 | 🟠 |
-| SPoHF_EC-BV_rij5 | soilMoisture | 48633 | 2026-06-11 | 738 | 2025-12-31 | 🟠 |
-| SPoHF_EC-BV_rij5 | soilTemperature | 48630 | 2026-06-11 | 738 | 2025-12-31 | 🟠 |
-| DF1C \| BN + BT \| Zijkant Biologisch | leaf_moisture | 52422 | 2026-06-12 | 749 | 2026-03-20 | 🟠 |
-| DF1C \| BN + BT \| Zijkant Biologisch | leaf_temperature | 52419 | 2026-06-12 | 749 | 2026-03-20 | 🟠 |
-| DF1D \| BN + BT \| Midden control | leaf_moisture | 52661 | 2026-06-12 | 699 | 2025-12-31 | 🟠 |
-| DF1D \| BN + BT \| Midden control | leaf_temperature | 52661 | 2026-06-12 | 699 | 2025-12-31 | 🟠 |
-| PH1 \| 4D1D | soil_pH | 12700 | 2026-06-11 | 0 | – | 🔴 |
-| PH2 \| 4D25 | soil_pH | 22139 | 2026-06-06 | 736 | 2026-05-12 | 🟠 |
-| PH3 \| 4D20 | soil_pH | 22279 | 2026-06-11 | 670 | 2025-12-31 | 🟠 |
+Monthly, over the 59 shared series:
 
-## Not yookr sensors — unaffected by removing yookr-direct ⚪
+| window | datalake rows as % of yookr | shape |
+|---|--:|---|
+| 2024-03 → 2024-10 | 100 % | complete |
+| 2024-11 → 2025-11 | 84 – 97 % | **thinning** — every series present every day, samples dropped inside the day |
+| 2025-12 | 54 % | **hole** — 36 of 59 series have *zero* datalake rows |
+| 2026-01 → 2026-07 | ~100 % | complete |
 
-These never come from `api.yookr.org`; they are ingested by other endpoints and
-all land under `project='unknown'`:
+The thinning (~280 k rows) is analytically harmless: it widens the ~10-min sample spacing
+to ~12 min, invisible to daily aggregates, coverage, and the soil forecast.
 
-- **long_data (CLI)** — treatment-keyed lab/field measures: `brix`,
-  `brix_after_storage`, `firmness`, `firmness_after_storage`, `berry_weight`,
-  `berry_weight_after_storage`, `shoot_length`, `score`, `budscore`,
-  `flowering_score`, `yield_per_plant`, `sample_weight_before/after_storage`,
-  across treatments `Ca, K, Org1, Org2, Std, V_CA, V_CA_G_BrPK, V_K_G_CaBrP, G_K`.
-- **fertigation_events** — `duration_min`, `program_id`, `volume_ml_per_plant`
-  across `Ca/K/Org1/Org2/Std` and `Ca1/Ca3/K1/K3`.
-- **insects (admin/CLI upload)** — `insect-trap:total_insects` (538 rows, 2026-05-29).
-</content>
-</invoke>
+### December 2025: the relay bug, fossilised
+
+That month the datalake retained **exactly one sensor per device** — the same signature as
+the upstream bug reported in [`spohf-relay-bug-report.md`](./spohf-relay-bug-report.md).
+56,805 yookr-only rows across 36 series:
+
+| Device | Datalake kept | Datalake lost |
+|---|---|---|
+| `weatherstation` | `windspeedGust` | `airTemperature`, `solarRadiation`, `precipitation`, `windSpeed`, `windDirection`, `atmosphericPressure`, `vaporPressure`, `battery`, `inputVoltage`, `lightningStrikes` |
+| `01 \| 0E5E \| BV + EC + BT` | `soilMoisture` | `soilConductivity`, `soilTemperature` |
+| `02 \| 0E4F \| BV + EC + BT` | `soilTemperature` | `soilConductivity`, `soilMoisture` |
+| `03 \| 0E09 \| BV + EC + BT` | `soilMoisture` | `soilConductivity`, `soilTemperature` |
+| `04 \| 0E69 \| BV + EC + BT` | `soilMoisture` | `soilConductivity`, `soilTemperature` |
+| `BV + BT + EC \| Nr. 6` | `soilConductivity` | `soilMoisture`, `soilTemperature` |
+| `SPoHF_EC-BV_rij1` | `soilTemperature` | `soilConductivity`, `soilMoisture` |
+| `SPoHF_EC-BV_rij2` | `soilMoisture`, `soilTemperature` | `soilConductivity` |
+| `SPoHF_EC-BV_rij3` | `soilMoisture` | `soilConductivity`, `soilTemperature` |
+| `SPoHF_EC-BV_rij4` | `soilMoisture` | `soilConductivity`, `soilTemperature` |
+| `SPoHF_EC-BV_rij5` | `soilConductivity` | `soilMoisture`, `soilTemperature` |
+| `366D`/`366E`/`3670`/`3671`/`3672 \| LT + LV` | `temperature` | `humidity` |
+| `DF1C \| BN + BT` | `leaf_moisture` | `leaf_temperature` |
+| `DF1D \| BN + BT` | `leaf_temperature` | `leaf_moisture` |
+
+The 2026-06-16 full backfill already re-pulled this window and still landed only the
+subset, while 2026-01 → 2026-06 came back complete. So the gap is most likely in SPoHF's
+*stored* history, not in what the endpoint serves today.
+
+## ⚠️ `/status` cannot show any of this
+
+`deps.fetch_daily_coverage` joins the cagg at `(device, sensor, day)` granularity — a day
+counts as covered if the series has **≥ 1 row** in it. So:
+
+- the **thinning** is structurally invisible (same days, fewer rows within them), and
+- the **December hole** falls outside the recent weekly grid the page renders.
+
+Two `/status` pages agreeing across the source toggle is therefore *expected*, and is **not**
+evidence that the datalake is row-complete. Only a row-level anti-join shows the deficit.
+
+## Source of truth for this document
+
+```sql
+-- Series-level: is the datalake a superset?
+WITH s AS (
+  SELECT device_name, sensor_tag,
+    count(*) FILTER (WHERE project='yookr-direct')   AS yk,
+    count(*) FILTER (WHERE project='spohf-datalake') AS dl
+  FROM readings WHERE project IN ('yookr-direct','spohf-datalake')
+  GROUP BY 1,2)
+SELECT count(*) FILTER (WHERE yk>0 AND dl=0) AS yookr_only_series,
+       count(*) FILTER (WHERE yk=0 AND dl>0) AS datalake_only_series,
+       count(*) FILTER (WHERE yk>0 AND dl>0) AS both
+FROM s;
+
+-- Row-level: exactly how many readings would a purge of yookr-direct destroy?
+SELECT count(*) AS yookr_only_rows, count(DISTINCT (device_name,sensor_tag)) AS series
+FROM readings y
+WHERE y.project='yookr-direct'
+  AND NOT EXISTS (
+    SELECT 1 FROM readings d
+    WHERE d.project='spohf-datalake'
+      AND d.device_name=y.device_name AND d.sensor_tag=y.sensor_tag AND d.time=y.time);
+
+-- Which series-months are true holes (datalake has nothing)?
+WITH m AS (
+  SELECT device_name, sensor_tag, date_trunc('month',time)::date mo,
+    count(*) FILTER (WHERE project='yookr-direct')   yk,
+    count(*) FILTER (WHERE project='spohf-datalake') dl
+  FROM readings WHERE project IN ('yookr-direct','spohf-datalake')
+  GROUP BY 1,2,3)
+SELECT mo, count(*) AS series_with_dl_zero, sum(yk) AS yk_rows_at_risk
+FROM m WHERE yk>0 AND dl=0 GROUP BY 1 ORDER BY 1;
+```
+
+## Datalake-only series (33) — not from yookr-direct
+
+Retiring `yookr-direct` removes the toggle that currently hides these from the default
+view. They will surface on `/status` and the sensor monitor:
+
+| Device | Series | Rows | Note |
+|---|--:|--:|---|
+| `Natte bol - Test temperature zonder houder` | 1 | 458,140 | test rig, dead since 2025-12-31 |
+| `Natte bol - Test Temperature (met houder)` | 1 | 473,208 | test rig, dead since 2025-12-31 |
+| `Grubbenvorst, Limburg, Nederland` | 19 | 891 | *forecast* fields (`icon`, `moonPhase`, `sunrise`, `uvIndex`…), not sensor data |
+| `351516175282524` | 10 | 10 | stray weatherstation rows under a raw IMEI |
+| `366F \| LT + LV \| Rij 1 Boven \| 6` | 2 | 199,448 | real row sensor, dead since 2025-07-21 |
+
+## Not yookr sensors — unaffected by removing yookr-direct
+
+Manual ingest, distinguished by a non-default `readings.source` and always visible
+regardless of the toggle:
+
+- **long_data (CLI)** — treatment-keyed lab/field measures (`brix`, `firmness`,
+  `berry_weight`, `shoot_length`, `yield_per_plant`, …) across treatments
+  `Ca, K, Org1, Org2, Std, V_CA, V_CA_G_BrPK, V_K_G_CaBrP, G_K`.
+- **fertigation_events** — `duration_min`, `program_id`, `volume_ml_per_plant`.
+- **insects (admin/CLI upload)** — `insect-trap:total_insects`.
