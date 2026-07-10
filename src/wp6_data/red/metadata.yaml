@@ -65,6 +65,12 @@ sensor_defaults:
     type: "photosynthetically active radiation (PAR)"
     unit: "μmol/m²/s"
     alias: "PAR"
+  rad:
+    # Unit unconfirmed with WP1; the column is decimal(5,0), so it cannot carry a
+    # fractional value. W/m² is the only listed unit that fits an integer range.
+    type: "solar radiation"
+    unit: "W/m²"
+    alias: "Solar radiation"
   co2:
     type: "CO2 concentration"
     unit: "ppm"
@@ -210,6 +216,15 @@ devices:
   # ── Multi-height wire sensor (WS_01_01): 4 measurements × 5 heights ──
   # Each height is its own device, served from the wide wire_sensors table
   # (see red ADR 0001). Replaces the retired PAR-only s2100-10..15 sensors.
+  # The "-h0" device is the solar-radiation sensor hanging above H1: one per
+  # wire, so it reports `rad` alone and no growth section maps onto it.
+  "WS_01_01-h0":
+    description: "Multi-height wire — solar radiation, above H1"
+    position: "B"
+    type: "wire"
+    sensors:
+      rad: {}
+
   "WS_01_01-h1":
     description: "Multi-height wire — height 1"
     position: "B"
@@ -261,6 +276,13 @@ devices:
       co2: {}
 
   # Second multi-height wire (WS_01_02).
+  "WS_01_02-h0":
+    description: "Multi-height wire 2 — solar radiation, above H1"
+    position: "B"
+    type: "wire"
+    sensors:
+      rad: {}
+
   "WS_01_02-h1":
     description: "Multi-height wire 2 — height 1"
     position: "B"
@@ -312,6 +334,13 @@ devices:
       co2: {}
 
   # Third multi-height wire (WS_01_03), reporting since 2026-07-06.
+  "WS_01_03-h0":
+    description: "Multi-height wire 3 — solar radiation, above H1"
+    position: "B"
+    type: "wire"
+    sensors:
+      rad: {}
+
   "WS_01_03-h1":
     description: "Multi-height wire 3 — height 1"
     position: "B"

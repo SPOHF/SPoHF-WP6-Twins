@@ -124,13 +124,39 @@ WIRE_SENSORS_TABLE = "wire_sensors"
 WIRE_SENSOR_MEASUREMENTS = ["par", "temp", "hum", "co2"]
 WIRE_SENSOR_HEIGHTS = [1, 2, 3, 4, 5]
 
+# A radiation sensor hangs *above* H1 — one per wire, not one per height — so the
+# table carries a single unindexed ``rad`` column rather than ``rad1``..``rad5``.
+# Surfacing it as a virtual height 0 keeps it inside the ``-hN`` naming rule the
+# provider already parses, instead of inventing a second one. See CONTEXT
+# "Solar radiation". WP1 has yet to populate the column.
+WIRE_RADIATION_MEASUREMENT = "rad"
+WIRE_RADIATION_HEIGHT = 0
+
+# Every virtual device on a wire: the radiation level above, then the five
+# measured levels below it, top to bottom.
+WIRE_DEVICE_HEIGHTS = [WIRE_RADIATION_HEIGHT, *WIRE_SENSOR_HEIGHTS]
+
+
+def wire_height_measurements(height: int) -> list[str]:
+    """The measurements a given virtual height reports."""
+    if height == WIRE_RADIATION_HEIGHT:
+        return [WIRE_RADIATION_MEASUREMENT]
+    return list(WIRE_SENSOR_MEASUREMENTS)
+
+
+def wire_column(measurement: str, height: int) -> str:
+    """Wide-table column for a (measurement, height) — ``'par3'``, or bare ``'rad'``."""
+    if height == WIRE_RADIATION_HEIGHT:
+        return measurement
+    return f"{measurement}{height}"
+
 
 def wire_value_columns() -> list[str]:
-    """The 20 wide value column names, e.g. ['par1', ..., 'co25']."""
+    """Every wide value column: the 20 height-indexed ones plus ``rad``."""
     return [
-        f"{measurement}{height}"
-        for measurement in WIRE_SENSOR_MEASUREMENTS
-        for height in WIRE_SENSOR_HEIGHTS
+        wire_column(measurement, height)
+        for height in WIRE_DEVICE_HEIGHTS
+        for measurement in wire_height_measurements(height)
     ]
 
 
@@ -168,9 +194,9 @@ def unpivot_wire_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for row in rows:
         physical_id = row.get("device_id", "")
-        for measurement in WIRE_SENSOR_MEASUREMENTS:
-            for height in WIRE_SENSOR_HEIGHTS:
-                value = row.get(f"{measurement}{height}")
+        for height in WIRE_DEVICE_HEIGHTS:
+            for measurement in wire_height_measurements(height):
+                value = row.get(wire_column(measurement, height))
                 if value is not None:
                     records.append({
                         "device": wire_device_id(physical_id, height),
@@ -197,15 +223,16 @@ def split_wire_rows_by_height(
     of collapsing them into an average.
 
     Returns ``{virtual_device_id: [{received_at, par, temp, hum, co2}, ...]}``,
-    omitting heights that reported nothing.
+    omitting heights that reported nothing. The radiation level (height 0) yields
+    a single ``rad`` column instead of the four measurements.
     """
     by_device: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         physical_id = row.get("device_id", "")
-        for height in WIRE_SENSOR_HEIGHTS:
+        for height in WIRE_DEVICE_HEIGHTS:
             values = {
-                measurement: row.get(f"{measurement}{height}")
-                for measurement in WIRE_SENSOR_MEASUREMENTS
+                measurement: row.get(wire_column(measurement, height))
+                for measurement in wire_height_measurements(height)
             }
             if all(value is None for value in values.values()):
                 continue
@@ -710,7 +737,7 @@ class MySQLConnection:
 
         summary: dict[str, dict[str, Any]] = {}
         for row in rows:
-            for height in WIRE_SENSOR_HEIGHTS:
+            for height in WIRE_DEVICE_HEIGHTS:
                 summary[wire_device_id(row["device_id"], height)] = {
                     "readings": int(row["readings"] or 0),
                     "last_seen": row["last_seen"],

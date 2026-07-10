@@ -115,7 +115,7 @@ class RedSensorProvider:
         """
         from wp6_data.red.db import (
             SENSOR_TABLES,
-            WIRE_SENSOR_HEIGHTS,
+            WIRE_DEVICE_HEIGHTS,
             WIRE_SENSORS_TABLE,
             wire_device_id,
         )
@@ -154,7 +154,7 @@ class RedSensorProvider:
                 except Exception:
                     wire_rows = []
                 for physical_id, day in wire_rows:
-                    for height in WIRE_SENSOR_HEIGHTS:
+                    for height in WIRE_DEVICE_HEIGHTS:
                         device_id = wire_device_id(physical_id, height)
                         for sensor in self.wire_devices.get(device_id, []):
                             records.append({

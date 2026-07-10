@@ -21,7 +21,6 @@ from wp6_data.db.queries import record_sync_run, refresh_sensor_summary
 from wp6_data.red.db import (
     COMMON_MEASUREMENTS,
     SENSOR_TABLES,
-    WIRE_SENSOR_MEASUREMENTS,
     MySQLConnection,
     split_wire_rows_by_height,
 )
@@ -85,6 +84,9 @@ async def export_wire(
     (red ADR 0001), so they get separate CSVs — that is also the key the explorer's
     download link looks up.
 
+    Columns come from each height's own records, because the radiation level (h0)
+    carries `rad` alone while the measured heights carry the usual four.
+
     Returns the virtual device ids that produced a file.
     """
     rows = await db.get_wire_rows(physical_device_id)
@@ -94,7 +96,7 @@ async def export_wire(
 
     written = []
     for device_id, records in sorted(split_wire_rows_by_height(rows).items()):
-        df = pd.DataFrame(records, columns=["received_at", *WIRE_SENSOR_MEASUREMENTS])
+        df = pd.DataFrame(records)
         output_path = output_dir / f"{device_id}.csv"
         df.to_csv(output_path, index=False)
         written.append(device_id)

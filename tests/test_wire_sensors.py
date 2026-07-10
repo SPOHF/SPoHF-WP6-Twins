@@ -12,6 +12,9 @@ from __future__ import annotations
 from datetime import datetime
 
 from wp6_data.red.db import (
+    WIRE_DEVICE_HEIGHTS,
+    WIRE_RADIATION_HEIGHT,
+    WIRE_RADIATION_MEASUREMENT,
     WIRE_SENSOR_HEIGHTS,
     WIRE_SENSOR_MEASUREMENTS,
     split_wire_rows_by_height,
@@ -26,18 +29,19 @@ TS = datetime(2026, 5, 26, 14, 17, 28)
 
 
 def _full_row() -> dict:
-    """A row with every (measurement, height) cell populated."""
+    """A row with every (measurement, height) cell populated, `rad` included."""
     row: dict = {"device_id": "WS_01_01", "received_at": TS}
     for measurement in WIRE_SENSOR_MEASUREMENTS:
         for height in WIRE_SENSOR_HEIGHTS:
             row[f"{measurement}{height}"] = float(height)
+    row[WIRE_RADIATION_MEASUREMENT] = 42.0
     return row
 
 
 class TestWireValueColumns:
-    def test_count_is_measurements_times_heights(self):
+    def test_covers_the_height_grid_plus_radiation(self):
         assert len(wire_value_columns()) == (
-            len(WIRE_SENSOR_MEASUREMENTS) * len(WIRE_SENSOR_HEIGHTS)
+            len(WIRE_SENSOR_MEASUREMENTS) * len(WIRE_SENSOR_HEIGHTS) + 1
         )
 
     def test_naming_convention(self):
@@ -46,11 +50,22 @@ class TestWireValueColumns:
         assert "par1" in cols
         assert "co25" in cols
 
+    def test_radiation_column_is_not_height_indexed(self):
+        """`rad` hangs above H1 — one per wire — so there is no rad1..rad5."""
+        cols = wire_value_columns()
+        assert WIRE_RADIATION_MEASUREMENT in cols
+        assert not any(
+            f"{WIRE_RADIATION_MEASUREMENT}{height}" in cols
+            for height in WIRE_SENSOR_HEIGHTS
+        )
+
 
 class TestUnpivotWireRows:
     def test_full_row_yields_every_cell(self):
         records = unpivot_wire_rows([_full_row()])
-        assert len(records) == len(WIRE_SENSOR_MEASUREMENTS) * len(WIRE_SENSOR_HEIGHTS)
+        assert len(records) == (
+            len(WIRE_SENSOR_MEASUREMENTS) * len(WIRE_SENSOR_HEIGHTS) + 1
+        )
 
     def test_record_shape_and_mapping(self):
         records = unpivot_wire_rows([_full_row()])
@@ -69,7 +84,25 @@ class TestUnpivotWireRows:
     def test_height_becomes_virtual_device(self):
         records = unpivot_wire_rows([_full_row()])
         devices = {r["device"] for r in records}
-        assert devices == {f"WS_01_01-h{h}" for h in WIRE_SENSOR_HEIGHTS}
+        assert devices == {f"WS_01_01-h{h}" for h in WIRE_DEVICE_HEIGHTS}
+
+    def test_radiation_lands_on_the_level_above_h1(self):
+        records = unpivot_wire_rows([_full_row()])
+        rad = [r for r in records if r["measurement"] == WIRE_RADIATION_MEASUREMENT]
+        assert rad == [{
+            "device": wire_device_id("WS_01_01", WIRE_RADIATION_HEIGHT),
+            "height": WIRE_RADIATION_HEIGHT,
+            "measurement": WIRE_RADIATION_MEASUREMENT,
+            "time": TS,
+            "value": 42.0,
+        }]
+
+    def test_absent_radiation_yields_no_h0_records(self):
+        """WP1 has not populated `rad` on every wire; a NULL must not fake a zero."""
+        row = _full_row()
+        del row[WIRE_RADIATION_MEASUREMENT]
+        devices = {r["device"] for r in unpivot_wire_rows([row])}
+        assert wire_device_id("WS_01_01", WIRE_RADIATION_HEIGHT) not in devices
 
     def test_empty_cells_are_skipped(self):
         # Mirrors the real example row: only par at height 1, full temp/hum/co2.
@@ -220,8 +253,16 @@ class TestSplitWireRowsByHeight:
     def test_each_height_becomes_its_own_device(self):
         by_device = split_wire_rows_by_height([_full_row()])
         assert set(by_device) == {
-            wire_device_id("WS_01_01", h) for h in WIRE_SENSOR_HEIGHTS
+            wire_device_id("WS_01_01", h) for h in WIRE_DEVICE_HEIGHTS
         }
+
+    def test_radiation_level_carries_only_rad(self):
+        """h0's CSV has a `rad` column, not the four per-height measurements."""
+        by_device = split_wire_rows_by_height([_full_row()])
+        device = wire_device_id("WS_01_01", WIRE_RADIATION_HEIGHT)
+        assert by_device[device] == [
+            {"received_at": TS, WIRE_RADIATION_MEASUREMENT: 42.0}
+        ]
 
     def test_record_carries_that_heights_measurements(self):
         by_device = split_wire_rows_by_height([_full_row()])
