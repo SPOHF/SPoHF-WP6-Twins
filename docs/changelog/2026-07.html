@@ -90,6 +90,7 @@
       <li><strong>Manual irrigation data now shows up <em>in context</em> on Blue's charts.</strong> Fertigation events are drawn as markers over the soil sensor traces, alongside a new manual-measurement monitor and mixed sensor/manual views.</li>
       <li><strong>The GDD growth tracker now spans a full year.</strong> The on-site weather sensor had gaps across 2024; by sourcing temperature from OpenMeteo modeled weather instead, Blue can analyse Growing Degree Days over a complete calendar year (from 1 Jan 2024), with its growth constants set to recognised horticultural values.</li>
       <li><strong>Blue is now fully operational on the SPoHF Datalake.</strong> The direct Yookr API fallback is no longer needed and has been retired — removing 607 lines of production code, purging 4,104,138 duplicate rows (43.5% of the readings table), and dropping one of two API syncs from the 15-minute sync job.</li>
+      <li><strong>Red is getting ready for new greenhouse wire sensors.</strong> Support for the three new/updated multi-height wires was prepared as configuration, so onboarding the hardware needs no code change — plus a safety net that warns if an undeclared wire starts reporting.</li>
       <li><strong>We were silently losing sensor readings, and now we aren't.</strong> Preparing the retirement uncovered a bug in our own datalake client: it stopped paginating at the relay's 10,000-record cap and treated that as "no more data". <strong>277,588 readings</strong> were recovered across 14 months.</li>
     </ul>
   </div>
@@ -219,6 +220,32 @@
   </section>
 
   <section class="theme">
+    <h2>🍅 Red — Getting ready for new greenhouse wire sensors</h2>
+    <p class="theme-sub">Red's "multi-height wire" is a single device that measures light, temperature, humidity and CO₂ at several heights up the canopy. Ahead of installing three new/updated wires in the greenhouse, the platform was prepared so that onboarding them is a configuration change — not a code change.</p>
+    <div class="hero red">
+      <div class="card">
+        <h3>Config-driven wire support, with a safety net for undeclared wires</h3>
+        <div class="tags"><span class="pill red">Red</span></div>
+        <p>Which wires exist is declared in <code>metadata.yaml</code> and <strong>never inferred from the incoming data</strong>. Wire enumeration was centralised into one module that every view, the risk engine and the export job read from — so adding the three incoming wires means new config entries, with no code to touch. This groundwork is landing now, before the hardware goes in.</p>
+        <ul>
+          <li><strong>Undeclared-wire safety net:</strong> if a wire starts reporting into the greenhouse database without being declared, startup now logs a warning instead of silently dropping its readings — so a miswired or forgotten sensor can't go unnoticed.</li>
+          <li><strong>Per-height CSV export:</strong> each wire height can be exported as its own CSV for offline analysis, with the wire enumeration shared by the export job.</li>
+        </ul>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/multi_height">Open live</a>
+          <span class="route">/multi_height · /multi_height/wire-trends</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist">
+            <code>dcf5efd</code> declare third multi-height wire, warn on undeclared wires<br>
+            <code>f4ee877</code> export wire devices to CSV; centralise wire enumeration<br>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="theme">
     <h2>📊 Charts — pick a chart type per axis</h2>
     <p class="theme-sub">A shared upgrade to the unified chart page that every twin inherits. (Grey is the public demo — click straight in, no login.)</p>
     <div class="card">
@@ -338,6 +365,7 @@
         <li>Blue's treatment vocabulary was consolidated into a single <code>treatments.py</code> module.</li>
         <li>Trained models live on ephemeral storage and rebuild on boot — kept off the read-only export volume.</li>
         <li>C4 architecture diagrams refreshed to match the current implementation.</li>
+        <li>Added a data-model diagram (ERD) showing how the sensor-readings, manual-upload, coverage and risk tables — plus Red's live greenhouse feed — fit together across the two databases.</li>
       </ul>
     </div>
   </section>
