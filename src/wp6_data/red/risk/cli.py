@@ -19,15 +19,8 @@ from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection, wire_physical_id
 from wp6_data.red.risk.config import load_risk_thresholds
 from wp6_data.red.risk.engine import RiskEvaluation, evaluate
+from wp6_data.red.wires import wire_ids
 from wp6_data.shared.compat import run_async
-
-
-def _wire_ids() -> list[str]:
-    return sorted({
-        wire_physical_id(device_id)
-        for device_id, meta in deps.metadata.devices.items()
-        if meta.type == "wire"
-    })
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -100,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     tz = deps.base_settings.display_timezone
 
-    wires = _wire_ids()
+    wires = wire_ids()
     wire = args.wire or (wires[0] if wires else "")
     end_day = args.end or date.today()
     start_day = args.start or (end_day - timedelta(days=7))

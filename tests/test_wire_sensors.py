@@ -14,6 +14,7 @@ from datetime import datetime
 from wp6_data.red.db import (
     WIRE_SENSOR_HEIGHTS,
     WIRE_SENSOR_MEASUREMENTS,
+    split_wire_rows_by_height,
     unpivot_wire_rows,
     wire_device_id,
     wire_height_from_device,
@@ -168,45 +169,84 @@ class TestWireDeviceId:
 class TestWireEnumeration:
     def test_wire_ids_lists_declared_wires(self):
         """Every wire declared in metadata is enumerated, de-duped, sorted."""
-        from wp6_data.red.multi_height.data import wire_ids
+        from wp6_data.red.wires import wire_ids
 
         assert wire_ids() == ["WS_01_01", "WS_01_02", "WS_01_03"]
+
+
+class _StubDb:
+    """Stands in for MySQLConnection with a canned wire-device summary."""
+
+    def __init__(self, *physical_ids: str) -> None:
+        self._summary = {
+            wire_device_id(physical_id, height): {"readings": 1, "last_seen": TS}
+            for physical_id in physical_ids
+            for height in WIRE_SENSOR_HEIGHTS
+        }
+
+    async def get_wire_device_summary(self) -> dict:
+        return self._summary
 
 
 class TestUndeclaredWireDrift:
     """A wire reporting into wire_sensors but missing from metadata is invisible
     to every view, since views enumerate wires from metadata. Startup warns."""
 
-    @staticmethod
-    def _summary(*physical_ids: str) -> dict:
-        return {
-            wire_device_id(physical_id, height): {"readings": 1, "last_seen": TS}
-            for physical_id in physical_ids
-            for height in WIRE_SENSOR_HEIGHTS
+    async def test_reporting_wire_missing_from_metadata_is_flagged(self):
+        from wp6_data.red.wires import undeclared_wire_ids
+
+        db = _StubDb("WS_01_01", "WS_99_99")
+        assert await undeclared_wire_ids(db) == ["WS_99_99"]
+
+    async def test_all_declared_wires_reporting_is_no_drift(self):
+        from wp6_data.red.wires import undeclared_wire_ids, wire_ids
+
+        assert await undeclared_wire_ids(_StubDb(*wire_ids())) == []
+
+    async def test_declared_wire_not_yet_reporting_is_not_drift(self):
+        """Drift is one-directional: a silent wire is a sensor problem, not config."""
+        from wp6_data.red.wires import undeclared_wire_ids
+
+        assert await undeclared_wire_ids(_StubDb("WS_01_01")) == []
+
+
+class TestSplitWireRowsByHeight:
+    """The export path: each source row becomes one record per height.
+
+    `received_at` is the relay's insert time and collides within a burst, so
+    grouping must key on the row, never the timestamp.
+    """
+
+    def test_each_height_becomes_its_own_device(self):
+        by_device = split_wire_rows_by_height([_full_row()])
+        assert set(by_device) == {
+            wire_device_id("WS_01_01", h) for h in WIRE_SENSOR_HEIGHTS
         }
 
-    async def _undeclared_for(self, monkeypatch, summary):
-        from wp6_data.red import deps
-        from wp6_data.red.multi_height.data import undeclared_wire_ids
+    def test_record_carries_that_heights_measurements(self):
+        by_device = split_wire_rows_by_height([_full_row()])
+        # _full_row sets every cell to its height number.
+        assert by_device["WS_01_01-h3"] == [
+            {"received_at": TS, "par": 3.0, "temp": 3.0, "hum": 3.0, "co2": 3.0}
+        ]
 
-        class _StubDb:
-            async def get_wire_device_summary(self):
-                return summary
+    def test_same_timestamp_rows_stay_distinct(self):
+        """A burst of differing readings on one second must not be collapsed."""
+        rows = []
+        for par in (105.0, 112.0, 179.0):
+            row = _full_row()
+            row["par2"] = par
+            rows.append(row)
 
-        monkeypatch.setattr(deps, "db", _StubDb())
-        return await undeclared_wire_ids()
+        records = split_wire_rows_by_height(rows)["WS_01_01-h2"]
 
-    async def test_reporting_wire_missing_from_metadata_is_flagged(self, monkeypatch):
-        summary = self._summary("WS_01_01", "WS_99_99")
-        assert await self._undeclared_for(monkeypatch, summary) == ["WS_99_99"]
+        assert len(records) == len(rows)
+        assert [r["par"] for r in records] == [105.0, 112.0, 179.0]
 
-    async def test_all_declared_wires_reporting_is_no_drift(self, monkeypatch):
-        from wp6_data.red.multi_height.data import wire_ids
-
-        summary = self._summary(*wire_ids())
-        assert await self._undeclared_for(monkeypatch, summary) == []
-
-    async def test_declared_wire_not_yet_reporting_is_not_drift(self, monkeypatch):
-        """Drift is one-directional: a silent wire is a sensor problem, not config."""
-        summary = self._summary("WS_01_01")
-        assert await self._undeclared_for(monkeypatch, summary) == []
+    def test_height_reporting_nothing_is_omitted(self):
+        row = {"device_id": "WS_01_01", "received_at": TS, "par1": 7.0}
+        by_device = split_wire_rows_by_height([row])
+        assert set(by_device) == {"WS_01_01-h1"}
+        assert by_device["WS_01_01-h1"] == [
+            {"received_at": TS, "par": 7.0, "temp": None, "hum": None, "co2": None}
+        ]

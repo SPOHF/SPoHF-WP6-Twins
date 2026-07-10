@@ -51,13 +51,13 @@ from ..multi_height.data import (
     latest_wire_date,
     load_wire_readings,
     load_wire_sensor_data,
-    wire_ids,
 )
 from ..multi_height.svg import SVG_LAYOUT_PATH, parse_svg
 from ..multi_height.view_model import assemble_crop_climate_day
 from ..risk import service, store
 from ..risk.config import load_risk_thresholds
 from ..utils import svg_to_data_uri
+from ..wires import wire_ids
 
 router = APIRouter(dependencies=[Depends(verify_session_user)])
 

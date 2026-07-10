@@ -182,6 +182,41 @@ def unpivot_wire_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return records
 
 
+def split_wire_rows_by_height(
+    rows: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Group wide ``wire_sensors`` rows into per-height-device CSV records.
+
+    Each source row becomes one record per height, carrying that height's four
+    measurements as columns — the shape the other per-device exports use.
+
+    Unlike :func:`unpivot_wire_rows`, this preserves source-row identity rather
+    than going long. ``received_at`` is the relay's insert time and is *not*
+    unique: bursts of genuinely different readings share one second. Keying
+    output on the row, not the timestamp, keeps those readings distinct instead
+    of collapsing them into an average.
+
+    Returns ``{virtual_device_id: [{received_at, par, temp, hum, co2}, ...]}``,
+    omitting heights that reported nothing.
+    """
+    by_device: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        physical_id = row.get("device_id", "")
+        for height in WIRE_SENSOR_HEIGHTS:
+            values = {
+                measurement: row.get(f"{measurement}{height}")
+                for measurement in WIRE_SENSOR_MEASUREMENTS
+            }
+            if all(value is None for value in values.values()):
+                continue
+            device_id = wire_device_id(physical_id, height)
+            by_device.setdefault(device_id, []).append({
+                "received_at": row["received_at"],
+                **values,
+            })
+    return by_device
+
+
 class MySQLConnection:
     """Async MySQL connection pool manager."""
 
@@ -629,6 +664,26 @@ class MySQLConnection:
             df["time"] = pd.to_datetime(df["time"], utc=True)
             df = df.sort_values("time")
         return df
+
+    @_retry_on_disconnect()
+    async def get_wire_rows(self, physical_device_id: str) -> list[dict[str, Any]]:
+        """All wide rows for one physical wire, oldest first, for the CSV export.
+
+        Unbounded on purpose: the export job writes the device's full history,
+        matching :func:`export_device`'s per-table queries. Ordered by ``id`` as
+        a tiebreak because ``received_at`` collides within an insert burst.
+        """
+        if not self.pool:
+            raise RuntimeError("Not connected")
+
+        columns_sql = ", ".join(["device_id", "received_at", *wire_value_columns()])
+        async with self.pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                f"SELECT {columns_sql} FROM {WIRE_SENSORS_TABLE} "
+                f"WHERE device_id = %s ORDER BY received_at ASC, id ASC",
+                (physical_device_id,),
+            )
+            return list(await cursor.fetchall())
 
     @_retry_on_disconnect()
     async def get_wire_device_summary(self) -> dict[str, dict[str, Any]]:

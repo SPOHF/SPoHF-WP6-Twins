@@ -21,7 +21,7 @@ The instantaneous light intensity sensors report; integrated over a day it yield
 The above-lamp PAR sensor (`s2100-01-par`, natural light only) and the under-lamp sensor (`s2100-02-par`, natural + lamp). The DLI model trains on these and nothing else.
 
 **Position**:
-A labelled location/zone in the greenhouse a sensor belongs to (e.g. "B"). Horizontal placement, not vertical.
+A labelled location/zone in the greenhouse a sensor belongs to (e.g. "B"). Horizontal placement, not vertical. Declared per device in `metadata.yaml` and used only to group the explorer's device table; every red device currently shares one position, so the field is declared but not yet discriminating.
 _Avoid_: height (height is vertical — see below).
 
 **Height**:
@@ -38,6 +38,10 @@ _Avoid_: multi-height PAR sensor (the retired PAR-only `s2100-10..15` predecesso
 
 **Measurement type**:
 One of the four quantities the wire reports — PAR, temperature, humidity, CO₂ — reused as the sensor tags `par`, `temp`, `hum`, `co2`.
+
+**Reading time** (`wire_sensors.received_at`):
+When the relay *inserted* a wire reading, not when the sensor measured it — it equals `created_at` on virtually every row. It is **not unique per device**: the relay writes in bursts, so several genuinely different readings routinely share one second. A wire reading is therefore identified by its source row, never by `(device, received_at)`. Trapezoidal **Height DLI** integration is unharmed — a burst spans zero seconds and contributes no area, so the burst's last reading carries the interval — but any consumer that pivots or groups on time will silently average away real readings.
+_Avoid_: treating `received_at` as a measurement timestamp, or as a key.
 
 **VPD** (Vapour Pressure Deficit):
 A derived dryness-of-air metric computed from temperature and humidity *at the same height*. Shown per growth section as a trendline against a configured *healthy band*; excursions out of the band signal transpiration stress.
@@ -58,6 +62,7 @@ Episodes are **persisted in a rebuildable cache**, maintained by two admin actio
 - A **Risk episode** is a discrete on/off span derived from a risk metric crossing its active threshold; the admin audit lists episodes over a chosen range.
 - The wire **replaced** the retired PAR-only per-height sensors (`s2100-10..15`).
 - **DLI** is derived from **Natural/Total light**, independently of the wire.
+- Each **Height** is exported as its own CSV (`WS_01_01-h1.csv`), one row per source row — because **Reading time** cannot identify a reading.
 
 ## Example dialogue
 
@@ -68,4 +73,6 @@ Episodes are **persisted in a rebuildable cache**, maintained by two admin actio
 
 - "height" vs "position" — resolved: **position** is horizontal (zone); **height** is vertical (level on the wire, modelled as a device).
 - "height ordering unknown" — resolved: ordering is now declared by config (H1 highest … H5 root) as a horticultural assumption; only the inter-level *distances* remain unknown. See **Growth section**.
+- "is `received_at` the measurement time?" — resolved (2026-07, while adding wire CSV exports): no, it is the relay's *insert* time and is not unique per device. See **Reading time**. The true measurement time is not recorded anywhere, so sub-burst ordering is unrecoverable.
+- "does every wire sit in the same **Position**?" — open: `WS_01_03` was declared as position "B" to match the others; not yet confirmed with WP1.
 

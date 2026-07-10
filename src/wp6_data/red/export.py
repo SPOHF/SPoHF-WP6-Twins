@@ -18,8 +18,15 @@ from dotenv import load_dotenv
 from wp6_data.config import RedSettings
 from wp6_data.db.pool import close_pool, get_pool, init_pool
 from wp6_data.db.queries import record_sync_run, refresh_sensor_summary
-from wp6_data.red.db import COMMON_MEASUREMENTS, SENSOR_TABLES, MySQLConnection
+from wp6_data.red.db import (
+    COMMON_MEASUREMENTS,
+    SENSOR_TABLES,
+    WIRE_SENSOR_MEASUREMENTS,
+    MySQLConnection,
+    split_wire_rows_by_height,
+)
 from wp6_data.red.tsdb import ensure_schema_red
+from wp6_data.red.wires import undeclared_wire_ids, wire_ids
 from wp6_data.shared.export import clear_export_dir
 
 log = structlog.get_logger()
@@ -66,6 +73,36 @@ async def export_device(
     return output_path
 
 
+async def export_wire(
+    db: MySQLConnection,
+    physical_device_id: str,
+    output_dir: Path,
+) -> list[str]:
+    """Export one physical wire as one CSV per height device.
+
+    The wire lives in the wide `wire_sensors` table rather than `SENSOR_TABLES`,
+    so `export_device` never sees it. Heights are separate devices platform-wide
+    (red ADR 0001), so they get separate CSVs — that is also the key the explorer's
+    download link looks up.
+
+    Returns the virtual device ids that produced a file.
+    """
+    rows = await db.get_wire_rows(physical_device_id)
+    if not rows:
+        log.info("no_data", device=physical_device_id)
+        return []
+
+    written = []
+    for device_id, records in sorted(split_wire_rows_by_height(rows).items()):
+        df = pd.DataFrame(records, columns=["received_at", *WIRE_SENSOR_MEASUREMENTS])
+        output_path = output_dir / f"{device_id}.csv"
+        df.to_csv(output_path, index=False)
+        written.append(device_id)
+        log.info("exported", device=device_id, rows=len(df), path=str(output_path))
+
+    return written
+
+
 async def run_export() -> None:
     """Run the full CSV export job and refresh TSDB-side daily aggregates."""
     settings = RedSettings()
@@ -99,6 +136,17 @@ async def run_export() -> None:
                     exported[device_id] = datetime.now(UTC).isoformat()
             except Exception as e:
                 log.error("export_failed", device=device_id, error=str(e))
+
+        undeclared = await undeclared_wire_ids(db)
+        if undeclared:
+            log.warning("wire_sensors_undeclared", wires=undeclared)
+
+        for physical_id in wire_ids():
+            try:
+                for device_id in await export_wire(db, physical_id, export_dir):
+                    exported[device_id] = datetime.now(UTC).isoformat()
+            except Exception as e:
+                log.error("export_failed", device=physical_id, error=str(e))
 
         metadata = {
             "exported_at": datetime.now(UTC).isoformat(),

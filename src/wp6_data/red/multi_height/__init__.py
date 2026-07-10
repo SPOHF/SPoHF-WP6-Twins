@@ -13,8 +13,6 @@ from .data import (
     load_wire_readings,
     load_wire_sensor_data,
     series_for,
-    undeclared_wire_ids,
-    wire_ids,
 )
 from .view_model import (
     CropClimateDay,
@@ -36,6 +34,4 @@ __all__ = [
     "load_wire_readings",
     "load_wire_sensor_data",
     "series_for",
-    "undeclared_wire_ids",
-    "wire_ids",
 ]
