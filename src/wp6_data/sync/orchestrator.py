@@ -3,7 +3,7 @@
 import re
 from collections import defaultdict
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
 
 import httpx
@@ -34,7 +34,6 @@ def ensure_utc(dt: datetime) -> datetime:
 logger = structlog.get_logger()
 
 BATCH_SIZE = 1000  # Records per transaction
-FULL_SYNC_START = datetime(2024, 1, 1, tzinfo=UTC)
 INCREMENTAL_LOOKBACK_DAYS = 7
 CONSECUTIVE_DUPE_WINDOW_THRESHOLD = 3
 
@@ -74,16 +73,26 @@ def _log_window_summary(
 
 
 def _generate_windows(
-    mode: str, window_days: int
+    mode: str,
+    window_days: int,
+    *,
+    full_start: datetime,
+    end: datetime | None = None,
 ) -> Iterator[tuple[datetime, datetime]]:
-    """Generate (window_start, window_end) tuples, backwards from now.
+    """Generate (window_start, window_end) tuples, backwards from ``end``.
 
-    Full mode: from now+1d back to 2024-01-01.
-    Incremental mode: from now+1d back by INCREMENTAL_LOOKBACK_DAYS.
+    Full mode: from ``end`` back to ``full_start``.
+    Incremental mode: from ``end`` back by INCREMENTAL_LOOKBACK_DAYS.
+
+    ``end`` defaults to tomorrow midnight UTC. Bounding both ends scopes a full
+    sync to an arbitrary window (e.g. backfilling a known historical gap).
     """
-    end = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    if end is None:
+        end = datetime.now(UTC).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) + timedelta(days=1)
 
-    start = FULL_SYNC_START if mode == "full" else end - timedelta(days=INCREMENTAL_LOOKBACK_DAYS)
+    start = full_start if mode == "full" else end - timedelta(days=INCREMENTAL_LOOKBACK_DAYS)
 
     window_end = end
     while window_end > start:
@@ -213,6 +222,8 @@ class SyncOrchestrator:
                 endpoint=endpoint,
                 mode=mode,
                 window_days=self.settings.sync_window_days,
+                sync_start=self.settings.sync_start.isoformat(),
+                sync_end=self.settings.sync_end.isoformat() if self.settings.sync_end else None,
             )
 
             batch: list[dict[str, Any]] = []
@@ -225,7 +236,16 @@ class SyncOrchestrator:
                 lambda: {"count": 0, "min": None, "max": None}
             )
 
-            windows = _generate_windows(mode, self.settings.sync_window_days)
+            windows = _generate_windows(
+                mode,
+                self.settings.sync_window_days,
+                full_start=datetime.combine(self.settings.sync_start, time.min, tzinfo=UTC),
+                end=(
+                    datetime.combine(self.settings.sync_end, time.min, tzinfo=UTC)
+                    if self.settings.sync_end
+                    else None
+                ),
+            )
 
             try:
                 for window_start, window_end in windows:

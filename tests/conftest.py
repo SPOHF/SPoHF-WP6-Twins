@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from wp6_data.api.models import ApiResponse, SensorReading
+from wp6_data.config import Settings
 
 
 def make_reading(**overrides) -> SensorReading:
@@ -63,5 +64,7 @@ def mock_settings():
     s.sync_page_size = 100
     s.sync_mode = "incremental"
     s.sync_window_days = 1
+    s.sync_start = Settings.model_fields["sync_start"].default
+    s.sync_end = Settings.model_fields["sync_end"].default
     s.endpoint_list = ["yookr-data"]
     return s

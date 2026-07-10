@@ -1,5 +1,7 @@
 """Configuration via environment variables."""
 
+from datetime import date
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +26,12 @@ class Settings(BaseSettings):
     sync_page_size: int = 1000
     sync_mode: str = "incremental"  # "full" or "incremental"
     sync_window_days: int = 1  # Days per window
+
+    # Bounds for a full sync. `sync_end` defaults to tomorrow; setting both scopes
+    # a full sync to an arbitrary window, e.g. to backfill a known historical gap
+    # without re-pulling the whole archive. Ignored in incremental mode.
+    sync_start: date = date(2024, 1, 1)
+    sync_end: date | None = None
 
     # Endpoints to sync (comma-separated)
     endpoints: str = "yookr-data"

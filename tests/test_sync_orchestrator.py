@@ -32,30 +32,50 @@ class TestEnsureUtc:
         assert result is dt
 
 
+_FULL_START = datetime(2024, 1, 1, tzinfo=UTC)
+
+
 class TestGenerateWindows:
-    def test_full_mode_starts_from_2024(self):
-        windows = list(_generate_windows("full", 1))
-        # Last window (generated last, furthest back) should start at 2024-01-01
-        assert windows[-1][0] == datetime(2024, 1, 1, tzinfo=UTC)
+    def test_full_mode_starts_from_full_start(self):
+        windows = list(_generate_windows("full", 1, full_start=_FULL_START))
+        # Last window (generated last, furthest back) should start at full_start
+        assert windows[-1][0] == _FULL_START
 
     def test_incremental_mode_limited_lookback(self):
-        windows = list(_generate_windows("incremental", 1))
+        windows = list(_generate_windows("incremental", 1, full_start=_FULL_START))
         assert INCREMENTAL_LOOKBACK_DAYS - 1 <= len(windows) <= INCREMENTAL_LOOKBACK_DAYS + 1
 
+    def test_incremental_mode_ignores_full_start(self):
+        windows = list(_generate_windows("incremental", 1, full_start=_FULL_START))
+        assert windows[-1][0] > _FULL_START
+
     def test_windows_go_backwards(self):
-        windows = list(_generate_windows("incremental", 1))
+        windows = list(_generate_windows("incremental", 1, full_start=_FULL_START))
         # First window should be most recent
         assert windows[0][1] > windows[-1][1]
 
     def test_windows_are_contiguous(self):
-        windows = list(_generate_windows("incremental", 1))
+        windows = list(_generate_windows("incremental", 1, full_start=_FULL_START))
         for i in range(len(windows) - 1):
             assert windows[i][0] == windows[i + 1][1]
 
     def test_multi_day_windows(self):
-        windows = list(_generate_windows("incremental", 7))
+        windows = list(_generate_windows("incremental", 7, full_start=_FULL_START))
         for start, end in windows:
             assert (end - start).days <= 7
+
+    def test_full_mode_bounded_window(self):
+        """Both bounds set → a full sync scoped to an arbitrary historical window."""
+        start = datetime(2025, 11, 1, tzinfo=UTC)
+        end = datetime(2026, 1, 1, tzinfo=UTC)
+        windows = list(_generate_windows("full", 1, full_start=start, end=end))
+
+        assert windows[0][1] == end
+        assert windows[-1][0] == start
+        assert len(windows) == (end - start).days
+        # contiguous, no gaps or overlaps across the whole span
+        for i in range(len(windows) - 1):
+            assert windows[i][0] == windows[i + 1][1]
 
 
 class TestUpdateSensorStats:

@@ -1,14 +1,14 @@
 """Tests for wp6_data.api.client — mock httpx.AsyncClient."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
-from wp6_data.api.client import SpoHFClient, parse_api_timestamp
+from wp6_data.api.client import MIN_WINDOW, SpoHFClient, parse_api_timestamp
 
-from .conftest import make_reading
+from .conftest import make_api_response, make_reading
 
 # --- parse_api_timestamp ---
 
@@ -192,3 +192,132 @@ class TestFetchWindow:
                 results.append(r)
 
         assert len(results) == 2
+
+
+# --- fetch_window: result-cap bisection ---
+
+
+def _capped_backend(readings, page_size, cap):
+    """Fake the relay: offset paging over a time-filtered slice, capped like ES.
+
+    Mirrors `backoffice.spohf.com`'s Elasticsearch `max_result_window`: a request
+    for `from + size > cap` is never issued by the client, so anything past `cap`
+    in a single window is unreachable by offset alone.
+    """
+
+    async def _fetch_page(_self, client, endpoint, ts_from, ts_until, offset):
+        assert offset + page_size <= cap, "client must never request past the cap"
+        rows = sorted(
+            (r for r in readings if ts_from <= r.datetime_measure < ts_until),
+            key=lambda r: r.datetime_measure,
+        )
+        page = rows[offset : offset + page_size]
+        return make_api_response(page)
+
+    return _fetch_page
+
+
+class TestFetchWindowResultCap:
+    """A window holding more than the cap must be split, never silently truncated."""
+
+    @staticmethod
+    def _spread(n, start, span):
+        return [
+            make_reading(
+                sensor_tag=f"s{i}",
+                datetime_measure=start + (span / n) * i,
+            )
+            for i in range(n)
+        ]
+
+    @pytest.mark.asyncio()
+    async def test_window_over_cap_is_split_and_loses_nothing(self):
+        cap, page_size = 4, 2
+        start = datetime(2024, 1, 1, tzinfo=UTC)
+        span = timedelta(hours=8)
+        readings = self._spread(6, start, span)  # 6 > cap
+
+        client = SpoHFClient("https://api.example.com", "token", page_size=page_size)
+
+        with (
+            patch("wp6_data.api.client.MAX_RESULT_WINDOW", cap),
+            patch("wp6_data.api.client.httpx.AsyncClient"),
+            patch.object(
+                SpoHFClient,
+                "_fetch_page",
+                _capped_backend(readings, page_size, cap),
+            ),
+        ):
+            got = [r async for r in client.fetch_window("ep1", start, start + span)]
+
+        # Every reading surfaces, even those past the cap in the un-split window.
+        assert {r.sensor_tag for r in got} == {r.sensor_tag for r in readings}
+
+    @pytest.mark.asyncio()
+    async def test_split_re_emits_rows_from_the_truncated_attempt(self):
+        """Documents the contract: callers must be idempotent."""
+        cap, page_size = 4, 2
+        start = datetime(2024, 1, 1, tzinfo=UTC)
+        span = timedelta(hours=8)
+        readings = self._spread(6, start, span)
+
+        client = SpoHFClient("https://api.example.com", "token", page_size=page_size)
+
+        with (
+            patch("wp6_data.api.client.MAX_RESULT_WINDOW", cap),
+            patch("wp6_data.api.client.httpx.AsyncClient"),
+            patch.object(
+                SpoHFClient,
+                "_fetch_page",
+                _capped_backend(readings, page_size, cap),
+            ),
+        ):
+            got = [r async for r in client.fetch_window("ep1", start, start + span)]
+
+        assert len(got) > len(readings)
+
+    @pytest.mark.asyncio()
+    async def test_window_under_cap_is_not_split(self):
+        cap, page_size = 4, 2
+        start = datetime(2024, 1, 1, tzinfo=UTC)
+        span = timedelta(hours=8)
+        readings = self._spread(3, start, span)  # 3 < cap
+
+        client = SpoHFClient("https://api.example.com", "token", page_size=page_size)
+
+        with (
+            patch("wp6_data.api.client.MAX_RESULT_WINDOW", cap),
+            patch("wp6_data.api.client.httpx.AsyncClient"),
+            patch.object(
+                SpoHFClient,
+                "_fetch_page",
+                _capped_backend(readings, page_size, cap),
+            ),
+        ):
+            got = [r async for r in client.fetch_window("ep1", start, start + span)]
+
+        assert len(got) == len(readings)
+
+    @pytest.mark.asyncio()
+    async def test_unsplittable_window_terminates(self):
+        """A single instant over the cap cannot be split — bail out, don't recurse forever."""
+        cap, page_size = 4, 2
+        start = datetime(2024, 1, 1, tzinfo=UTC)
+        instant = [make_reading(sensor_tag=f"s{i}") for i in range(6)]
+        for r in instant:
+            r.datetime_measure = start
+
+        client = SpoHFClient("https://api.example.com", "token", page_size=page_size)
+
+        with (
+            patch("wp6_data.api.client.MAX_RESULT_WINDOW", cap),
+            patch("wp6_data.api.client.httpx.AsyncClient"),
+            patch.object(
+                SpoHFClient,
+                "_fetch_page",
+                _capped_backend(instant, page_size, cap),
+            ),
+        ):
+            got = [r async for r in client.fetch_window("ep1", start, start + MIN_WINDOW)]
+
+        assert len(got) == cap  # what offset paging can reach; the rest is unreachable

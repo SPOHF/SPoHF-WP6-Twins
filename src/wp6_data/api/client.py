@@ -1,7 +1,7 @@
 """SPoHF API client with pagination and retry logic."""
 
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 import structlog
@@ -15,6 +15,15 @@ from tenacity import (
 from wp6_data.api.models import ApiResponse, SensorReading
 
 logger = structlog.get_logger()
+
+# The relay is Elasticsearch-backed and refuses `from + size > max_result_window`.
+# Offset paging therefore cannot reach past this many records in one time window;
+# a window holding more is truncated, not paginated. `fetch_window` bisects instead.
+MAX_RESULT_WINDOW = 10_000
+
+# Stop bisecting here. A window this narrow that still overflows means a single
+# instant holds >MAX_RESULT_WINDOW records, which no time-split can separate.
+MIN_WINDOW = timedelta(seconds=1)
 
 
 def parse_api_timestamp(ts_str: str) -> datetime:
@@ -76,7 +85,7 @@ class SpoHFClient:
         timestamp_from: datetime,
         timestamp_until: datetime,
     ) -> AsyncIterator[SensorReading]:
-        """Paginate all records in one time window.
+        """Yield every record in one time window, bisecting past the result cap.
 
         Args:
             endpoint: API endpoint (e.g., "yookr-data")
@@ -84,57 +93,91 @@ class SpoHFClient:
             timestamp_until: End of window (exclusive)
 
         Yields:
-            SensorReading objects
+            SensorReading objects. A window exceeding MAX_RESULT_WINDOW is split
+            in half and re-fetched, so records already yielded from the truncated
+            attempt are emitted again. Callers must be idempotent (``upsert_readings``
+            is) — duplicates are the price of never silently dropping the tail.
         """
         async with httpx.AsyncClient() as client:
-            offset = 0
-            page_count = 0
-            total_yielded = 0
-
-            while True:
-                try:
-                    response = await self._fetch_page(
-                        client, endpoint, timestamp_from, timestamp_until, offset
-                    )
-                except httpx.HTTPStatusError as e:
-                    logger.error(
-                        "api_error",
-                        endpoint=endpoint,
-                        status=e.response.status_code,
-                        detail=e.response.text[:200],
-                    )
-                    raise
-
-                if not response.results:
-                    break
-
-                for reading in response.results:
-                    yield reading
-                    total_yielded += 1
-
-                page_count += 1
-
-                if page_count == 10:
-                    logger.warning(
-                        "many_pages_in_window",
-                        endpoint=endpoint,
-                        pages=page_count,
-                        records_so_far=total_yielded,
-                        window_from=timestamp_from.strftime("%Y-%m-%d"),
-                        window_until=timestamp_until.strftime("%Y-%m-%d"),
-                        hint="consider reducing sync_window_days",
-                    )
-
-                if response.count < self.page_size:
-                    break
-
-                offset += self.page_size
+            total = 0
+            async for reading in self._fetch_range(
+                client, endpoint, timestamp_from, timestamp_until
+            ):
+                total += 1
+                yield reading
 
             logger.info(
                 "fetch_window_complete",
                 endpoint=endpoint,
-                window_from=timestamp_from.strftime("%Y-%m-%d"),
-                window_until=timestamp_until.strftime("%Y-%m-%d"),
-                pages=page_count,
-                records=total_yielded,
+                window_from=timestamp_from.isoformat(),
+                window_until=timestamp_until.isoformat(),
+                records=total,
             )
+
+    async def _fetch_range(
+        self,
+        client: httpx.AsyncClient,
+        endpoint: str,
+        timestamp_from: datetime,
+        timestamp_until: datetime,
+    ) -> AsyncIterator[SensorReading]:
+        """Page one range; on hitting the result cap, bisect and recurse."""
+        offset = 0
+
+        while True:
+            try:
+                response = await self._fetch_page(
+                    client, endpoint, timestamp_from, timestamp_until, offset
+                )
+            except httpx.HTTPStatusError as e:
+                logger.error(
+                    "api_error",
+                    endpoint=endpoint,
+                    status=e.response.status_code,
+                    detail=e.response.text[:200],
+                )
+                raise
+
+            if not response.results:
+                return
+
+            for reading in response.results:
+                yield reading
+
+            # A short page is the only honest end-of-range signal.
+            if response.count < self.page_size:
+                return
+
+            offset += self.page_size
+
+            # The next page would need `from + size` past the relay's cap, which it
+            # refuses. Everything beyond here is unreachable by offset — split the
+            # range so each half fits, rather than mistaking the cap for "no more".
+            if offset + self.page_size > MAX_RESULT_WINDOW:
+                span = timestamp_until - timestamp_from
+                if span <= MIN_WINDOW:
+                    logger.error(
+                        "window_unsplittable",
+                        endpoint=endpoint,
+                        window_from=timestamp_from.isoformat(),
+                        window_until=timestamp_until.isoformat(),
+                        cap=MAX_RESULT_WINDOW,
+                        hint="a single instant exceeds the result cap; records are lost",
+                    )
+                    return
+
+                midpoint = timestamp_from + span / 2
+                logger.warning(
+                    "window_truncated_splitting",
+                    endpoint=endpoint,
+                    window_from=timestamp_from.isoformat(),
+                    window_until=timestamp_until.isoformat(),
+                    cap=MAX_RESULT_WINDOW,
+                )
+                for lo, hi in (
+                    (timestamp_from, midpoint),
+                    (midpoint, timestamp_until),
+                ):
+                    async for reading in self._fetch_range(client, endpoint, lo, hi):
+                        yield reading
+                return
