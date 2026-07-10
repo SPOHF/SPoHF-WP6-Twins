@@ -118,6 +118,16 @@ There is also a milder deficit from **2024-11 → 2025-11**: the relay carries 8
 readings the direct feed has for the same series. No days are missing, only samples within
 them, so this is low priority for us.
 
+### (a2) Relay latency is now the twin's latency
+
+We retired our direct feed on 2026-07-10, so the dashboard is exactly as fresh as the relay
+and no fresher. At 15:36 UTC that day the endpoint's newest `datetime_measure` was
+**10:31:54 UTC** — a five-hour lag. Our sync was fully caught up; the gap was entirely
+upstream. Previously the direct feed masked this.
+
+Please let us know the expected relay latency, and whether these multi-hour stalls are
+routine. Anything under ~30 min would let us alert on staleness meaningfully.
+
 ### (b) Are `0Exx` and `SPoHF_EC-BV_rijN` the same physical probes?
 
 Both naming schemes are now fully populated, so the same soil probes appear to be carried
