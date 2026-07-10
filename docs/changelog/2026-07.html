@@ -89,7 +89,8 @@
       <li><strong>Blue can now forecast soil conditions 7 days ahead.</strong> A per-treatment model predicts soil moisture &amp; temperature for the week to come, retrained automatically on every deploy — no manual step.</li>
       <li><strong>Manual irrigation data now shows up <em>in context</em> on Blue's charts.</strong> Fertigation events are drawn as markers over the soil sensor traces, alongside a new manual-measurement monitor and mixed sensor/manual views.</li>
       <li><strong>The GDD growth tracker now spans a full year.</strong> The on-site weather sensor had gaps across 2024; by sourcing temperature from OpenMeteo modeled weather instead, Blue can analyse Growing Degree Days over a complete calendar year (from 1 Jan 2024), with its growth constants set to recognised horticultural values.</li>
-      <li><strong>Blue is now fully operational on the SPoHF Datalake.</strong> The direct Yookr API fallback is no longer needed and has been retired — which also removed ~686 lines of code, purged 4.1 M duplicate rows (43.5% of the readings table), and dropped one of two API syncs from the 15-minute sync job.</li>
+      <li><strong>Blue is now fully operational on the SPoHF Datalake.</strong> The direct Yookr API fallback is no longer needed and has been retired — removing 607 lines of production code, purging 4,104,138 duplicate rows (43.5% of the readings table), and dropping one of two API syncs from the 15-minute sync job.</li>
+      <li><strong>We were silently losing sensor readings, and now we aren't.</strong> Preparing the retirement uncovered a bug in our own datalake client: it stopped paginating at the relay's 10,000-record cap and treated that as "no more data". <strong>277,588 readings</strong> were recovered across 14 months.</li>
     </ul>
   </div>
 
@@ -270,14 +271,35 @@
         <div class="tags"><span class="pill blue">Blue</span><span class="pill shared">Shared</span></div>
         <p>The SPoHF Datalake is now Blue's single, canonical source of automated readings. The direct Yookr API — kept as a fallback while the relay caught up — is no longer needed and has been removed, along with the source toggle and the <code>readings.project</code> column that distinguished the two feeds.</p>
         <ul>
-          <li><strong>Code — ~686 fewer lines of production code</strong> (146 added / 832 removed). Six modules deleted outright (≈565 lines of dedicated yookr code): the entire <code>src/wp6_data/yookr/</code> client package, the 299-line sync orchestrator, and blue's <code>datasource.py</code> + <code>yookr.py</code>. The rest is net simplification of shared plumbing (<code>deps.py</code>, <code>provider.py</code>, <code>ops.py</code>, <code>__main__.py</code>).</li>
-          <li><strong>Storage — ~4.1 million duplicate rows purged</strong>, which was <strong>43.5%</strong> of the readings table (9.4 M → 5.3 M rows). That's ~500 MB of logical row data, and proportionally ~1.5 GB of physical heap+index footprint out of a 3.6 GB hypertable, reclaimed as chunks are vacuumed. The <code>project</code> column is also dropped from every remaining row.</li>
-          <li><strong>Compute — one of two API syncs eliminated on every run.</strong> The combined sync job runs every 15 min (96×/day); it no longer authenticates against and paginates the direct Yookr API for its 58 series — only the datalake sync remains.</li>
+          <li><strong>Code — 607 fewer lines of production code</strong> (289 added / 896 removed, measured across the retirement commits). Seven files deleted outright (619 lines of dedicated yookr code): the entire <code>src/wp6_data/yookr/</code> client package, the 299-line sync orchestrator, blue's <code>datasource.py</code> + <code>yookr.py</code>, and the full-sync script. The remainder is net simplification of <code>deps.py</code> (every <code>project</code> filter gone), <code>provider.py</code>, <code>ops.py</code> and <code>__main__.py</code> — partly offset by the truncation fix below.</li>
+          <li><strong>Storage — 4,104,138 rows purged, exactly 43.5%</strong> of the readings table (9,432,610 → 5,328,472). The <code>project</code> column is dropped from every remaining row and the dedup index loses a column. <code>daily_coverage</code> shed 4,323 stale device/sensor/day entries (44,930 → 40,607) that no longer had readings behind them. The hypertable now stands at 2.77 GB, already vacuumed.</li>
+          <li><strong>Compute — one of two API syncs eliminated on every run.</strong> The sync job runs every 15 min (96×/day) and no longer authenticates against and paginates the direct Yookr API. A post-migration run ingested 27,078 records in <strong>22.5 s</strong>. Two secrets (<code>yookr-email</code>, <code>yookr-password</code>) and one external dependency (<code>api.yookr.org</code>) are gone from the platform entirely.</li>
+          <li><strong>Simplification — the toggle machinery is gone.</strong> Two parallel data-source mechanisms collapsed to zero, two <code>BlueSensorProvider</code> instances to one, and a cookie-dispatched provider to a static badge. Blue now matches Red's single-categorical <code>readings.source</code> model, closing issues <strong>024</strong>, <strong>026</strong> and <strong>029</strong> and rendering <strong>027</strong> moot.</li>
         </ul>
         <details class="more"><summary>Commits</summary>
           <div class="commitlist">
             <code>91cdda5</code> feat(blue)!: retire yookr-direct, drop readings.project<br>
             <code>68bc100</code> chore(sync): disable sync CronJob for the drop-project migration window<br>
+            <code>50277cb</code> docs: record the completed yookr-direct retirement; re-enable sync<br>
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>277,588 sensor readings recovered — we were truncating our own ingest</h3>
+        <div class="tags"><span class="pill blue">Blue</span><span class="pill shared">Shared</span></div>
+        <p>Auditing the two feeds before the purge turned up a 337,081-reading gap. Most of it was not the relay's fault — it was ours. The SPoHF datalake is Elasticsearch-backed and refuses to page past <strong>10,000 records</strong> in one query. Our client paged by offset until it got a short page, so any day holding more than 10,000 readings simply stopped early, with no error. We read "the server won't give me more" as "there is no more".</p>
+        <ul>
+          <li><strong>Scale of the loss — 83% of days were affected.</strong> Two test-rig sensors (931k rows) ran from 2024-11-15 to 2025-12-31 and pushed daily volume over the cap for exactly that window. Re-syncing it with the fixed client split <strong>330 of 396 days</strong>. Yookr-only readings fell from 337,081 to 59,493.</li>
+          <li><strong>The fix — bisect, don't truncate.</strong> <code>fetch_window</code> now detects that the next page would cross the cap and splits the time range in half, recursing until each half fits. It is self-correcting at any future data volume, rather than needing an operator to notice and re-tune a window size.</li>
+          <li><strong>Why nobody saw it.</strong> The coverage grid on <code>/status</code> matches at <em>(device, sensor, day)</em> granularity — a day counts as covered if it has at least one reading. Losing the tail of every day is invisible there. Only a row-level comparison against the second feed exposed it, which is the one thing retiring that feed would have made impossible. It was found with a week to spare.</li>
+          <li><strong>What could not be saved.</strong> December 2025 remains incomplete: the relay's stored history for that month still returns one sensor per device, so 58,826 readings across 36 series exist only in the retired feed. A backfill has been requested from SPoHF; the purged rows are archived.</li>
+        </ul>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist">
+            <code>401ca75</code> fix(sync): bisect windows past the relay's result cap instead of truncating<br>
+            <code>0d4270f</code> fix(sync): scope WP6_SYNC_END to full syncs only<br>
+            <code>4408949</code> docs(blue): refresh yookr-vs-datalake state — relay fixed, gap re-scoped<br>
           </div>
         </details>
       </div>
