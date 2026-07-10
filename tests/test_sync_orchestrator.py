@@ -1,7 +1,7 @@
 """Tests for wp6_data.sync.orchestrator — patch SyncStateManager + upsert_readings + mock client."""
 
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -455,3 +455,49 @@ class TestRun:
         assert stats["total_records"] == 30
         assert stats["endpoints"] == {"ep1": 10, "ep2": 20}
         assert "duration_seconds" in stats
+
+
+class TestSyncEndpointWindowBounds:
+    """`sync_end` must scope a full sync without ever rewinding an incremental one."""
+
+    @staticmethod
+    async def _capture_window_kwargs(orch):
+        pool, _conn = _mock_pool_ctx()
+
+        async def no_readings(*args, **kwargs):
+            return
+            yield  # pragma: no cover — makes this an async generator
+
+        orch.client.fetch_window = no_readings
+
+        with (
+            patch("wp6_data.sync.orchestrator.SyncStateManager") as MockState,
+            patch("wp6_data.sync.orchestrator.get_pool", return_value=pool),
+            patch("wp6_data.sync.orchestrator._generate_windows") as mock_gen,
+        ):
+            MockState.return_value = AsyncMock()
+            mock_gen.return_value = iter([])
+            await orch._sync_endpoint("yookr-data")
+
+        return mock_gen.call_args.kwargs
+
+    @pytest.mark.asyncio()
+    async def test_full_mode_honours_sync_end(self, mock_settings):
+        mock_settings.sync_mode = "full"
+        mock_settings.sync_start = date(2024, 11, 1)
+        mock_settings.sync_end = date(2025, 12, 1)
+
+        kwargs = await self._capture_window_kwargs(_make_orchestrator(mock_settings))
+
+        assert kwargs["full_start"] == datetime(2024, 11, 1, tzinfo=UTC)
+        assert kwargs["end"] == datetime(2025, 12, 1, tzinfo=UTC)
+
+    @pytest.mark.asyncio()
+    async def test_incremental_mode_ignores_sync_end(self, mock_settings):
+        """Otherwise the watermark would stop advancing and the twin would go stale."""
+        mock_settings.sync_mode = "incremental"
+        mock_settings.sync_end = date(2025, 12, 1)
+
+        kwargs = await self._capture_window_kwargs(_make_orchestrator(mock_settings))
+
+        assert kwargs["end"] is None

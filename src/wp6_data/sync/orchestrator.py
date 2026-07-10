@@ -236,15 +236,17 @@ class SyncOrchestrator:
                 lambda: {"count": 0, "min": None, "max": None}
             )
 
+            # `sync_end` bounds a full sync only. An incremental run must always
+            # reach the present, or the watermark stops advancing.
+            end = None
+            if mode == "full" and self.settings.sync_end:
+                end = datetime.combine(self.settings.sync_end, time.min, tzinfo=UTC)
+
             windows = _generate_windows(
                 mode,
                 self.settings.sync_window_days,
                 full_start=datetime.combine(self.settings.sync_start, time.min, tzinfo=UTC),
-                end=(
-                    datetime.combine(self.settings.sync_end, time.min, tzinfo=UTC)
-                    if self.settings.sync_end
-                    else None
-                ),
+                end=end,
             )
 
             try:
