@@ -7,6 +7,7 @@ import structlog
 from wp6_data.db.pool import close_pool, init_pool
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
+from wp6_data.red.multi_height import undeclared_wire_ids
 from wp6_data.red.provider import RedSensorProvider
 from wp6_data.red.routes import browse, dli, dli_model, multi_height, sijia
 from wp6_data.red.routes import charts as red_charts
@@ -30,6 +31,10 @@ async def _startup() -> None:
         database=deps.DB_NAME,
     )
     await deps.db.connect()
+
+    undeclared = await undeclared_wire_ids()
+    if undeclared:
+        log.warning("wire_sensors_undeclared", wires=undeclared)
 
     pool = await init_pool(deps.settings.tsdb_url)
     await ensure_schema_red(pool)

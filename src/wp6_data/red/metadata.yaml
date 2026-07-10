@@ -311,6 +311,57 @@ devices:
       hum: {}
       co2: {}
 
+  # Third multi-height wire (WS_01_03), reporting since 2026-07-06.
+  "WS_01_03-h1":
+    description: "Multi-height wire 3 — height 1"
+    position: "B"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
+
+  "WS_01_03-h2":
+    description: "Multi-height wire 3 — height 2"
+    position: "B"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
+
+  "WS_01_03-h3":
+    description: "Multi-height wire 3 — height 3"
+    position: "B"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
+
+  "WS_01_03-h4":
+    description: "Multi-height wire 3 — height 4"
+    position: "B"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
+
+  "WS_01_03-h5":
+    description: "Multi-height wire 3 — height 5"
+    position: "B"
+    type: "wire"
+    sensors:
+      par: {}
+      temp: {}
+      hum: {}
+      co2: {}
+
   "s2101-01-temp-hum":
     position: "B"
     type: "s2101"

@@ -167,7 +167,46 @@ class TestWireDeviceId:
 
 class TestWireEnumeration:
     def test_wire_ids_lists_declared_wires(self):
-        """Both wires declared in metadata are enumerated, de-duped, sorted."""
+        """Every wire declared in metadata is enumerated, de-duped, sorted."""
         from wp6_data.red.multi_height.data import wire_ids
 
-        assert wire_ids() == ["WS_01_01", "WS_01_02"]
+        assert wire_ids() == ["WS_01_01", "WS_01_02", "WS_01_03"]
+
+
+class TestUndeclaredWireDrift:
+    """A wire reporting into wire_sensors but missing from metadata is invisible
+    to every view, since views enumerate wires from metadata. Startup warns."""
+
+    @staticmethod
+    def _summary(*physical_ids: str) -> dict:
+        return {
+            wire_device_id(physical_id, height): {"readings": 1, "last_seen": TS}
+            for physical_id in physical_ids
+            for height in WIRE_SENSOR_HEIGHTS
+        }
+
+    async def _undeclared_for(self, monkeypatch, summary):
+        from wp6_data.red import deps
+        from wp6_data.red.multi_height.data import undeclared_wire_ids
+
+        class _StubDb:
+            async def get_wire_device_summary(self):
+                return summary
+
+        monkeypatch.setattr(deps, "db", _StubDb())
+        return await undeclared_wire_ids()
+
+    async def test_reporting_wire_missing_from_metadata_is_flagged(self, monkeypatch):
+        summary = self._summary("WS_01_01", "WS_99_99")
+        assert await self._undeclared_for(monkeypatch, summary) == ["WS_99_99"]
+
+    async def test_all_declared_wires_reporting_is_no_drift(self, monkeypatch):
+        from wp6_data.red.multi_height.data import wire_ids
+
+        summary = self._summary(*wire_ids())
+        assert await self._undeclared_for(monkeypatch, summary) == []
+
+    async def test_declared_wire_not_yet_reporting_is_not_drift(self, monkeypatch):
+        """Drift is one-directional: a silent wire is a sensor problem, not config."""
+        summary = self._summary("WS_01_01")
+        assert await self._undeclared_for(monkeypatch, summary) == []

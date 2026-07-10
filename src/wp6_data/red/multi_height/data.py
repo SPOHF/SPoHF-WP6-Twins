@@ -25,6 +25,18 @@ def wire_ids() -> list[str]:
     return sorted(ids)
 
 
+async def undeclared_wire_ids() -> list[str]:
+    """Physical wires reporting into wire_sensors but absent from metadata, sorted.
+
+    Metadata is the source of truth for which wires exist, so every view
+    enumerates from it. A wire hung in the greenhouse but never declared would
+    therefore write rows that no view ever reads. This surfaces that drift.
+    """
+    summary = await deps.db.get_wire_device_summary()
+    reporting = {wire_physical_id(device_id) for device_id in summary}
+    return sorted(reporting - set(wire_ids()))
+
+
 async def load_wire_sensor_data(start, end):
     """Tidy long wire-sensor readings for a UTC window: time, height, measurement, value."""
     df = await deps.db.get_wire_sensor_readings(start=start, end=end)

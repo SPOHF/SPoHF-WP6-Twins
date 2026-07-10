@@ -33,7 +33,7 @@ A named canopy zone the plant is divided into for the prescriptive view, mapped 
 _Avoid_: equating a growth section with a physical distance, or assuming the order is sensor-confirmed.
 
 **Multi-height wire** (a *wire sensor* device):
-A single physical device on a vertical wire (`WS_01_01`) that measures four **measurement types** at five **heights**, landing in the wide external `wire_sensors` table. Surfaced as five per-height devices typed `wire`.
+A single physical device on a vertical wire (`WS_01_01`) that measures four **measurement types** at five **heights**, landing in the wide external `wire_sensors` table. Surfaced as five per-height devices typed `wire`. Which wires exist is declared in `metadata.yaml`, never inferred from the data — a wire that reports without being declared is invisible to every view, so startup logs `wire_sensors_undeclared`.
 _Avoid_: multi-height PAR sensor (the retired PAR-only `s2100-10..15` predecessor).
 
 **Measurement type**:
@@ -52,7 +52,7 @@ Episodes are **persisted in a rebuildable cache**, maintained by two admin actio
 ## Relationships
 
 - A **Multi-height wire** is surfaced as five per-**Height** devices, each carrying the four **Measurement type** sensors.
-- A **Growth section** is a labelled view over a **Height** (1:1, fixed order H1→H5 = top→root, same for both wires).
+- A **Growth section** is a labelled view over a **Height** (1:1, fixed order H1→H5 = top→root, same for every wire).
 - **VPD**, **Fungal-risk**, and **Height DLI** are derived per **Growth section** from its **Measurement type** readings (temp+hum; hum-over-time; PAR-over-day).
 - **Canopy light deficit** compares the top section's **Height DLI** to a target; it is the PAR-based **Risk episode** condition.
 - A **Risk episode** is a discrete on/off span derived from a risk metric crossing its active threshold; the admin audit lists episodes over a chosen range.
