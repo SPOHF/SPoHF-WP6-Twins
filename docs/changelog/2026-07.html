@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WP6 Digital Twins — Changelog (June–July 2026)</title>
+<style>
+  :root {
+    --red: #c0392b;   --red-bg: #fdecea;
+    --blue: #2471a3;  --blue-bg: #eaf2fa;
+    --grey: #566573;  --grey-bg: #eef1f3;
+    --shared:#7d3c98; --shared-bg:#f4ecf7;
+    --ink: #1c2833;   --muted: #5d6d7e;
+    --line:#d5dbdb;   --bg:#f7f9f9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink); background: var(--bg); margin: 0; line-height: 1.55;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 24px 80px; }
+  header.page { border-bottom: 3px solid var(--ink); padding-bottom: 18px; margin-bottom: 8px; }
+  header.page h1 { margin: 0 0 4px; font-size: 30px; letter-spacing: -0.5px; }
+  header.page .sub { color: var(--muted); font-size: 15px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 28px; }
+  .pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; }
+  .pill.red   { background: var(--red-bg);   color: var(--red);   border-color: var(--red); }
+  .pill.blue  { background: var(--blue-bg);  color: var(--blue);  border-color: var(--blue); }
+  .pill.grey  { background: var(--grey-bg);  color: var(--grey);  border-color: var(--grey); }
+  .pill.shared{ background: var(--shared-bg);color: var(--shared);border-color: var(--shared); }
+  .tldr { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin-bottom: 36px; }
+  .tldr h2 { margin: 0 0 10px; font-size: 16px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .tldr ul { margin: 0; padding-left: 20px; }
+  .tldr li { margin: 6px 0; }
+  section.theme { margin-bottom: 44px; }
+  section.theme > h2 { font-size: 22px; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+  section.theme > .theme-sub { color: var(--muted); margin: 0 0 20px; font-size: 15px; }
+  .hero { border-left: 5px solid var(--line); padding-left: 18px; }
+  .hero.blue { border-color: var(--blue); }
+  .hero.red  { border-color: var(--red); }
+  .hero.grey { border-color: var(--grey); }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin-bottom: 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 18px; }
+  .card .tags { margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .card p { margin: 0 0 12px; }
+  .card ul { margin: 0 0 12px; padding-left: 20px; }
+  .card ul li { margin: 3px 0; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 4px; }
+  a.btn { display: inline-block; text-decoration: none; font-weight: 600; font-size: 14px; padding: 8px 14px; border-radius: 8px; color: #fff; background: var(--ink); }
+  a.btn.blue { background: var(--blue); }
+  a.btn.red  { background: var(--red); }
+  a.btn.grey { background: var(--grey); }
+  a.btn.shared { background: var(--shared); }
+  a.btn::after { content: " ↗"; font-weight: 400; }
+  .route { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  details.more { margin-top: 6px; }
+  details.more summary { cursor: pointer; font-weight: 600; color: var(--muted); font-size: 14px; }
+  .commitlist { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .commitlist code { color: var(--ink); }
+  footer.page { border-top: 1px solid var(--line); margin-top: 40px; padding-top: 20px; color: var(--muted); font-size: 13.5px; }
+  footer.page code { background: #eef1f3; padding: 1px 5px; border-radius: 4px; }
+  @media print {
+    body { background: #fff; }
+    .card, .tldr { break-inside: avoid; }
+    a.btn { color: #000; background: none; border: 1px solid #999; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <p style="margin:0 0 8px;"><a href="./" style="color:var(--muted); text-decoration:none; font-size:14px;">← All changelogs</a></p>
+    <h1>WP6 Digital Twins — What shipped this update</h1>
+    <!-- Fill counts from scripts/changelog-stats.sh -->
+    <div class="sub">Changelog · <strong>update of 14 July 2026</strong> · covering 8 Jun – 14 Jul · branch <code>main</code> · 91 commits · 4 merged PRs · 3 contributors · <em>final pushes may still be appended before release</em></div>
+  </header>
+
+  <div class="legend">
+    <span class="pill blue">Blue — blueberry farm · wp6-blue.spohf.fontysvenlo.dev</span>
+    <span class="pill red">Red — tomato greenhouse · wp6-red.spohf.fontysvenlo.dev</span>
+    <span class="pill grey">Grey — public platform demo · wp6-grey.spohf.fontysvenlo.dev</span>
+    <span class="pill shared">Shared — twin-agnostic platform</span>
+  </div>
+
+  <div class="tldr">
+    <h2>Headlines</h2>
+    <ul>
+      <li><strong>Blue can now forecast soil conditions 7 days ahead.</strong> A per-treatment model predicts soil moisture &amp; temperature for the week to come, retrained automatically on every deploy — no manual step.</li>
+      <li><strong>Manual irrigation data now shows up <em>in context</em> on Blue's charts.</strong> Fertigation events are drawn as markers over the soil sensor traces, alongside a new manual-measurement monitor and mixed sensor/manual views.</li>
+      <li><strong>The GDD growth tracker now spans a full year.</strong> The on-site weather sensor had gaps across 2024; by sourcing temperature from OpenMeteo modeled weather instead, Blue can analyse Growing Degree Days over a complete calendar year (from 1 Jan 2024), with its growth constants set to recognised horticultural values.</li>
+      <li><strong>Blue is now fully operational on the SPoHF Datalake.</strong> The direct Yookr API fallback is no longer needed and has been retired — which also removed ~686 lines of code, purged 4.1 M duplicate rows (43.5% of the readings table), and dropped one of two API syncs from the 15-minute sync job.</li>
+    </ul>
+  </div>
+
+  <p style="color:var(--muted); font-size:13.5px; margin:-18px 0 30px;">
+    🔗 The <strong>Open live</strong> buttons (↗) deep-link into the deployed dashboards. Blue and Red require a login on first open; Grey is a public demo (no login).
+  </p>
+
+  <!-- =========================================================================
+       ONE <section class="theme"> PER THEME. Lead with the highlights the user named.
+       Wrap a theme's cards in <div class="hero blue|red|grey"> for an accent stripe.
+       CARD TEMPLATE — copy per feature:
+         <div class="card">
+           <h3>Feature title</h3>
+           <div class="tags"><span class="pill blue">Blue</span></div>   (twin/shared tags)
+           <p>What it does and why it matters, in plain language.</p>
+           <ul><li>notable sub-points</li></ul>                          (optional)
+           <div class="actions">                                         (live deep links — VERIFY each first)
+             <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/some/route">Open live</a>
+           </div>
+           <details class="more"><summary>Commits</summary>               (optional)
+             <div class="commitlist"><code>abc1234</code> commit subject<br></div>
+           </details>
+         </div>
+       ========================================================================== -->
+
+  <section class="theme">
+    <h2>🫐 Blue — Forecasting &amp; growth</h2>
+    <p class="theme-sub">Blue moves from "what happened" to "what's coming" — a look-ahead on soil conditions and a growth tracker that can't go stale.</p>
+    <div class="hero blue">
+      <div class="card">
+        <h3>Soil-condition forecast (next 7 days)</h3>
+        <div class="tags"><span class="pill blue">Blue</span></div>
+        <p>A new forecast page predicts <strong>soil moisture and soil temperature for day +1 through +7</strong>, one curve per treatment group. It learns from the last 30 days of readings (using lag features) and plots a shaded uncertainty band so you can see how confident each prediction is.</p>
+        <ul>
+          <li>Models retrain automatically on every deploy — no manual training step, and nothing to keep in sync on disk.</li>
+          <li>An admin "Update" button forces a retrain on demand; concurrent clicks are safely serialised so two updates never clobber the same model files.</li>
+        </ul>
+        <div class="actions">
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/sensor-monitor/soil/forecast">Open live</a>
+          <span class="route">/sensor-monitor/soil/forecast</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist">
+            <code>d53e030</code> basic forecasting<br>
+            <code>52ca4cf</code> soil-model bootstrap + ephemeral model dir; promote GDD route<br>
+            <code>d1c6975</code> soil-forecast: escape reflected HTML, offload+lock training, fix MAE band<br>
+            <code>d72d394</code> fixes forecast<br>
+          </div>
+        </details>
+      </div>
+      <div class="card">
+        <h3>GDD growth tracker: full-year coverage from modeled weather</h3>
+        <div class="tags"><span class="pill blue">Blue</span></div>
+        <p>Growing Degree Days (a running measure of accumulated heat that drives crop development) used to read the farm's own weather-station sensor, which <strong>lacked complete coverage for 2024</strong> — leaving gaps in the analysis. It now sources daily min/max temperature from <strong>OpenMeteo modeled weather at the farm's exact location (Grubbenvorst)</strong>, stitching together the historical archive, the recent past, and a 14-day forecast into an unbroken series from 1 Jan 2024 onward. That gives Blue a <strong>full calendar year of GDD to analyse for the first time</strong>.</p>
+        <ul>
+          <li>Growth constants set to recognised values — a 5&nbsp;°C base temperature (European convention, biofix 1 Jan) and a 7.2&nbsp;°C chill-hour threshold.</li>
+          <li>GDD left the data-source toggle entirely and now has its own card on the Blue home page.</li>
+        </ul>
+        <div class="actions">
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/gdd">Open live</a>
+          <span class="route">/gdd</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist">
+            <code>16882a2</code> GDD reads OpenMeteo modeled weather, decoupled from sensors<br>
+            <code>77ebf53</code> update GDD thresholds to Jans research<br>
+            <code>955b971</code> give GDD its own home-page card with growth accent<br>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>🫐 Blue — Manual data, in context</h2>
+    <p class="theme-sub">Hand-recorded farm data (irrigation events, lab measurements) is no longer siloed — it's overlaid directly on the sensor charts where it explains what the sensors show.</p>
+    <div class="hero blue">
+      <div class="card">
+        <h3>Fertigation events overlaid on soil charts</h3>
+        <div class="tags"><span class="pill blue">Blue</span></div>
+        <p>Irrigation/fertigation events (uploaded as CSV or via the admin UI) now appear as <strong>vertical markers on the soil monitor</strong>, so a moisture spike lines up visually with the watering that caused it. The overlay reads from the same ingested data store as every other manual dataset — one source of truth, not a separate CSV re-read.</p>
+        <div class="actions">
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/sensor-monitor/soil">Open live</a>
+          <span class="route">/sensor-monitor/soil</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist">
+            <code>2e98fdf</code> local fertigation overlay<br>
+            <code>fe3ea8e</code> fertigation upload option<br>
+            <code>7aba4b9</code> fertigation no longer shared (blue-scoped)<br>
+          </div>
+        </details>
+      </div>
+      <div class="card">
+        <h3>Manual-measurement monitor &amp; mixed views</h3>
+        <div class="tags"><span class="pill blue">Blue</span></div>
+        <p>A dedicated hub for the hand-recorded lab measurements, with correlation and comparison views — plus <strong>mixed views</strong> that put sensor data and manual data (or manual measurements and fertigation) on the same chart for direct comparison.</p>
+        <div class="actions">
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/manual-monitor">Manual monitor</a>
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/mixed-views/manual-fert">Mixed views</a>
+          <span class="route">/manual-monitor · /mixed-views/manual-fert</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist">
+            <code>cbf7650</code> manual measurement monitor<br>
+            <code>788f100</code> mixed graphs<br>
+          </div>
+        </details>
+      </div>
+      <div class="card">
+        <h3>Broken / unreliable sensors tab</h3>
+        <div class="tags"><span class="pill blue">Blue</span></div>
+        <p>A view that surfaces sensors whose data is <strong>unreliable rather than simply missing</strong> — separating soil and weather feeds — so data-quality issues are visible instead of silently skewing charts.</p>
+        <div class="actions">
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/broken-sensors">Open live</a>
+          <span class="route">/broken-sensors</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist">
+            <code>d3af0e0</code> broken sensors tab<br>
+            <code>58be207</code> unreliable, not broken<br>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>📊 Charts — pick a chart type per axis</h2>
+    <p class="theme-sub">A shared upgrade to the unified chart page that every twin inherits. (Grey is the public demo — click straight in, no login.)</p>
+    <div class="card">
+      <h3>Line / Scatter / Boxplot, selectable per Y-axis</h3>
+      <div class="tags"><span class="pill shared">Shared</span><span class="pill grey">Grey demo</span></div>
+      <p>Each Y-axis on the unified chart now carries its own chart-type selector — <strong>Line, Scatter, or Boxplot</strong> — mirroring how the aggregation controls already work per axis. Boxplots are built client-side from raw points, so the bucket slider becomes a "box width" control. The choice round-trips through the URL (<code>ct</code> / <code>ct_r</code>), so a shared or bookmarked chart keeps its type; existing links are untouched and still render exactly as before.</p>
+      <div class="actions">
+        <a class="btn grey" href="https://wp6-grey.spohf.fontysvenlo.dev/chart">Open live (public)</a>
+        <span class="route">/chart · ct / ct_r URL params</span>
+      </div>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist">
+          <code>7203710</code> per-Y-axis chart types (line/scatter/boxplot)<br>
+          <code>ce04d78</code> persist per-axis chart type when saving a chart<br>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>🫐 Blue — Honest data-source coverage</h2>
+    <p class="theme-sub">Blue draws automated data from two feeds (the SPoHF datalake and the direct "yookr" interface). This work makes the dashboards tell the truth about which feed actually has data.</p>
+    <div class="card">
+      <h3>Coverage grid honors the active source</h3>
+      <div class="tags"><span class="pill blue">Blue</span></div>
+      <p>The <code>/status</code> coverage grid used to show a sensor as "covered up to today" even when those recent days were written by the <em>other</em> feed — masking the datalake's staleness. It now matches coverage at the <strong>day level per source</strong>, so under the Datalake view a sensor's days reflect only datalake-owned days. The two feeds can also coexist safely now via project-aware de-duplication.</p>
+      <ul>
+        <li>A subtle follow-up: GDD/status no longer refuse data just because the datalake relay omits an ingestion timestamp.</li>
+      </ul>
+      <div class="actions">
+        <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/status">Open live</a>
+        <span class="route">/status</span>
+      </div>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist">
+          <code>641ab81</code> /status coverage honors source toggle (day-granularity match)<br>
+          <code>759d838</code> project-aware dedup so datalake &amp; yookr-direct coexist<br>
+          <code>b9272c9</code> stop requiring the datalake relay's ingestion timestamp<br>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>🫐 Blue — Now fully operational on the SPoHF Datalake</h2>
+    <p class="theme-sub">The SPoHF Datalake is the intended integration for Blue. Until now the twin kept a direct Yookr API feed as a fallback, because the datalake relay wasn't yet complete enough to rely on. It now is — so the fallback, its sync job, and the whole dual-source machinery have been retired. Less code, less storage, less compute.</p>
+    <div class="hero blue">
+      <div class="card">
+        <h3>Blue runs entirely on the datalake — Yookr fallback removed</h3>
+        <div class="tags"><span class="pill blue">Blue</span><span class="pill shared">Shared</span></div>
+        <p>The SPoHF Datalake is now Blue's single, canonical source of automated readings. The direct Yookr API — kept as a fallback while the relay caught up — is no longer needed and has been removed, along with the source toggle and the <code>readings.project</code> column that distinguished the two feeds.</p>
+        <ul>
+          <li><strong>Code — ~686 fewer lines of production code</strong> (146 added / 832 removed). Six modules deleted outright (≈565 lines of dedicated yookr code): the entire <code>src/wp6_data/yookr/</code> client package, the 299-line sync orchestrator, and blue's <code>datasource.py</code> + <code>yookr.py</code>. The rest is net simplification of shared plumbing (<code>deps.py</code>, <code>provider.py</code>, <code>ops.py</code>, <code>__main__.py</code>).</li>
+          <li><strong>Storage — ~4.1 million duplicate rows purged</strong>, which was <strong>43.5%</strong> of the readings table (9.4 M → 5.3 M rows). That's ~500 MB of logical row data, and proportionally ~1.5 GB of physical heap+index footprint out of a 3.6 GB hypertable, reclaimed as chunks are vacuumed. The <code>project</code> column is also dropped from every remaining row.</li>
+          <li><strong>Compute — one of two API syncs eliminated on every run.</strong> The combined sync job runs every 15 min (96×/day); it no longer authenticates against and paginates the direct Yookr API for its 58 series — only the datalake sync remains.</li>
+        </ul>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist">
+            <code>91cdda5</code> feat(blue)!: retire yookr-direct, drop readings.project<br>
+            <code>68bc100</code> chore(sync): disable sync CronJob for the drop-project migration window<br>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>⚙️ Platform &amp; architecture (under the hood)</h2>
+    <p class="theme-sub">Less visible, but it keeps the twins fast, the links honest, and the codebase maintainable across three twins.</p>
+    <div class="card">
+      <h3>Templates split into a package; large assets served as static files</h3>
+      <div class="tags"><span class="pill shared">Shared</span></div>
+      <ul>
+        <li>The monolithic <code>templates.py</code> became a proper package, and heavy JS/CSS assets are now real files served at static URLs instead of being inlined into every page — smaller responses, browser-cacheable.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Provider conformance suite + Red smoke tests</h3>
+      <div class="tags"><span class="pill shared">Shared</span></div>
+      <ul>
+        <li>A shared test suite that every twin's data provider must satisfy, plus Red app smoke tests and one MySQL seam — so a new twin or backend can't silently diverge from the platform contract.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Config-driven docs &amp; source links in the footer</h3>
+      <div class="tags"><span class="pill shared">Shared</span></div>
+      <ul>
+        <li>Each twin's footer now links to its docs and source from configuration, rather than hardcoded per-page URLs.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Red &amp; Blue internals tidied</h3>
+      <div class="tags"><span class="pill red">Red</span><span class="pill blue">Blue</span></div>
+      <ul>
+        <li>Red's Multi Height route became its own domain package; stat grids and data tables now go through shared render helpers (less duplication across twins).</li>
+        <li>Blue's treatment vocabulary was consolidated into a single <code>treatments.py</code> module.</li>
+        <li>Trained models live on ephemeral storage and rebuild on boot — kept off the read-only export volume.</li>
+        <li>C4 architecture diagrams refreshed to match the current implementation.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="page">
+    <p>Live dashboards: <code>wp6-blue.spohf.fontysvenlo.dev</code> · <code>wp6-red.spohf.fontysvenlo.dev</code> (login required) · <code>wp6-grey.spohf.fontysvenlo.dev</code> (public demo, synthetic data).</p>
+    <p>Generated from <code>git log --since=2026-06-08</code> on <code>main</code>, plus <code>issues/</code> PRDs. All deep links verified against the live environment.</p>
+  </footer>
+
+</div>
+</body>
+</html>
