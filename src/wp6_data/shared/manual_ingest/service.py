@@ -31,7 +31,6 @@ from psycopg_pool import AsyncConnectionPool
 from wp6_data.db.queries import (
     record_sync_run,
     refresh_sensor_summary,
-    upsert_daily_coverage,
 )
 from wp6_data.shared.manual_ingest.source import ManualSource
 from wp6_data.shared.manual_ingest.types import ValidationReport
@@ -214,31 +213,19 @@ class ManualIngestService:
         return ApplyResult(upload_id=upload_id, row_count=len(readings))
 
     async def _post_apply_bookkeeping(self, readings, started: float) -> None:
-        """Refresh the cagg, upsert daily coverage, and audit the run.
+        """Refresh the cagg and audit the run.
 
         These run after the ingest transaction commits; each is wrapped so a
         bookkeeping failure cannot fail the upload itself (the data is
-        already durably stored).
+        already durably stored). Coverage is derived from the cagg, so the
+        refresh below is what makes the just-uploaded days visible on /status.
         """
         slug = self._source.slug
-        coverage_records = [
-            {
-                "device_name": device,
-                "sensor_tag": sensor,
-                "source": source,
-                "day": day.isoformat(),
-            }
-            for device, sensor, source, day in {
-                (r.device_name, r.sensor_tag, r.source, r.time.date())
-                for r in readings
-            }
-        ]
         max_time = max((r.time for r in readings), default=None)
         duration_sec = time.monotonic() - started
 
         try:
             async with self.pool.connection() as conn:
-                await upsert_daily_coverage(conn, coverage_records)
                 await record_sync_run(
                     conn,
                     slug,
@@ -256,9 +243,9 @@ class ManualIngestService:
         except Exception:
             logger.exception("manual_cagg_refresh_failed", source=slug)
 
-        # In-process provider caches point at the cagg + coverage; the twin's
-        # hook drops them so the next home/status request sees the just-written
-        # rows instead of pre-upload stale data.
+        # In-process provider caches point at the cagg; the twin's hook drops
+        # them so the next home/status request sees the just-written rows
+        # instead of pre-upload stale data.
         if self._post_apply_hook is not None:
             result = self._post_apply_hook()
             if inspect.isawaitable(result):

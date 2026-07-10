@@ -168,7 +168,7 @@ def red_case(
     monkeypatch.setattr(tsdb, "fetch_sensors_from_cagg", AsyncMock(return_value=[]))
     monkeypatch.setattr(tsdb, "fetch_sync_metrics_tsdb", AsyncMock(return_value=[]))
     monkeypatch.setattr(
-        tsdb, "fetch_daily_coverage_from_table", AsyncMock(return_value=[]),
+        tsdb, "fetch_daily_coverage_from_cagg", AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
         tsdb,

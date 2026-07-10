@@ -2,8 +2,8 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, Query
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi import APIRouter
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from wp6_data.blue import deps
 from wp6_data.shared import render_card, render_page
@@ -76,24 +76,10 @@ async def metrics() -> str:
 
 
 @router.get("/maintenance", response_class=HTMLResponse)
-async def maintenance(rebuilt: int | None = Query(default=None)) -> str:
+async def maintenance() -> str:
     """Hidden maintenance page for ops tools."""
-    rebuilt_msg = ""
-    if rebuilt is not None:
-        rebuilt_msg = (
-            f'<p role="alert" style="color: var(--pico-ins-color);">'
-            f"Coverage index rebuilt: {rebuilt:,} entries.</p>"
-        )
-
     content = f"""
         <h1>Maintenance</h1>
-        {rebuilt_msg}
-        {render_card(
-            "Coverage Index",
-            '<form method="post" action="/rebuild-coverage">'
-            '<button type="submit">Rebuild Coverage Index</button></form>',
-            description="Rebuild daily_coverage table from all existing readings.",
-        )}
         {render_card(
             "Metrics",
             '<p><a href="/metrics">Prometheus metrics</a></p>',
@@ -104,15 +90,3 @@ async def maintenance(rebuilt: int | None = Query(default=None)) -> str:
         "SPoHF Blue - Maintenance", content,
         show_back_link=True,
     )
-
-
-@router.post("/rebuild-coverage")
-async def rebuild_coverage() -> RedirectResponse:
-    """Rebuild daily_coverage table from existing readings."""
-    from wp6_data.db import get_pool, rebuild_daily_coverage
-
-    pool = get_pool()
-    async with pool.connection() as conn:
-        count = await rebuild_daily_coverage(conn)
-        await conn.commit()
-    return RedirectResponse(url=f"/maintenance?rebuilt={count}", status_code=303)

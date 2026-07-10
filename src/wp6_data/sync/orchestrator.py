@@ -19,7 +19,6 @@ from wp6_data.db import (
     init_pool,
     refresh_sensor_summary,
     refresh_sensor_summary_recent,
-    upsert_daily_coverage,
     upsert_readings,
 )
 from wp6_data.sync.state import SyncStateManager
@@ -177,19 +176,6 @@ class SyncOrchestrator:
         if not batch:
             return 0, 0
         upserted, created = await upsert_readings(conn, batch)
-        # Update daily_coverage for the days touched by this batch
-        coverage_keys = {
-            (r["device_name"], r["sensor_tag"], r["datetime_measure"][:10])
-            for r in batch
-        }
-        # Automated sync writes via upsert_readings, which never sets
-        # `source`, so these readings carry the 'unknown' DDL default — the
-        # daily_coverage source must mirror that to stay consistent.
-        coverage_records = [
-            {"device_name": dn, "sensor_tag": st, "source": "unknown", "day": day}
-            for dn, st, day in coverage_keys
-        ]
-        await upsert_daily_coverage(conn, coverage_records)
         await conn.commit()
         logger.debug("batch_flushed", upserted=upserted, created=created)
         return upserted, created

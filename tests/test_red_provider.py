@@ -70,7 +70,7 @@ def mock_tsdb_coverage(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     from wp6_data.red import tsdb
 
     fn = AsyncMock(return_value=[])
-    monkeypatch.setattr(tsdb, "fetch_daily_coverage_from_table", fn)
+    monkeypatch.setattr(tsdb, "fetch_daily_coverage_from_cagg", fn)
     return fn
 
 

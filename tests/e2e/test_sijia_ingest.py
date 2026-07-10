@@ -104,20 +104,18 @@ async def test_re_ingest_replaces_sijia_rows_and_writes_new_audit_row(
         assert (await cur.fetchone())["n"] == 2
 
 
-async def test_ingest_populates_daily_coverage(service, red_tsdb_conn):
-    """The post-apply bookkeeping writes per-day coverage so /status renders."""
+async def test_ingest_populates_coverage_days(service, red_tsdb_conn):
+    """The post-apply cagg refresh gives /status per-day coverage for sijia rows."""
     await ingest_sijia_file(service, SEED_PATH)
 
     async with red_tsdb_conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
-            "SELECT count(*) AS n FROM daily_coverage "
-            "WHERE device_name IN ("
-            "SELECT DISTINCT device_name FROM readings WHERE source = 'sijia'"
-            ")"
+            "SELECT count(DISTINCT (device_name, sensor_tag, bucket::date)) AS n "
+            "FROM sensors_daily_summary WHERE source = 'sijia'"
         )
-        coverage_rows = (await cur.fetchone())["n"]
+        coverage_days = (await cur.fetchone())["n"]
 
-    assert coverage_rows > 0
+    assert coverage_days > 0
 
 
 async def test_ingest_refreshes_cagg(service, red_tsdb_conn):
@@ -127,7 +125,7 @@ async def test_ingest_refreshes_cagg(service, red_tsdb_conn):
     async with red_tsdb_conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
             "SELECT sum(reading_count) AS total "
-            "FROM sensors_daily_summary WHERE project = 'sijia'"
+            "FROM sensors_daily_summary WHERE source = 'sijia'"
         )
         row = await cur.fetchone()
 

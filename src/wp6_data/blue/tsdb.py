@@ -6,10 +6,9 @@ or 'unknown' for automated datalake rows) and a nullable `upload_id` FK to
 column that once distinguished the yookr-direct and spohf-datalake pipelines
 was dropped once the datalake became the only automated source.
 
-The cagg + `sync_metadata` + `daily_coverage` infrastructure is twin-agnostic
-and lives in `wp6_data.db.schema`/`queries`; `ensure_schema_blue` delegates to
-`ensure_aggregates(pool, project_column="source")` after creating blue's
-readings hypertable.
+The cagg + `sync_metadata` infrastructure is twin-agnostic and lives in
+`wp6_data.db.schema`/`queries`; `ensure_schema_blue` delegates to
+`ensure_aggregates(pool)` after creating blue's readings hypertable.
 
 Mirrors `wp6_data.red.tsdb`: each twin owns its own readings DDL +
 `ensure_schema_*` symmetrically, so `db.schema` stays twin-agnostic.
@@ -117,5 +116,5 @@ async def ensure_schema_blue(pool: AsyncConnectionPool) -> None:
         await conn.execute(_BLUE_SOURCE_SQL)
         await conn.execute(_BLUE_DEDUP_MIGRATION_SQL)
         await conn.commit()
-    await ensure_aggregates(pool, project_column="source")
+    await ensure_aggregates(pool)
     logger.info("blue_tsdb_schema_ensured")

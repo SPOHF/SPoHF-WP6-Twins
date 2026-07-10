@@ -61,55 +61,6 @@ async def upsert_readings(
     return len(readings), created
 
 
-async def upsert_daily_coverage(
-    conn: AsyncConnection,
-    records: list[dict[str, str]],
-) -> int:
-    """Upsert daily_coverage rows.
-
-    Args:
-        conn: psycopg async connection
-        records: List of dicts with keys: device_name, sensor_tag, source,
-            day (ISO date string). ``source`` mirrors ``readings.source`` so the
-            status page can classify manual vs automated coverage.
-
-    Returns:
-        Number of rows touched
-    """
-    if not records:
-        return 0
-
-    query = """
-        INSERT INTO daily_coverage (device_name, sensor_tag, source, day)
-        VALUES (%(device_name)s, %(sensor_tag)s, %(source)s, %(day)s)
-        ON CONFLICT DO NOTHING
-    """
-    async with conn.cursor() as cur:
-        for r in records:
-            await cur.execute(query, r)
-
-    return len(records)
-
-
-async def rebuild_daily_coverage(conn: AsyncConnection) -> int:
-    """Rebuild daily_coverage from all readings.
-
-    Returns:
-        Total number of coverage entries after rebuild
-    """
-    async with conn.cursor() as cur:
-        await cur.execute("DELETE FROM daily_coverage")
-        await cur.execute("""
-            INSERT INTO daily_coverage (device_name, sensor_tag, source, day)
-            SELECT DISTINCT device_name, sensor_tag, source, time::date
-            FROM readings
-            ON CONFLICT DO NOTHING
-        """)
-        await cur.execute("SELECT count(*) FROM daily_coverage")
-        row = await cur.fetchone()
-        return row[0] if row else 0
-
-
 async def record_sync_run(
     conn: AsyncConnection,
     endpoint: str,

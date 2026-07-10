@@ -164,13 +164,13 @@ async def test_incremental_sync_and_dashboard_display(tsdb_conn):
         values = [r["raw_value"] for r in await cur.fetchall()]
         assert "21.5" in values
 
-        # Daily coverage entries
+        # Coverage is derived from the cagg; the synced days must appear there.
         await cur.execute(
-            "SELECT count(*) AS cnt FROM daily_coverage "
+            "SELECT count(*) AS cnt FROM sensors_daily_summary "
             "WHERE device_name LIKE 'e2e-%'"
         )
         row = await cur.fetchone()
-        assert row["cnt"] > 0, "Expected daily_coverage entries"
+        assert row["cnt"] > 0, "Expected sensors_daily_summary entries"
 
         # Sync metadata
         await cur.execute(

@@ -1,14 +1,9 @@
 """E2E: /status coverage reflects what `readings` actually holds.
 
-`daily_coverage` is insert-only — the sync adds a (device, sensor, day) row as it
-ingests, and nothing ever removes one. So it cannot be trusted alone: after the
-yookr-direct purge it still claimed days whose rows were deleted. `fetch_daily_coverage`
-therefore cross-checks each automated day against the `sensors_daily_summary` cagg,
-which is derived from `readings` and tells the truth.
-
-(This replaces the issue-022 source-attribution test. That leak — one source's days
-showing under the other's view — became unreachable when the data-source toggle was
-removed, but the day-level cagg join it introduced now serves this purpose instead.)
+Coverage is read straight from the `sensors_daily_summary` cagg, which is derived
+from `readings`. The retired `daily_coverage` table was insert-only, so it kept
+claiming days whose readings had been deleted (e.g. after the yookr-direct purge);
+the cagg refreshes from readings, so a deleted day stops reporting.
 """
 
 from datetime import UTC, date, datetime, timedelta
@@ -20,7 +15,6 @@ from wp6_data.db import (
     close_pool,
     init_pool,
     refresh_sensor_summary,
-    upsert_daily_coverage,
     upsert_readings,
 )
 
@@ -48,23 +42,13 @@ def _reading(day: date) -> dict:
     }
 
 
-def _coverage_row(device: str, sensor: str, day: date, source: str) -> dict:
-    return {
-        "device_name": device, "sensor_tag": sensor,
-        "source": source, "day": day.isoformat(),
-    }
-
-
 def _days_for(coverage: list[dict], device: str, sensor: str) -> set[date]:
     return {r["day"] for r in coverage if r["device"] == device and r["sensor"] == sensor}
 
 
 @pytest.mark.e2e
 async def test_purged_day_stops_reporting_coverage(tsdb_conn):
-    """A day whose readings were deleted must not keep claiming coverage.
-
-    This is exactly what the yookr-direct purge does to `daily_coverage`.
-    """
+    """A day whose readings were deleted must not keep claiming coverage."""
     kept = datetime.now(UTC).date() - timedelta(days=10)
     purged = datetime.now(UTC).date() - timedelta(days=100)
 
@@ -72,19 +56,11 @@ async def test_purged_day_stops_reporting_coverage(tsdb_conn):
     try:
         async with pool.connection() as conn:
             await upsert_readings(conn, [_reading(kept), _reading(purged)])
-            await upsert_daily_coverage(
-                conn,
-                [
-                    _coverage_row(DEVICE, SENSOR, kept, "unknown"),
-                    _coverage_row(DEVICE, SENSOR, purged, "unknown"),
-                ],
-            )
             await conn.commit()
         await refresh_sensor_summary(pool)
 
         both = _days_for(await fetch_daily_coverage(), DEVICE, SENSOR)
 
-        # Purge one day's readings, leaving its daily_coverage row behind.
         async with pool.connection() as conn:
             await conn.execute(
                 "DELETE FROM readings WHERE device_name = %s AND sensor_tag = %s AND time = %s",
@@ -99,15 +75,15 @@ async def test_purged_day_stops_reporting_coverage(tsdb_conn):
 
     assert {kept, purged} <= both, "both days should report before the purge"
     assert kept in after
-    assert purged not in after, "stale daily_coverage row leaked a day with no readings"
+    assert purged not in after, "coverage leaked a day whose readings were deleted"
 
 
 @pytest.mark.e2e
-async def test_manual_coverage_is_visible_without_the_cagg(tsdb_conn):
-    """Manual rows are flagged straight off `daily_coverage.source`.
+async def test_manual_source_is_tagged_manual(tsdb_conn):
+    """A reading carrying a manual `source` is flagged manual=True in coverage.
 
-    They never depend on the cagg join, so a manual upload shows on /status the
-    moment it lands rather than after the next refresh cycle.
+    Manual uploads write readings with a manual source slug; the cagg groups by
+    source, so coverage classifies them without a separate table.
     """
     manual_source = MANUAL_SOURCES[0]
     day = datetime.now(UTC).date() - timedelta(days=3)
@@ -115,10 +91,13 @@ async def test_manual_coverage_is_visible_without_the_cagg(tsdb_conn):
     pool = await init_pool(TSDB_DSN)
     try:
         async with pool.connection() as conn:
-            await upsert_daily_coverage(
-                conn, [_coverage_row(MANUAL_DEVICE, MANUAL_SENSOR, day, manual_source)],
+            await conn.execute(
+                "INSERT INTO readings (time, device_name, sensor_tag, value, source) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (_noon(day), MANUAL_DEVICE, MANUAL_SENSOR, 1.0, manual_source),
             )
             await conn.commit()
+        await refresh_sensor_summary(pool)
 
         coverage = await fetch_daily_coverage()
     finally:
@@ -128,6 +107,6 @@ async def test_manual_coverage_is_visible_without_the_cagg(tsdb_conn):
         r for r in coverage
         if r["device"] == MANUAL_DEVICE and r["sensor"] == MANUAL_SENSOR
     ]
-    assert len(rows) == 1, "manual coverage must show without any readings/cagg entry"
+    assert len(rows) == 1
     assert rows[0]["manual"] is True
     assert rows[0]["day"] == day

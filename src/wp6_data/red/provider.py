@@ -116,7 +116,7 @@ class RedSensorProvider:
             wire_device_id,
         )
         from wp6_data.red.manual_sources import MANUAL_SOURCE_VALUES
-        from wp6_data.red.tsdb import fetch_daily_coverage_from_table
+        from wp6_data.red.tsdb import fetch_daily_coverage_from_cagg
 
         records: list[dict[str, Any]] = []
         async with self.db.pool.acquire() as conn, conn.cursor() as cursor:
@@ -160,7 +160,7 @@ class RedSensorProvider:
                                 "manual": False,
                             })
 
-        for rec in await fetch_daily_coverage_from_table():
+        for rec in await fetch_daily_coverage_from_cagg():
             rec["manual"] = rec.pop("source", None) in MANUAL_SOURCE_VALUES
             records.append(rec)
         return records

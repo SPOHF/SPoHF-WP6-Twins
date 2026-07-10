@@ -70,10 +70,6 @@ async def _delete_e2e_data(conn) -> None:
             {"prefix": f"{E2E_PREFIX}%"},
         )
         await cur.execute(
-            "DELETE FROM daily_coverage WHERE device_name LIKE %(prefix)s",
-            {"prefix": f"{E2E_PREFIX}%"},
-        )
-        await cur.execute(
             "DELETE FROM sync_metadata WHERE endpoint LIKE %(prefix)s",
             {"prefix": f"{E2E_PREFIX}%"},
         )

@@ -7,11 +7,9 @@ encoding twin-specific knowledge.
 
 from wp6_data.db.pool import close_pool, get_pool, init_pool
 from wp6_data.db.queries import (
-    rebuild_daily_coverage,
     record_sync_run,
     refresh_sensor_summary,
     refresh_sensor_summary_recent,
-    upsert_daily_coverage,
     upsert_readings,
 )
 from wp6_data.db.schema import ensure_aggregates
@@ -21,10 +19,8 @@ __all__ = [
     "ensure_aggregates",
     "get_pool",
     "init_pool",
-    "rebuild_daily_coverage",
     "record_sync_run",
     "refresh_sensor_summary",
     "refresh_sensor_summary_recent",
-    "upsert_daily_coverage",
     "upsert_readings",
 ]

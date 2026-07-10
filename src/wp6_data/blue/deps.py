@@ -195,33 +195,23 @@ async def fetch_available_sensors() -> list[dict[str, Any]]:
 async def fetch_daily_coverage() -> list[dict[str, Any]]:
     """Distinct days with data per device+sensor, tagged manual vs automated.
 
-    Manual coverage (``source`` is a manual slug) is flagged ``manual=True``
-    straight from the ``daily_coverage.source`` column — no ``readings`` access.
-
-    Automated coverage is still matched against the ``sensors_daily_summary``
-    cagg at ``(device, sensor, day)``. That join was introduced to stop one
-    source's days leaking into the other's view (issue 022); with a single
-    source it instead guards drift — ``daily_coverage`` rows are only ever
-    inserted, never removed, so a day whose readings were deleted would keep
-    claiming coverage. The cagg is derived from ``readings``, so it tells the
-    truth. It can lag a freshly-ingested day by one refresh cycle (~15 min),
-    acceptable for a status view.
+    Read straight from the ``sensors_daily_summary`` cagg, which is derived from
+    ``readings`` and carries the ``source`` categorical. A day where every row of
+    a (device, sensor) is a manual slug is flagged ``manual=True``. Because the
+    cagg refreshes from readings, a day whose readings were deleted stops
+    reporting — unlike the old insert-only ``daily_coverage`` table it replaces.
+    The trade-off is a freshness lag: the current day can trail by one refresh
+    cycle (~15 min), acceptable for a status view.
     """
     pool = get_pool()
     params: dict[str, Any] = {"manual_sources": list(MANUAL_SOURCES)}
 
     query = """
-        WITH visible_auto AS (
-            SELECT DISTINCT device_name, sensor_tag, bucket::date AS day
-            FROM sensors_daily_summary
-        )
-        SELECT dc.device_name AS device, dc.sensor_tag AS sensor, dc.day,
-               (dc.source = ANY(%(manual_sources)s)) AS manual
-        FROM daily_coverage dc
-        WHERE dc.source = ANY(%(manual_sources)s)
-           OR (dc.device_name, dc.sensor_tag, dc.day)
-               IN (SELECT device_name, sensor_tag, day FROM visible_auto)
-        ORDER BY dc.sensor_tag, dc.device_name, dc.day
+        SELECT device_name AS device, sensor_tag AS sensor, bucket::date AS day,
+               bool_or(source = ANY(%(manual_sources)s)) AS manual
+        FROM sensors_daily_summary
+        GROUP BY device_name, sensor_tag, bucket::date
+        ORDER BY sensor_tag, device_name, day
     """
 
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:

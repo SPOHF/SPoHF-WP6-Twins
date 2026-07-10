@@ -6,14 +6,11 @@ module owns the twin-agnostic parts:
 
 * `MANUAL_UPLOADS_SQL` — the `manual_uploads` audit table, the permanent
   system of record for every manual upload, identical between twins.
-* `AUX_SCHEMA_SQL` — `sync_metadata` and `daily_coverage` tables, identical
-  between twins.
-* `CAGG_SQL_TEMPLATE` — the `sensors_daily_summary` continuous aggregate,
-  parameterised by the categorical column name on a twin's `readings`
-  table (a twin with multiple parallel automated pipelines uses a different
-  column than one keyed only by provenance).
+* `AUX_SCHEMA_SQL` — the `sync_metadata` table, identical between twins.
+* `CAGG_SQL` — the `sensors_daily_summary` continuous aggregate. Both twins
+  key `readings` on a single `source` categorical, so it is not parameterised.
 
-Twin code calls `ensure_aggregates(pool, project_column=...)` after creating
+Twin code calls `ensure_aggregates(pool)` after creating
 its own `readings` hypertable.
 """
 
@@ -54,57 +51,42 @@ CREATE TABLE IF NOT EXISTS sync_metadata (
     total_failures        INTEGER DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS daily_coverage (
-    device_name TEXT NOT NULL,
-    sensor_tag  TEXT NOT NULL,
-    source      TEXT NOT NULL DEFAULT 'unknown',
-    day         DATE NOT NULL,
-    PRIMARY KEY (device_name, sensor_tag, day)
-);
-
--- Idempotent migration for pre-existing tables (the CREATE above is a no-op
--- once the table exists). `source` mirrors `readings.source`, letting the
--- status page classify manual vs automated coverage without touching the
--- readings hypertable. It is functionally dependent on (device, sensor), so
--- it stays out of the primary key. Existing rows default to 'unknown' until
--- the next `rebuild_daily_coverage` repopulates the real source.
-ALTER TABLE daily_coverage ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'unknown';
+-- The `daily_coverage` table was retired: coverage is now read straight from
+-- the `sensors_daily_summary` cagg, which carries the same (device, sensor,
+-- day, source) and refreshes as readings change. Drop it if present.
+DROP TABLE IF EXISTS daily_coverage;
 """
 
-# Continuous aggregate template. `{project_column}` is the categorical column
-# on the twin's `readings` table (blue: `project`, red: `source`). Both are
-# valid SQL identifiers; callers are trusted to pass a known constant.
-CAGG_SQL_TEMPLATE = """
+# Continuous aggregate over each twin's `readings`. Both twins carry the same
+# single categorical (`source`) since blue dropped `project`, so the cagg groups
+# by it directly — no per-twin column parameter.
+CAGG_SQL = """
 CREATE MATERIALIZED VIEW IF NOT EXISTS sensors_daily_summary
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('1 day', time) AS bucket,
     device_name,
     sensor_tag,
-    {project_column} AS project,
+    source,
     count(*)    AS reading_count,
     min(time)   AS first_reading,
     max(time)   AS last_reading
 FROM readings
-GROUP BY bucket, device_name, sensor_tag, {project_column}
+GROUP BY bucket, device_name, sensor_tag, source
 WITH NO DATA;
 """
 
 
-async def ensure_aggregates(
-    pool: AsyncConnectionPool, *, project_column: str
-) -> None:
+async def ensure_aggregates(pool: AsyncConnectionPool) -> None:
     """Create twin-agnostic aux tables + the sensors_daily_summary cagg.
 
     Idempotent. Must be called after the twin's `readings` hypertable exists.
-    The continuous aggregate aliases the twin's categorical column to ``project``
-    so consumers see a uniform shape regardless of which twin produced it.
     """
     async with pool.connection() as conn:
         await conn.execute(AUX_SCHEMA_SQL)
         await conn.commit()
     async with pool.connection() as conn:
-        await conn.execute(CAGG_SQL_TEMPLATE.format(project_column=project_column))
+        await conn.execute(CAGG_SQL)
         await conn.commit()
     # Background refresh policy: TimescaleDB's scheduler refreshes the cagg
     # incrementally over a sliding window, independent of sync. start_offset
@@ -128,4 +110,4 @@ async def ensure_aggregates(
             )
         finally:
             await conn.set_autocommit(False)
-    logger.info("aggregates_ensured", project_column=project_column)
+    logger.info("aggregates_ensured")

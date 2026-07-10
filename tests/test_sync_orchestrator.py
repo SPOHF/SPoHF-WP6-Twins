@@ -140,40 +140,22 @@ class TestFlushBatch:
         conn = AsyncMock()
         batch = [
             {
-                "sensor_id": "x",
                 "device_name": "dev1",
                 "sensor_tag": "temp",
                 "datetime_measure": "2024-06-15T12:00:00",
             }
         ]
 
-        with (
-            patch(
-                "wp6_data.sync.orchestrator.upsert_readings",
-                new_callable=AsyncMock,
-                return_value=(3, 2),
-            ) as mock_upsert,
-            patch(
-                "wp6_data.sync.orchestrator.upsert_daily_coverage",
-                new_callable=AsyncMock,
-                return_value=1,
-            ) as mock_coverage,
-        ):
+        with patch(
+            "wp6_data.sync.orchestrator.upsert_readings",
+            new_callable=AsyncMock,
+            return_value=(3, 2),
+        ) as mock_upsert:
             upserted, created = await orch._flush_batch(conn, batch)
 
+        # Coverage is derived from the cagg now — the sync only writes readings.
         assert (upserted, created) == (3, 2)
         mock_upsert.assert_awaited_once_with(conn, batch)
-        mock_coverage.assert_awaited_once_with(
-            conn,
-            [
-                {
-                    "device_name": "dev1",
-                    "sensor_tag": "temp",
-                    "source": "unknown",
-                    "day": "2024-06-15",
-                }
-            ],
-        )
 
 
 # --- _sync_endpoint ---
@@ -306,11 +288,6 @@ class TestSyncEndpoint:
                 "wp6_data.sync.orchestrator.upsert_readings",
                 new_callable=AsyncMock,
                 return_value=(1, 0),  # upserted=1, created=0 → all dupes
-            ),
-            patch(
-                "wp6_data.sync.orchestrator.upsert_daily_coverage",
-                new_callable=AsyncMock,
-                return_value=1,
             ),
             patch(
                 "wp6_data.sync.orchestrator._generate_windows"

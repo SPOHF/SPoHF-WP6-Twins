@@ -6,10 +6,9 @@ Red's `readings` has a different column shape than blue's: a `source` column
 plus a nullable `upload_id` FK to `manual_uploads` for rows that came from a
 manual Excel upload.
 
-The cagg + `sync_metadata` + `daily_coverage` infrastructure is twin-agnostic
-and lives in `wp6_data.db.schema`/`queries`; `ensure_schema_red` delegates to
-`ensure_aggregates(pool, project_column="source")` after creating red's
-readings hypertable.
+The cagg + `sync_metadata` infrastructure is twin-agnostic and lives in
+`wp6_data.db.schema`/`queries`; `ensure_schema_red` delegates to
+`ensure_aggregates(pool)` after creating red's readings hypertable.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from wp6_data.config import Settings
-from wp6_data.db.queries import rebuild_daily_coverage
+from wp6_data.db.queries import refresh_sensor_summary
 from wp6_data.db.schema import MANUAL_UPLOADS_SQL, ensure_aggregates
 from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 
@@ -106,36 +105,33 @@ SCHEMA_SQL = MANUAL_UPLOADS_SQL + _READINGS_RED_SQL + _RISK_CACHE_SQL
 async def ensure_schema_red(pool: AsyncConnectionPool) -> None:
     """Bootstrap red's TSDB schema and aggregates idempotently.
 
-    Order matters: readings hypertable first, then the shared aggregates
-    helper which creates `sync_metadata`, `daily_coverage`, and the
-    `sensors_daily_summary` continuous aggregate (with a background refresh
-    policy installed by `ensure_aggregates`). On first run after data already
-    exists (e.g. historical Sijia uploads), a one-time `daily_coverage`
-    rebuild populates that table so the home/status pages return data.
+    Order matters: readings hypertable first, then the shared aggregates helper
+    which creates `sync_metadata` and the `sensors_daily_summary` continuous
+    aggregate (with a background refresh policy installed by `ensure_aggregates`).
 
-    Cagg refresh is handled out-of-band: the TSDB background policy refreshes
-    the last 7 days continuously, and the sync orchestrator runs a whole-
-    history refresh after WP6_SYNC_MODE=full. For a manual cagg rebuild,
-    the runbook step is:
-        CALL refresh_continuous_aggregate('sensors_daily_summary',NULL,NULL)
+    The cagg is created WITH NO DATA and its background policy only covers the
+    last 7 days, so on first run against a DB that already has readings (e.g.
+    historical Sijia uploads) it holds nothing for those older days. Coverage is
+    read from the cagg, so materialise it whole-history once when it is empty but
+    readings exist. Steady-state refresh is out-of-band (the 7-day background
+    policy + a whole-history refresh after WP6_SYNC_MODE=full).
     """
     async with pool.connection() as conn:
         await conn.execute(SCHEMA_SQL)
         await conn.commit()
 
-    await ensure_aggregates(pool, project_column="source")
+    await ensure_aggregates(pool)
 
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT count(*) FROM daily_coverage")
-        coverage_row = await cur.fetchone()
-        coverage_rows = coverage_row[0] if coverage_row else 0
+        await cur.execute("SELECT count(*) FROM sensors_daily_summary")
+        cagg_row = await cur.fetchone()
+        cagg_rows = cagg_row[0] if cagg_row else 0
         await cur.execute("SELECT count(*) FROM readings")
         readings_row = await cur.fetchone()
         readings_rows = readings_row[0] if readings_row else 0
-        if coverage_rows == 0 and readings_rows > 0:
-            backfilled = await rebuild_daily_coverage(conn)
-            await conn.commit()
-            logger.info("daily_coverage_backfilled", rows=backfilled)
+    if cagg_rows == 0 and readings_rows > 0:
+        await refresh_sensor_summary(pool)
+        logger.info("cagg_backfilled_whole_history")
 
     logger.info("red_tsdb_schema_ensured")
 
@@ -240,7 +236,7 @@ async def fetch_sensors_from_cagg(
     from wp6_data.db.pool import get_pool
 
     if source is not None:
-        where = "WHERE project = %(source)s"
+        where = "WHERE source = %(source)s"
         params: dict[str, Any] = {"source": source}
     else:
         where = ""
@@ -279,21 +275,24 @@ async def fetch_manual_summary_tsdb() -> dict[str, Any]:
     return await fetch_manual_summary(get_pool())
 
 
-async def fetch_daily_coverage_from_table() -> list[dict[str, Any]]:
-    """Distinct (device, sensor, day, source) rows from the `daily_coverage` table.
+async def fetch_daily_coverage_from_cagg() -> list[dict[str, Any]]:
+    """Distinct (device, sensor, day, source) rows from `sensors_daily_summary`.
 
-    Replaces the previous `GROUP BY DATE(time)` scan of `readings`; rows are
-    written incrementally by ingest paths and rebuilt by the bootstrap. The
-    `source` column is carried through so the provider can tag manual-upload
-    rows (see `red.manual_sources`); this function stays source-agnostic.
+    Red's TSDB-side coverage (manual Sijia uploads + any risk/TSDB readings) is
+    derived from the cagg over `readings`, which refreshes as readings change —
+    so a deleted day stops reporting, unlike the retired `daily_coverage` table.
+    The `source` column is carried through so the provider can tag manual-upload
+    rows (see `red.manual_sources`); this function stays source-agnostic. The
+    live MySQL/wire legs are merged separately by the provider.
     """
     from wp6_data.db.pool import get_pool
 
     pool = get_pool()
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
-            "SELECT device_name AS device, sensor_tag AS sensor, day, source "
-            "FROM daily_coverage "
+            "SELECT DISTINCT device_name AS device, sensor_tag AS sensor, "
+            "bucket::date AS day, source "
+            "FROM sensors_daily_summary "
             "ORDER BY device, sensor, day"
         )
         return list(await cur.fetchall())

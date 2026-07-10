@@ -258,11 +258,12 @@ async def test_readings_is_a_timescaledb_hypertable(clean_red_db, red_pool):
 
 
 async def test_bootstrap_creates_aggregates_and_audit_tables(clean_red_db, red_pool):
-    """ensure_schema_red also lays down sync_metadata, daily_coverage, and the cagg."""
+    """ensure_schema_red lays down sync_metadata + the cagg, and no daily_coverage."""
     await ensure_schema_red(red_pool)
 
     assert await _table_exists(clean_red_db, "sync_metadata")
-    assert await _table_exists(clean_red_db, "daily_coverage")
+    # daily_coverage was retired — coverage is read from the cagg.
+    assert not await _table_exists(clean_red_db, "daily_coverage")
 
     async with clean_red_db.cursor(row_factory=dict_row) as cur:
         await cur.execute(
@@ -301,11 +302,8 @@ async def test_cagg_refresh_policy_is_idempotent(clean_red_db, red_pool):
         assert (await cur.fetchone())["n"] == 1
 
 
-async def test_cagg_groups_by_source_column(clean_red_db, red_pool):
-    """Red's cagg must group by `source` (not `project`).
-
-    See ``project_blue_project_vs_red_source`` memo for the rationale.
-    """
+async def test_cagg_exposes_source_column(clean_red_db, red_pool):
+    """The cagg groups by and exposes `source` (both twins are source-keyed now)."""
     await ensure_schema_red(red_pool)
 
     async with clean_red_db.cursor(row_factory=dict_row) as cur:
@@ -315,21 +313,24 @@ async def test_cagg_groups_by_source_column(clean_red_db, red_pool):
         )
         cols = {row["column_name"] for row in await cur.fetchall()}
 
-    # The template aliases the categorical column to "project" in the view
-    # output for cross-twin uniformity; the underlying grouping is over
-    # red's `source` column.
-    assert "project" in cols
+    assert "source" in cols
+    assert "project" not in cols
     assert "device_name" in cols
     assert "reading_count" in cols
     assert "first_reading" in cols
     assert "last_reading" in cols
 
 
-async def test_daily_coverage_is_backfilled_when_readings_already_exist(
+async def test_cagg_is_backfilled_when_readings_already_exist(
     clean_red_db, red_pool,
 ):
-    """First bootstrap on a non-empty `readings` table populates daily_coverage."""
-    # Pre-existing data simulates an upgrade where readings predate this feature.
+    """First bootstrap on a non-empty `readings` table materialises the whole cagg.
+
+    The cagg is created WITH NO DATA and its background policy only covers recent
+    days, so historical readings (e.g. old Sijia uploads) would be invisible in
+    coverage without this one-time whole-history refresh.
+    """
+    # Pre-existing data, older than the background refresh window.
     async with clean_red_db.cursor() as cur:
         await cur.execute(
             "CREATE TABLE readings ("
@@ -354,31 +355,19 @@ async def test_daily_coverage_is_backfilled_when_readings_already_exist(
 
     async with clean_red_db.cursor(row_factory=dict_row) as cur:
         await cur.execute(
-            "SELECT count(*) AS n FROM daily_coverage WHERE device_name = 'd1'"
+            "SELECT count(DISTINCT bucket::date) AS n "
+            "FROM sensors_daily_summary WHERE device_name = 'd1'"
         )
-        assert (await cur.fetchone())["n"] == 2  # one row per distinct day
+        assert (await cur.fetchone())["n"] == 2  # one bucket per distinct day
 
 
-async def test_daily_coverage_not_rebuilt_on_subsequent_bootstrap(
-    clean_red_db, red_pool,
-):
-    """The backfill guard prevents repeated full rebuilds on every pod start."""
+async def test_cagg_backfill_skipped_when_no_readings(clean_red_db, red_pool):
+    """A second bootstrap on an unchanged DB is a no-op and errors on nothing."""
     await ensure_schema_red(red_pool)
-
-    # Insert one coverage row manually; it must survive a second bootstrap
-    # since `readings` itself is empty (count-check sees coverage already exists).
-    async with clean_red_db.cursor() as cur:
-        await cur.execute(
-            "INSERT INTO daily_coverage (device_name, sensor_tag, day) "
-            "VALUES (%s, %s, %s)",
-            ("d-manual", "s-manual", "2025-05-01"),
-        )
-    await clean_red_db.commit()
-
+    # Empty readings → backfill guard skips the whole-history refresh. Re-running
+    # must stay clean (the point of the count-guard).
     await ensure_schema_red(red_pool)
 
     async with clean_red_db.cursor(row_factory=dict_row) as cur:
-        await cur.execute(
-            "SELECT count(*) AS n FROM daily_coverage WHERE device_name = 'd-manual'"
-        )
-        assert (await cur.fetchone())["n"] == 1  # untouched
+        await cur.execute("SELECT count(*) AS n FROM sensors_daily_summary")
+        assert (await cur.fetchone())["n"] == 0
