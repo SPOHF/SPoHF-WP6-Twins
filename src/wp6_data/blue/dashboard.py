@@ -80,13 +80,13 @@ async def _shutdown() -> None:
 config = TwinConfig(
     twin_id="blue",
     title="SPoHF Blue Digital Twin",
-    # One automated source. The shared layer renders a static badge (no toggle)
-    # and `get_provider` short-circuits to the default when there is only one.
+    # One automated source. The shared layer renders a static "SPoHF Datalake"
+    # badge from this label; there is no toggle.
     data_sources=[
         DataSource(
             key="spohf-datalake",
             label="SPoHF Datalake",
-            provider=BlueSensorProvider(source_key="spohf-datalake"),
+            provider=BlueSensorProvider(),
         ),
     ],
     metadata=deps.metadata,

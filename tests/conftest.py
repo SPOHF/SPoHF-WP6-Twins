@@ -21,7 +21,6 @@ def make_reading(**overrides) -> SensorReading:
     """Factory for SensorReading with sensible defaults."""
     defaults = {
         "sensor_id": "device-001",
-        "project": "test-project",
         "device_name": "Test Device",
         "sensor_tag": "temperature",
         "value": "21.5",

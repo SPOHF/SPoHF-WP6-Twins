@@ -1,15 +1,12 @@
 """Blue dashboard operations endpoints: metrics, maintenance."""
 
 from datetime import datetime
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from wp6_data.blue import deps
 from wp6_data.shared import render_card, render_page
-from wp6_data.shared.routes.deps import get_provider
-from wp6_data.shared.twin import SensorDataProvider
 
 router = APIRouter()
 
@@ -79,10 +76,7 @@ async def metrics() -> str:
 
 
 @router.get("/maintenance", response_class=HTMLResponse)
-async def maintenance(
-    provider: Annotated[SensorDataProvider, Depends(get_provider)],
-    rebuilt: int | None = Query(default=None),
-) -> str:
+async def maintenance(rebuilt: int | None = Query(default=None)) -> str:
     """Hidden maintenance page for ops tools."""
     rebuilt_msg = ""
     if rebuilt is not None:
@@ -108,7 +102,7 @@ async def maintenance(
 
     return render_page(
         "SPoHF Blue - Maintenance", content,
-        show_back_link=True, data_source=provider.data_source_label,
+        show_back_link=True,
     )
 
 

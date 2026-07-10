@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Full historical sync from SPoHF datalake API → TimescaleDB
-# Suspends both CronJobs to avoid deadlocks, unsuspends on exit
+# Suspends the sync CronJob to avoid deadlocks, unsuspends on exit
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-spohf-system}"
 JOB_NAME="wp6-data-sync-full"
-CRONJOBS=("wp6-data-sync" "wp6-data-yookr-sync")
+CRONJOBS=("wp6-data-sync")
 
 SED_ARGS=(
   -e 's/value: "\{0,1\}incremental"\{0,1\}/value: full/'

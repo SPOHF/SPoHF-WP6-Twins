@@ -12,9 +12,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from wp6_data.shared.auth import NotAuthenticated, verify_session_user
 from wp6_data.shared.export import make_download_router
 from wp6_data.shared.routes import api, charts, dashboard_page, health, home, status
-from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.templates import _current_user, configure_dashboard
-from wp6_data.shared.twin import SensorDataProvider, TwinConfig
+from wp6_data.shared.twin import TwinConfig
 
 # Static files live at the project root (4 dirs up from shared/app_factory.py)
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -30,21 +29,6 @@ async def _set_user_context(request: Request, call_next):
 
 def _noop_auth() -> None:
     """No-op auth dependency for public twins."""
-
-
-def _make_provider_dependency(config: TwinConfig):
-    """Build a get_provider override that dispatches by cookie for multi-source twins."""
-    sources_by_key = {ds.key: ds.provider for ds in config.data_sources}
-    default = config.default_provider
-    cookie_name = f"wp6_{config.twin_id}_source"
-
-    async def _resolve_provider(request: Request) -> SensorDataProvider:
-        if len(config.data_sources) <= 1:
-            return default
-        active_key = request.cookies.get(cookie_name)
-        return sources_by_key.get(active_key, default) if active_key else default
-
-    return _resolve_provider
 
 
 def create_app(config: TwinConfig) -> FastAPI:
@@ -76,11 +60,10 @@ def create_app(config: TwinConfig) -> FastAPI:
 
     app = FastAPI(title=config.title, lifespan=lifespan)
 
-    # Store config on app state for shared route dependencies
+    # Store config on app state for shared route dependencies. `get_provider`
+    # (shared/routes/deps.py) reads config.default_provider straight off state —
+    # each twin has a single source, so no per-request dispatch is needed.
     app.state.twin_config = config
-
-    # Cookie-based provider dispatch (noop for single-source twins)
-    app.dependency_overrides[get_provider] = _make_provider_dependency(config)
 
     # For public twins, disable auth on all shared routes
     if not config.require_auth:

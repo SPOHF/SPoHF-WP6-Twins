@@ -56,7 +56,6 @@ async def microclimate(
         return render_page(
             PAGE_TITLE, f"<p>Error fetching data: {e}</p>",
             show_back_link=True, back_url="/sensor-monitor",
-            data_source=provider.data_source_label,
         )
 
     date_filter = render_date_filter(start, end)
@@ -67,7 +66,6 @@ async def microclimate(
             f"<h1>Microclimate</h1>{date_filter}"
             "<p>No microclimate sensor data for the selected period.</p>",
             show_back_link=True, back_url="/sensor-monitor",
-            data_source=provider.data_source_label,
         )
 
     chart_html = _build_chart(df)
@@ -80,7 +78,6 @@ async def microclimate(
     return render_page(
         PAGE_TITLE, content,
         show_back_link=True, back_url="/sensor-monitor",
-        data_source=provider.data_source_label,
     )
 
 

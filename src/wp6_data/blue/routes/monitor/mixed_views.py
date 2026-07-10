@@ -174,8 +174,6 @@ def _render_correlation_page(
     wide: pd.DataFrame,
     title: str,
     description: str,
-    *,
-    provider_label: str,
 ) -> str:
     """Render a full correlation matrix page from a treatment-indexed wide DataFrame."""
     columns = [c for c in wide.columns if wide[c].notna().sum() >= _MIN_TREATMENT_OVERLAP]
@@ -202,7 +200,6 @@ def _render_correlation_page(
         content,
         show_back_link=True,
         back_url="/mixed-views",
-        data_source=provider_label,
     )
 
 
@@ -305,7 +302,6 @@ async def sensor_manual_matrix(
         "Soil &amp; Light vs. Manual Measurements (2025)",
         "Spearman ρ between 2025 soil sensor readings, PAR, and hand-measured quality "
         "metrics — aggregated to treatment-level seasonal means (n = 9 treatments).",
-        provider_label=provider.data_source_label,
     )
 
 
@@ -329,5 +325,4 @@ async def manual_fert_matrix(
         "Spearman ρ between treatment-level quality metrics and total nutrient inputs "
         "(kg/ha) from the SPoHF 2025 fertilizer strategy — non-parametric rank correlation "
         "appropriate for n = 9 treatment means.",
-        provider_label=provider.data_source_label,
     )

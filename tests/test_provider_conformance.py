@@ -111,7 +111,7 @@ def blue_case(
         AsyncMock(return_value={"uploads": {}, "measurements": {}}),
     )
 
-    provider = BlueSensorProvider(source_key="test-source")
+    provider = BlueSensorProvider()
     return provider, Expectations()
 
 
@@ -249,7 +249,3 @@ async def test_fetch_manual_metadata_has_uploads_and_measurements_dicts(case) ->
         assert isinstance(meta[key], dict)
 
 
-def test_data_source_label_is_str_or_none(case) -> None:
-    provider, _ = case
-    label = provider.data_source_label
-    assert label is None or isinstance(label, str)

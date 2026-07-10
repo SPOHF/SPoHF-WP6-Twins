@@ -124,7 +124,6 @@ async def soil_conditions(
         return render_page(
             PAGE_TITLE, f"<p>Error fetching data: {e}</p>",
             show_back_link=True, back_url="/sensor-monitor",
-            data_source=provider.data_source_label,
         )
 
     extra_params = {"fert_events": "1"} if show_fert else None
@@ -150,7 +149,6 @@ async def soil_conditions(
             f"<h1>Soil Conditions</h1>{date_filter}{fert_toggle}"
             "<p>No soil sensor data for the selected period.</p>",
             show_back_link=True, back_url="/sensor-monitor",
-            data_source=provider.data_source_label,
         )
 
     chart_html = _build_chart(df, fertigation_days=in_view_days if show_fert else [])
@@ -165,7 +163,6 @@ async def soil_conditions(
     return render_page(
         PAGE_TITLE, content,
         show_back_link=True, back_url="/sensor-monitor",
-        data_source=provider.data_source_label,
     )
 
 

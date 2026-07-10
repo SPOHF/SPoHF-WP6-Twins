@@ -44,7 +44,6 @@ async def light_chart(
         return render_page(
             PAGE_TITLE, f"<p>Error fetching data: {e}</p>",
             show_back_link=True, back_url="/sensor-monitor",
-            data_source=provider.data_source_label,
         )
 
     date_filter = render_date_filter(start, end)
@@ -55,7 +54,6 @@ async def light_chart(
             f"<h1>Light</h1>{date_filter}"
             "<p>No light sensor data for the selected period.</p>",
             show_back_link=True, back_url="/sensor-monitor",
-            data_source=provider.data_source_label,
         )
 
     chart_html = _build_chart(df)
@@ -68,7 +66,6 @@ async def light_chart(
     return render_page(
         PAGE_TITLE, content,
         show_back_link=True, back_url="/sensor-monitor",
-        data_source=provider.data_source_label,
     )
 
 

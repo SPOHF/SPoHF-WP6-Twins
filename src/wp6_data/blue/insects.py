@@ -27,7 +27,7 @@ from wp6_data.shared.manual_ingest import (
     bind,
 )
 
-# Categorical value written to blue's `readings.project` column.
+# Categorical value written to blue's `readings.source` column.
 SOURCE = "insects"
 
 # The CSV has no trap-discriminating column, so all rows belong to one

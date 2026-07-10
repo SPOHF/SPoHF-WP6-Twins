@@ -52,7 +52,7 @@ class TestValueFloat:
 
 
 class TestOptionalDefaults:
-    def test_project_defaults_to_unknown(self):
+    def test_device_name_defaults_to_unknown(self):
         r2 = SensorReading(
             sensor_id="x",
             sensor_tag="t",
@@ -60,12 +60,12 @@ class TestOptionalDefaults:
             datetime_measure=datetime(2024, 1, 1, tzinfo=UTC),
             timestamp=datetime(2024, 1, 1, tzinfo=UTC),
         )
-        assert r2.project == "unknown"
         assert r2.device_name == "unknown"
 
-    def test_explicit_project_preserved(self):
+    def test_unmodelled_keys_are_dropped(self):
+        # `project` is not a field; Pydantic must ignore it, not raise.
         r = make_reading(project="my-project")
-        assert r.project == "my-project"
+        assert not hasattr(r, "project")
 
     def test_metadata_defaults_to_none(self):
         r = make_reading()

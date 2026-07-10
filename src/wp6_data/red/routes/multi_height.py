@@ -113,7 +113,6 @@ async def multi_height_landing(
     return render_page(
         config.title,
         content,
-        data_source=provider.data_source_label,
     )
 
 
@@ -276,7 +275,6 @@ async def single_simple_page(
     return render_page(
         config.title,
         content,
-        data_source=provider.data_source_label,
     )
 
 
@@ -365,7 +363,6 @@ async def wire_trends_page(
     return render_page(
         config.title,
         content,
-        data_source=provider.data_source_label,
     )
 
 
@@ -534,7 +531,6 @@ async def crop_climate_page(
     return render_page(
         config.title,
         content,
-        data_source=provider.data_source_label,
     )
 
 
@@ -641,7 +637,6 @@ async def crop_climate_audit(
     return render_page(
         config.title,
         content,
-        data_source=provider.data_source_label,
     )
 
 

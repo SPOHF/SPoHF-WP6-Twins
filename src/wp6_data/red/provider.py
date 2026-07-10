@@ -87,10 +87,6 @@ class RedSensorProvider:
             raise RuntimeError("Database not connected")
         return deps.db
 
-    @property
-    def data_source_label(self) -> str | None:
-        return None
-
     async def fetch_sync_metrics(self) -> list[dict[str, Any]]:
         from wp6_data.red.tsdb import fetch_sync_metrics_tsdb
 

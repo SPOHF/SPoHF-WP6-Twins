@@ -17,13 +17,6 @@ from wp6_data.blue import deps
 class BlueSensorProvider:
     """SensorDataProvider backed by TimescaleDB."""
 
-    def __init__(self, *, source_key: str | None = None) -> None:
-        self._source_key = source_key
-
-    @property
-    def data_source_label(self) -> str | None:
-        return self._source_key
-
     async def fetch_data(
         self,
         sensor_tags: list[str] | None = None,

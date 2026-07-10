@@ -20,5 +20,5 @@ async def dashboard_page(
 ) -> str:
     """Dashboard page showing saved chart bookmarks."""
     return render_dashboard_page(
-        config.title, data_source=provider.data_source_label,
+        config.title,
     )

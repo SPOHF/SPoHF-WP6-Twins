@@ -64,10 +64,6 @@ def _generate_readings(
 class GreySensorProvider:
     """SensorDataProvider backed by in-memory generated data."""
 
-    @property
-    def data_source_label(self) -> str | None:
-        return None
-
     async def fetch_sync_metrics(self) -> list[dict[str, Any]]:
         return []
 

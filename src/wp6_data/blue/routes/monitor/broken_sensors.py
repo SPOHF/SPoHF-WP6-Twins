@@ -437,7 +437,6 @@ async def broken_sensors_soil(
     return render_page(
         PAGE_TITLE, content,
         show_back_link=True, back_url="/broken-sensors",
-        data_source=provider.data_source_label,
     )
 
 
@@ -488,5 +487,4 @@ async def broken_sensors_weather(
     return render_page(
         PAGE_TITLE, content,
         show_back_link=True, back_url="/broken-sensors",
-        data_source=provider.data_source_label,
     )

@@ -20,11 +20,15 @@ def sample_readings():
     ]
 
 
-def _make_conn(statusmessage: str = "INSERT 0 1"):
-    """Create a mock async connection with cursor context manager."""
+def _make_conn(inserted: bool = True):
+    """Create a mock async connection with cursor context manager.
+
+    ``inserted`` is what ``RETURNING (xmax = 0)`` yields per row — True for a
+    fresh insert, False for a conflict-update.
+    """
     conn = AsyncMock()
     cursor = AsyncMock()
-    cursor.statusmessage = statusmessage
+    cursor.fetchone = AsyncMock(return_value=(inserted,))
 
     ctx = AsyncMock()
     ctx.__aenter__ = AsyncMock(return_value=cursor)
@@ -42,19 +46,19 @@ class TestUpsertReadings:
 
     @pytest.mark.asyncio()
     async def test_returns_counts_for_inserts(self, sample_readings):
-        conn, cursor = _make_conn("INSERT 0 1")
+        conn, cursor = _make_conn(inserted=True)
         upserted, created = await upsert_readings(conn, sample_readings)
         assert (upserted, created) == (1, 1)
 
     @pytest.mark.asyncio()
     async def test_returns_counts_for_updates(self, sample_readings):
-        conn, cursor = _make_conn("UPDATE 0 1")
+        conn, cursor = _make_conn(inserted=False)
         upserted, created = await upsert_readings(conn, sample_readings)
         assert (upserted, created) == (1, 0)
 
     @pytest.mark.asyncio()
     async def test_execute_called_per_reading(self, sample_readings):
-        conn, cursor = _make_conn("INSERT 0 1")
+        conn, cursor = _make_conn(inserted=True)
         await upsert_readings(conn, sample_readings)
         cursor.execute.assert_awaited_once()
 

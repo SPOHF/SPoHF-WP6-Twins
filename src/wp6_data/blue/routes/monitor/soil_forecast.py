@@ -321,7 +321,6 @@ async def soil_forecast(
             content,
             show_back_link=True,
             back_url="/sensor-monitor",
-            data_source=provider.data_source_label,
             extra_css=FORECAST_CSS,
         )
 
@@ -343,7 +342,6 @@ async def soil_forecast(
             "<h1>Soil Forecast</h1><p>Error fetching recent data.</p>",
             show_back_link=True,
             back_url="/sensor-monitor",
-            data_source=provider.data_source_label,
             extra_css=FORECAST_CSS,
         )
 
@@ -354,7 +352,6 @@ async def soil_forecast(
             "<p>No recent sensor data available for prediction.</p>",
             show_back_link=True,
             back_url="/sensor-monitor",
-            data_source=provider.data_source_label,
             extra_css=FORECAST_CSS,
         )
 
@@ -403,7 +400,6 @@ async def soil_forecast(
         content,
         show_back_link=True,
         back_url="/sensor-monitor",
-        data_source=provider.data_source_label,
         extra_css=FORECAST_CSS,
     )
 

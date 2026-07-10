@@ -373,7 +373,6 @@ class SyncOrchestrator:
         and the column no longer exists. Automated rows take `source`'s default.
         """
         return {
-            "sensor_id": reading.sensor_id,
             "device_name": reading.device_name,
             "sensor_tag": reading.sensor_tag,
             "value": reading.value,

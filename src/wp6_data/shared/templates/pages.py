@@ -32,60 +32,31 @@ DOCS_ICON_SVG = (
 )
 
 
-def _render_source_indicator(active_source: str | None) -> str:
-    """Render a data-source indicator in the nav bar.
+def _render_source_indicator() -> str:
+    """Render the static data-source badge in the nav bar.
 
-    Single source: static badge. Multiple sources: interactive dropdown.
+    Every twin has a single source, so this is a label, not a switch.
     """
     if not config._data_sources:
         return ""
     icon = '<span style="font-size:0.9rem;opacity:0.6">\u26c1</span>'
-    if len(config._data_sources) == 1:
-        label = config._data_sources[0].label
-        return (
-            f'<span title="Data source: {label}"'
-            f' style="display:flex;align-items:center;gap:0.3rem;cursor:default">'
-            f"{icon}"
-            f'<span style="font-size:0.75rem;opacity:0.7">{label}</span>'
-            f"</span>"
-        )
-    options = "".join(
-        f'<option value="{ds.key}"{" selected" if ds.key == active_source else ""}>'
-        f"{ds.label}</option>"
-        for ds in config._data_sources
-    )
+    label = config._data_sources[0].label
     return (
-        f'<span title="Data source"'
-        f' style="display:flex;align-items:center;gap:0.3rem">'
+        f'<span title="Data source: {label}"'
+        f' style="display:flex;align-items:center;gap:0.3rem;cursor:default">'
         f"{icon}"
-        f'<select id="source-toggle" onchange="switchSource(this.value)"'
-        f' style="width:auto;margin:0;padding:0.2rem 0.5rem;font-size:0.8rem">'
-        f"{options}</select></span>"
+        f'<span style="font-size:0.75rem;opacity:0.7">{label}</span>'
+        f"</span>"
     )
 
 
-def _source_toggle_js() -> str:
-    """Generate the cookie-setting JS for the source toggle."""
-    if len(config._data_sources) < 2:
-        return ""
-    cookie_name = f"wp6_{config.require_dashboard_id()}_source"
-    return f"""
-    function switchSource(value) {{
-        document.cookie = '{cookie_name}=' + value + ';path=/;max-age=31536000';
-        location.reload();
-    }}
-"""
-
-
-def render_nav_bar(
-    *, data_source: str | None = None, show_source_indicator: bool = True,
-) -> str:
+def render_nav_bar(*, show_source_indicator: bool = True) -> str:
     """Render a sticky nav bar with dashboard name, home link, and dark mode toggle."""
     name = config._dashboard_title
     user = config._current_user.get()
     # Source-independent pages (e.g. GDD, now OpenMeteo-backed) opt out of the
-    # data-source indicator so they don't imply the toggle affects their data.
-    source_html = _render_source_indicator(data_source) if show_source_indicator else ""
+    # data-source badge so they don't imply it reflects their data.
+    source_html = _render_source_indicator() if show_source_indicator else ""
 
     groups = [
         '<div class="nav-group">'
@@ -129,7 +100,6 @@ def render_page(
     show_back_link: bool = False,
     back_url: str = "/",
     extra_css: str = "",
-    data_source: str | None = None,
     show_source_indicator: bool = True,
 ) -> str:
     """Render a complete HTML page with consistent styling.
@@ -142,6 +112,7 @@ def render_page(
         show_back_link: Show back navigation link
         back_url: URL for back link
         extra_css: Additional CSS rules
+        show_source_indicator: Show the static data-source badge (GDD hides it)
 
     Returns:
         Complete HTML document as string
@@ -193,14 +164,13 @@ def render_page(
         </style>
     </head>
     <body>
-        {render_nav_bar(data_source=data_source, show_source_indicator=show_source_indicator)}
+        {render_nav_bar(show_source_indicator=show_source_indicator)}
         <main>
             {back_html}
             {content}
             {footer_html}
         </main>
         <script>{TOGGLE_JS}</script>
-        <script>{_source_toggle_js()}</script>
         <script src="{asset_url('table_sort.js')}"></script>
         <script>{EXPLORE_TABS_JS}</script>
     </body>
@@ -212,8 +182,6 @@ def render_unified_chart_page(
     title_prefix: str,
     start: date,
     end: date,
-    *,
-    data_source: str | None = None,
 ) -> str:
     """Render the unified chart page with side panel and on-demand data loading.
 
@@ -224,7 +192,6 @@ def render_unified_chart_page(
         title_prefix: Page title prefix
         start: Start date for the date-range filter.
         end: End date for the date-range filter.
-        data_source: Optional data source identifier (blue twin).
 
     Returns:
         Complete HTML page string.
@@ -467,15 +434,10 @@ to {end.isoformat()}</summary>
         show_logo=False,
         show_footer=False,
         show_back_link=True,
-        data_source=data_source,
     )
 
 
-def render_dashboard_page(
-    title_prefix: str,
-    *,
-    data_source: str | None = None,
-) -> str:
+def render_dashboard_page(title_prefix: str) -> str:
     """Render the dashboard page showing saved chart bookmarks as live mini-charts."""
     content = f"""
     <h2>Dashboard</h2>
@@ -494,5 +456,4 @@ def render_dashboard_page(
         show_logo=False,
         show_footer=True,
         extra_css=DASHBOARD_CSS,
-        data_source=data_source,
     )

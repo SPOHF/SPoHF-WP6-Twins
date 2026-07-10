@@ -42,17 +42,23 @@ async def _rows(pool) -> list[tuple]:
 
 @pytest.mark.e2e
 async def test_same_instant_updates_in_place(tsdb_conn):
-    """Re-upserting one instant never yields a second row."""
+    """Re-upserting one instant never yields a second row, and reports created=0.
+
+    The created count comes from `RETURNING (xmax = 0)`, which only PostgreSQL can
+    evaluate — so this guards the real SQL, not just the counting logic.
+    """
     pool = await init_pool(TSDB_DSN)
     try:
         async with pool.connection() as conn:
-            await upsert_readings(conn, [_reading("10.0")])
+            upserted, created = await upsert_readings(conn, [_reading("10.0")])
             await conn.commit()
+        assert (upserted, created) == (1, 1), "first insert should count as created"
         assert await _rows(pool) == [(TS, 10.0)]
 
         async with pool.connection() as conn:
-            await upsert_readings(conn, [_reading("11.0")])
+            upserted, created = await upsert_readings(conn, [_reading("11.0")])
             await conn.commit()
+        assert (upserted, created) == (1, 0), "conflict-update must not count as created"
         assert await _rows(pool) == [(TS, 11.0)], "duplicate row instead of in-place update"
     finally:
         await close_pool()

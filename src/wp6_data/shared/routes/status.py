@@ -236,5 +236,4 @@ async def status(
     return render_page(
         f"{config.title} - Status", content,
         show_back_link=True, extra_css=COVERAGE_CSS,
-        data_source=provider.data_source_label,
     )

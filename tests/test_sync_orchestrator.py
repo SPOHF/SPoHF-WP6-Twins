@@ -109,14 +109,15 @@ class TestReadingToParams:
         orch.settings = mock_settings
         reading = make_reading()
         params = orch._reading_to_params(reading)
-        assert params["sensor_id"] == "device-001"
+        assert params["device_name"] == "Test Device"
         assert params["sensor_tag"] == "temperature"
         assert params["value"] == "21.5"
         assert "datetime_measure" in params
         # We deliberately drop the relay's ingestion timestamp — not persisted, not used.
         assert "api_timestamp" not in params
-        # `readings.project` is gone; the relay's own reading.project ('test-project')
-        # must not leak back in as a column that no longer exists.
+        # Only the four columns the INSERT binds; `sensor_id` and the retired
+        # `project` are not carried into the params.
+        assert "sensor_id" not in params
         assert "project" not in params
 
 

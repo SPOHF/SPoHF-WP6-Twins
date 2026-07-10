@@ -98,15 +98,6 @@ class SensorDataProvider(Protocol):
         """
         ...
 
-    @property
-    def data_source_label(self) -> str | None:
-        """The active data source key, used by templates for the source toggle.
-
-        Returns the DataSource.key this provider belongs to, or None
-        if the twin has only one source (no toggle rendered).
-        """
-        ...
-
 
 @dataclass
 class ThemeColors:
@@ -125,15 +116,15 @@ class ThemeColors:
 
 @dataclass
 class DataSource:
-    """A named data source with its provider.
+    """A twin's data source and its provider.
 
-    When a twin has multiple data sources, the platform renders a
-    navigation toggle and manages the cookie-based switching.
-    The provider on each DataSource handles the actual data access.
+    Every twin currently declares exactly one. The list is kept (rather than a
+    scalar) as the single place a genuine second source could reappear; the
+    `label` names the static badge in the nav bar.
     """
 
-    key: str                      # cookie value, e.g. "spohf-datalake"
-    label: str                    # display name in toggle
+    key: str                      # stable identifier, e.g. "spohf-datalake"
+    label: str                    # display name on the nav-bar badge
     provider: SensorDataProvider  # data access for this source
 
 

@@ -30,10 +30,7 @@ async def home(
     device_data = await provider.fetch_device_data()
     manual_metadata = await provider.fetch_manual_metadata()
 
-    # Exports are only generated for the default (first) data source
-    default_key = config.data_sources[0].key if config.data_sources else None
-    is_default_source = provider.data_source_label in (None, default_key)
-    export_meta = get_export_metadata(config.export_dir) if is_default_source else None
+    export_meta = get_export_metadata(config.export_dir)
     available_exports = export_meta.get("devices", {}) if export_meta else {}
 
     explore_tabs = build_explore_tabs(
@@ -49,8 +46,6 @@ async def home(
             result = await result
         hero_html_parts.append(result)
     hero_html = "\n".join(hero_html_parts)
-
-    data_source = provider.data_source_label
 
     content = f"""
         <h1>{config.title}</h1>
@@ -82,4 +77,4 @@ async def home(
         )}
     """
 
-    return render_page(config.title, content, data_source=data_source)
+    return render_page(config.title, content)

@@ -14,16 +14,17 @@ class SensorReading(BaseModel):
     """
 
     sensor_id: str  # UUID of the device
-    project: str = "unknown"  # Optional - some records don't have it
     device_name: str = "unknown"  # Optional - some records don't have it
     sensor_tag: str  # Measurement type: solarRadiation, soilMoisture, etc.
     value: str  # Coerced to string
     metadata: dict[str, Any] | None = None
     datetime_measure: datetime  # When measurement was taken
-    # We deliberately ignore the relay's ingestion-time field (sent as `timestamp`,
-    # renamed to `synced_at` ~2026-07-07). It's a datalake internal we never persist or
-    # act on — freshness is derived from datetime_measure instead — so it's dropped here
-    # rather than parsed. Pydantic ignores the extra key, so either API name is fine.
+    # Fields we deliberately don't model, because Pydantic drops unknown keys and
+    # we never persist or act on them:
+    #   - `project`: the relay's pipeline tag. Blue dropped `readings.project` when
+    #     yookr-direct was retired; automated rows now take `source`'s default.
+    #   - the ingestion-time field (`timestamp`, renamed to `synced_at` ~2026-07-07):
+    #     a datalake internal. Freshness is derived from datetime_measure instead.
 
     @field_validator("value", mode="before")
     @classmethod

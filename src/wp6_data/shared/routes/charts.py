@@ -26,7 +26,7 @@ async def unified_chart(
     """Unified interactive chart page with side panel sensor selection."""
     start, end, _, _ = resolve_date_range(start, end)
     return render_unified_chart_page(
-        config.title, start, end, data_source=provider.data_source_label,
+        config.title, start, end,
     )
 
 

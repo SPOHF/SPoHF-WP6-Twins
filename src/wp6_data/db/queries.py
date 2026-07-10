@@ -19,7 +19,7 @@ async def upsert_readings(
     Args:
         conn: psycopg async connection
         readings: List of dicts with keys:
-            sensor_id, device_name, sensor_tag, value, datetime_measure
+            device_name, sensor_tag, value, datetime_measure
 
     Returns:
         Tuple of (total upserted, newly created)
@@ -43,14 +43,19 @@ async def upsert_readings(
         " DO UPDATE SET value = EXCLUDED.value,"
         "              raw_value = EXCLUDED.raw_value,"
         "              synced_at = NOW()"
+        # `xmax = 0` iff this row was freshly inserted; on a conflict-update xmax
+        # holds the updating xid. The command tag can't tell them apart — ON
+        # CONFLICT DO UPDATE reports "INSERT 0 1" either way — so the sync's
+        # dupe-window early-stop depends on this distinction.
+        " RETURNING (xmax = 0) AS inserted"
     )
 
     async with conn.cursor() as cur:
         created = 0
         for r in readings:
             await cur.execute(query, r)
-            # statusmessage is "INSERT 0 1" for insert, "UPDATE 0 1" for update
-            if cur.statusmessage and cur.statusmessage.startswith("INSERT"):
+            row = await cur.fetchone()
+            if row and row[0]:
                 created += 1
 
     return len(readings), created

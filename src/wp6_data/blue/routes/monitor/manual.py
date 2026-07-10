@@ -127,7 +127,6 @@ async def measure_comparison(
         content,
         show_back_link=True,
         back_url="/manual-monitor",
-        data_source=provider.data_source_label,
     )
 
 
@@ -148,7 +147,6 @@ async def correlation_2025(
             "<h1>Correlation Matrix (2025)</h1><p>No 2025 long_data rows found.</p>",
             show_back_link=True,
             back_url="/manual-monitor",
-            data_source=provider.data_source_label,
         )
 
     available = [m for m in _CORR_2025_MEASURE_ORDER if m in set(df_2025["sensor"])]
@@ -170,7 +168,6 @@ async def correlation_2025(
         content,
         show_back_link=True,
         back_url="/manual-monitor",
-        data_source=provider.data_source_label,
     )
 
 
@@ -194,7 +191,6 @@ async def _load_long_data(
             f"<p>Error fetching data: {e}</p>",
             show_back_link=True,
             back_url="/manual-monitor",
-            data_source=provider.data_source_label,
         )
 
     if df.empty:
@@ -203,7 +199,6 @@ async def _load_long_data(
             "<h1>Manual Monitor</h1><p>No data found for 2024-2025.</p>",
             show_back_link=True,
             back_url="/manual-monitor",
-            data_source=provider.data_source_label,
         )
 
     df = df.copy()
@@ -218,7 +213,6 @@ async def _load_long_data(
             "<h1>Manual Monitor</h1><p>No long_data rows in 2024-2025.</p>",
             show_back_link=True,
             back_url="/manual-monitor",
-            data_source=provider.data_source_label,
         )
 
     comparable = _find_comparable_measures(df)
@@ -228,7 +222,6 @@ async def _load_long_data(
             "<h1>Manual Monitor</h1><p>No measures shared by 2024 and 2025.</p>",
             show_back_link=True,
             back_url="/manual-monitor",
-            data_source=provider.data_source_label,
         )
     return df, comparable, None
 
