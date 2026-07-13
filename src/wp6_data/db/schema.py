@@ -51,11 +51,36 @@ CREATE TABLE IF NOT EXISTS sync_metadata (
     total_failures        INTEGER DEFAULT 0
 );
 
+-- Current-failure-streak tracking (added idempotently for existing DBs). Unlike
+-- the lifetime `total_failures`, these reset to NULL/0 on the next success, so
+-- the status page can say "failing since X (N runs)" and stop showing a stale
+-- error once a run recovers.
+ALTER TABLE sync_metadata ADD COLUMN IF NOT EXISTS failing_since TIMESTAMPTZ;
+ALTER TABLE sync_metadata ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0;
+
+-- One row per sync run — the granular history sync_metadata (one row per
+-- endpoint) cannot hold. Feeds the status page's rolling SLA, "X of last Y",
+-- and per-run record sparkline. Append-only, pruned to SYNC_HISTORY_RETENTION.
+CREATE TABLE IF NOT EXISTS sync_run_history (
+    endpoint     TEXT             NOT NULL,
+    run_at       TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
+    success      BOOLEAN          NOT NULL,
+    records      INTEGER,
+    duration_sec DOUBLE PRECISION,
+    api_status   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_sync_run_history_endpoint_time
+    ON sync_run_history (endpoint, run_at DESC);
+
 -- The `daily_coverage` table was retired: coverage is now read straight from
 -- the `sensors_daily_summary` cagg, which carries the same (device, sensor,
 -- day, source) and refreshes as readings change. Drop it if present.
 DROP TABLE IF EXISTS daily_coverage;
 """
+
+# Rows older than this are pruned from sync_run_history on each write. At the
+# 15-min cadence (~96 runs/day/endpoint) that is ~2,900 rows per endpoint.
+SYNC_HISTORY_RETENTION = "30 days"
 
 # Continuous aggregate over each twin's `readings`. Both twins carry the same
 # single categorical (`source`) since blue dropped `project`, so the cagg groups

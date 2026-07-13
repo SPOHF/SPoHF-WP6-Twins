@@ -220,27 +220,24 @@ async def fetch_daily_coverage() -> list[dict[str, Any]]:
 
 
 async def fetch_sync_metrics() -> list[dict[str, Any]]:
-    """Fetch sync metadata for every endpoint (only the datalake sync remains)."""
-    pool = get_pool()
+    """Fetch enriched sync metrics for every endpoint (only the datalake remains).
 
-    query = """
-        SELECT endpoint,
-               last_run_at,
-               last_run_success,
-               last_run_duration_sec AS duration_seconds,
-               last_run_records AS records,
-               last_error AS error,
-               last_api_status AS api_status,
-               last_api_error_detail AS api_error_detail,
-               total_runs,
-               total_failures,
-               last_timestamp AS last_data_timestamp
-        FROM sync_metadata
+    The continuously-synced endpoints (``endpoint_list``) get a data-freshness
+    budget so the status page can flag an upstream stall; manual sources
+    (long_data / insects / fertigation) are event-driven and get none.
     """
+    from wp6_data.db.queries import fetch_sync_metrics_rows
 
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(query)
-        return await cur.fetchall()
+    settings = Settings()
+    rows = await fetch_sync_metrics_rows(get_pool())
+    automated = set(settings.endpoint_list)
+    manual = set(MANUAL_SOURCES)
+    budget = (settings.sync_stale_hours, settings.sync_outage_hours)
+    for r in rows:
+        ep = r["endpoint"]
+        r["source_type"] = "manual" if ep in manual else "synced"
+        r["freshness_budget"] = budget if ep in automated else None
+    return rows
 
 
 def get_export_metadata() -> dict | None:

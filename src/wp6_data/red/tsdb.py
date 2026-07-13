@@ -299,29 +299,19 @@ async def fetch_daily_coverage_from_cagg() -> list[dict[str, Any]]:
 
 
 async def fetch_sync_metrics_tsdb() -> list[dict[str, Any]]:
-    """Return red's job-run audit rows from `sync_metadata`.
+    """Return red's enriched job-run audit rows from `sync_metadata`.
 
     Shape matches `blue.deps.fetch_sync_metrics` so `shared.routes.status`
-    can render them uniformly.
+    renders them uniformly. Red has no continuously-synced datalake endpoint —
+    its rows (``sijia``, ``red-export``) are event/job-driven — so no freshness
+    budget is attached.
     """
     from wp6_data.db.pool import get_pool
+    from wp6_data.db.queries import fetch_sync_metrics_rows
+    from wp6_data.red.manual_sources import MANUAL_SOURCE_VALUES
 
-    pool = get_pool()
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(
-            """
-            SELECT endpoint,
-                   last_run_at,
-                   last_run_success,
-                   last_run_duration_sec AS duration_seconds,
-                   last_run_records AS records,
-                   last_error AS error,
-                   last_api_status AS api_status,
-                   last_api_error_detail AS api_error_detail,
-                   total_runs,
-                   total_failures,
-                   last_timestamp AS last_data_timestamp
-            FROM sync_metadata
-            """
-        )
-        return list(await cur.fetchall())
+    rows = await fetch_sync_metrics_rows(get_pool())
+    for r in rows:
+        r["source_type"] = "manual" if r["endpoint"] in MANUAL_SOURCE_VALUES else "synced"
+        r["freshness_budget"] = None
+    return rows

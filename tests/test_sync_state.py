@@ -87,11 +87,19 @@ class TestRecordRunResult:
         await state.record_run_result(
             success=True, duration_seconds=1.5, record_count=10
         )
-        call_args = cursor.execute.call_args
-        params = call_args[0][1]
+        calls = cursor.execute.call_args_list
+        # Three statements: metadata upsert, history insert, history prune.
+        assert len(calls) == 3
+        upsert_sql, params = calls[0][0][0], calls[0][0][1]
         assert params["success"] is True
         assert params["duration"] == 1.5
         assert params["records"] == 10
+        # On success the transient error fields are cleared, not preserved.
+        assert "THEN NULL ELSE %(error)s" in upsert_sql
+        assert "consecutive_failures" in upsert_sql
+        # The run is appended to the granular history and old rows pruned.
+        assert "INSERT INTO sync_run_history" in calls[1][0][0]
+        assert "DELETE FROM sync_run_history" in calls[2][0][0]
 
     @pytest.mark.asyncio()
     async def test_failure_path(self, mock_db_conn, state):
@@ -104,9 +112,9 @@ class TestRecordRunResult:
             api_status=500,
             api_error_detail="oops",
         )
-        call_args = cursor.execute.call_args
-        params = call_args[0][1]
+        params = cursor.execute.call_args_list[0][0][1]
         assert params["success"] is False
         assert params["error"] == "500 Internal Server Error"
         assert params["api_status"] == 500
         assert params["api_detail"] == "oops"
+        assert params["failure_inc"] == 1

@@ -7,6 +7,8 @@ import structlog
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
+from wp6_data.db.schema import SYNC_HISTORY_RETENTION
+
 logger = structlog.get_logger()
 
 
@@ -61,6 +63,53 @@ async def upsert_readings(
     return len(readings), created
 
 
+# Enriched per-endpoint sync metrics: current state from sync_metadata joined to
+# rolling aggregates from sync_run_history (7-day SLA, the last 12 record counts
+# for a sparkline, the last 20 outcomes for "X of last Y"). Both twins use it; the
+# status page renders it. `freshness_budget` is attached per-twin by the caller.
+SYNC_METRICS_QUERY = """
+    WITH hist AS (
+        SELECT endpoint,
+            count(*) FILTER (WHERE run_at > NOW() - INTERVAL '7 days')             AS runs_7d,
+            count(*) FILTER (WHERE run_at > NOW() - INTERVAL '7 days' AND success) AS ok_7d,
+            (array_agg(records ORDER BY run_at DESC))[1:12] AS recent_records,
+            (array_agg(success ORDER BY run_at DESC))[1:20] AS recent_success
+        FROM sync_run_history
+        GROUP BY endpoint
+    )
+    SELECT m.endpoint,
+           m.last_run_at,
+           m.last_run_success,
+           m.last_run_duration_sec AS duration_seconds,
+           m.last_run_records AS records,
+           m.last_error AS error,
+           m.last_api_status AS api_status,
+           m.last_api_error_detail AS api_error_detail,
+           m.total_runs,
+           m.total_failures,
+           m.consecutive_failures,
+           m.failing_since,
+           m.last_timestamp AS last_data_timestamp,
+           h.runs_7d,
+           h.ok_7d,
+           h.recent_records,
+           h.recent_success
+    FROM sync_metadata m
+    LEFT JOIN hist h USING (endpoint)
+    ORDER BY m.endpoint
+"""
+
+
+async def fetch_sync_metrics_rows(pool: Any) -> list[dict[str, Any]]:
+    """Enriched sync-metric rows for every endpoint (twin-agnostic).
+
+    Callers attach a per-endpoint ``freshness_budget`` before rendering.
+    """
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(SYNC_METRICS_QUERY)
+        return list(await cur.fetchall())
+
+
 async def record_sync_run(
     conn: AsyncConnection,
     endpoint: str,
@@ -71,27 +120,38 @@ async def record_sync_run(
     last_timestamp: datetime | None = None,
     error: str | None = None,
 ) -> None:
-    """Upsert one row in `sync_metadata` for a job-run audit log entry.
+    """Upsert `sync_metadata` and append a `sync_run_history` row for a job run.
 
-    Increments `total_runs` always, `total_failures` only when `success` is
-    false. On success, prior error fields are preserved (use a follow-up
-    successful run to clear stale errors only via explicit policy).
+    Increments `total_runs` always, `total_failures` only on failure. On success
+    the transient error and the failure streak are cleared (the lifetime
+    `total_failures` is kept, and the run history holds the archive), so a
+    recovered job stops showing a stale error.
 
     Endpoint is a free-form string — treat it as a generic job identifier
     (e.g. ``"sijia"``, ``"red-export"``, ``"yookr-data"``).
     """
+    params = {
+        "endpoint": endpoint,
+        "last_ts": last_timestamp,
+        "success": success,
+        "duration": duration_sec,
+        "records": records,
+        "failure_inc": 0 if success else 1,
+        "error": error,
+    }
     async with conn.cursor() as cur:
         await cur.execute(
             """
             INSERT INTO sync_metadata (
                 endpoint, last_timestamp, last_run_at, last_run_success,
                 last_run_duration_sec, last_run_records,
-                total_runs, total_failures, last_error
+                total_runs, total_failures, consecutive_failures, failing_since, last_error
             )
             VALUES (
                 %(endpoint)s, %(last_ts)s, NOW(), %(success)s,
                 %(duration)s, %(records)s,
-                1, %(failure_inc)s, %(error)s
+                1, %(failure_inc)s, %(failure_inc)s,
+                CASE WHEN %(success)s THEN NULL ELSE NOW() END, %(error)s
             )
             ON CONFLICT (endpoint) DO UPDATE SET
                 last_timestamp = COALESCE(EXCLUDED.last_timestamp, sync_metadata.last_timestamp),
@@ -101,18 +161,26 @@ async def record_sync_run(
                 last_run_records = %(records)s,
                 total_runs = COALESCE(sync_metadata.total_runs, 0) + 1,
                 total_failures = COALESCE(sync_metadata.total_failures, 0) + %(failure_inc)s,
-                last_error = CASE WHEN %(success)s THEN sync_metadata.last_error
-                                  ELSE %(error)s END
+                consecutive_failures = CASE WHEN %(success)s THEN 0
+                    ELSE COALESCE(sync_metadata.consecutive_failures, 0) + 1 END,
+                failing_since = CASE WHEN %(success)s THEN NULL
+                    ELSE COALESCE(sync_metadata.failing_since, NOW()) END,
+                last_error = CASE WHEN %(success)s THEN NULL ELSE %(error)s END
             """,
-            {
-                "endpoint": endpoint,
-                "last_ts": last_timestamp,
-                "success": success,
-                "duration": duration_sec,
-                "records": records,
-                "failure_inc": 0 if success else 1,
-                "error": error,
-            },
+            params,
+        )
+        await cur.execute(
+            """
+            INSERT INTO sync_run_history (endpoint, success, records, duration_sec)
+            VALUES (%(endpoint)s, %(success)s, %(records)s, %(duration)s)
+            """,
+            params,
+        )
+        await cur.execute(
+            "DELETE FROM sync_run_history "
+            "WHERE endpoint = %(endpoint)s "
+            f"  AND run_at < NOW() - INTERVAL '{SYNC_HISTORY_RETENTION}'",
+            {"endpoint": endpoint},
         )
 
 

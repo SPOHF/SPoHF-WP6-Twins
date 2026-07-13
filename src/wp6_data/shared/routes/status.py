@@ -1,6 +1,8 @@
 """Shared status page: sync metrics and data coverage timeline."""
 
+import html
 import inspect
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
@@ -15,9 +17,65 @@ from wp6_data.shared import (
 )
 from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.routes.deps import get_provider, get_twin_config
+from wp6_data.shared.templates.components import _format_timestamp_cell
 from wp6_data.shared.twin import SensorDataProvider, TwinConfig
 
 router = APIRouter(dependencies=[Depends(verify_session_user)])
+
+SYNC_CSS = """
+    .sync-endpoint { margin-bottom: 1rem; }
+    .sync-endpoint:last-child { margin-bottom: 0; }
+    .sync-head {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 0.5rem; margin-bottom: 0.6rem;
+    }
+    .sync-head strong { font-size: 1.05rem; }
+    .sync-name { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+    .sync-type {
+        font-size: 0.72rem; color: var(--pico-muted-color);
+        border: 1px solid var(--pico-muted-border-color); border-radius: 999px;
+        padding: 1px 8px; white-space: nowrap;
+    }
+    .sync-badge {
+        font-size: 0.8rem; font-weight: 600; padding: 2px 10px; border-radius: 999px;
+        white-space: nowrap; border: 1px solid transparent;
+    }
+    .sync-badge.success { background: #dcfce7; color: #166534; border-color: #86efac; }
+    .sync-badge.warning { background: #fef9c3; color: #854d0e; border-color: #fde047; }
+    .sync-badge.danger  { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+    .sync-badge.muted   { background: var(--pico-code-background-color);
+        color: var(--pico-muted-color); }
+    .sync-metrics {
+        display: flex; flex-wrap: wrap; gap: 0.15rem 1.1rem;
+        font-size: 0.85rem; color: var(--pico-muted-color);
+    }
+    .sync-metrics b { color: var(--pico-color); font-weight: 600; }
+    .sync-metrics .fresh.warn b { color: #a16207; }
+    .sync-metrics .fresh.bad b  { color: #b91c1c; }
+    @media (prefers-color-scheme: dark) {
+        .sync-metrics .fresh.warn b { color: #fde047; }
+        .sync-metrics .fresh.bad b  { color: #fca5a5; }
+    }
+    .sync-reason {
+        margin: 0.5rem 0 0; padding: 0.5rem 0.75rem; border-radius: 6px;
+        font-size: 0.9rem; border-left: 3px solid transparent;
+    }
+    .sync-reason.warning { background: #fef9c3; border-left-color: #eab308; color: #854d0e; }
+    .sync-reason.danger  { background: #fee2e2; border-left-color: #ef4444; color: #991b1b; }
+    .sync-reason.success { background: #dcfce7; border-left-color: #22c55e; color: #166534; }
+    .sync-spark { font-family: ui-monospace, monospace; letter-spacing: 1px; font-size: 1rem; }
+    .sync-details { margin-top: 0.6rem; }
+    .sync-details summary { cursor: pointer; font-size: 0.85rem; color: var(--pico-muted-color); }
+    .sync-details table { margin: 0.5rem 0 0; font-size: 0.85rem; }
+    .sync-details td:first-child { color: var(--pico-muted-color); white-space: nowrap; width: 1%; }
+    @media (prefers-color-scheme: dark) {
+        .sync-badge.success, .sync-reason.success { background: #14532d33; color: #86efac; }
+        .sync-badge.warning, .sync-reason.warning { background: #713f1233; color: #fde047; }
+        .sync-badge.danger,  .sync-reason.danger  { background: #7f1d1d33; color: #fca5a5; }
+    }
+"""
+
+_SPARK_TICKS = "▁▂▃▄▅▆▇█"
 
 COVERAGE_CSS = """
     .uptime-grid { display: flex; flex-direction: column; gap: 0; overflow-x: auto; }
@@ -55,73 +113,202 @@ COVERAGE_CSS = """
 """
 
 
+def _rel(dt: datetime | None) -> str:
+    """Relative-time span with an absolute-UTC tooltip ('—' when None)."""
+    return _format_timestamp_cell(dt)[0]
+
+
+def _lag_phrase(seconds: float) -> str:
+    """Human data-lag, e.g. '10 h behind' / '35 min behind'."""
+    if seconds >= 86400:
+        return f"{int(seconds // 86400)} d behind"
+    if seconds >= 3600:
+        return f"{seconds / 3600:.0f} h behind"
+    return f"{int(seconds // 60)} min behind"
+
+
+# Source type → (chip icon, chip label). Selects which health dimensions apply:
+# synced (scheduled ingest: freshness budget + run-SLA), manual (event-driven
+# uploads: recency, no SLA/outage), live (queried, not synced — added later).
+_SOURCE_TYPES = {
+    "synced": ("🔄", "Synced"),
+    "manual": ("✋", "Manual"),
+    "live": ("📡", "Live"),
+}
+
+
+def _classify(m: dict, now: datetime) -> tuple[str, str, str]:
+    """Return (state, label, tone) for a sync-metric row.
+
+    `tone` is a CSS class (success / warning / danger / muted). A **synced**
+    endpoint that succeeds but whose data lags past its freshness budget is
+    'stale'/'outage' (upstream), distinct from 'failing' (the sync errored).
+    **Manual** sources are event-driven, so they never go stale — only their
+    last upload's success matters.
+    """
+    if not m.get("last_run_at"):
+        return ("never", "Never run", "muted")
+    if not m.get("last_run_success"):
+        return ("failing", "Failing", "danger")
+
+    if m.get("source_type") == "manual":
+        return ("ok", "Up to date", "success")
+
+    budget = m.get("freshness_budget")
+    last_data = m.get("last_data_timestamp")
+    if budget and last_data:
+        lag_h = (now - last_data).total_seconds() / 3600
+        stale_h, outage_h = budget
+        if lag_h >= outage_h:
+            return ("outage", "Likely outage", "danger")
+        if lag_h >= stale_h:
+            return ("stale", "Data stale", "warning")
+    return ("healthy", "Healthy", "success")
+
+
+def _sparkline(values: list) -> str:
+    """Render most-recent-first record counts as an oldest→newest block spark."""
+    nums = [int(v) for v in (values or []) if v is not None]
+    if not nums:
+        return ""
+    hi = max(nums) or 1
+    ticks = "".join(
+        _SPARK_TICKS[min(len(_SPARK_TICKS) - 1, round(n / hi * (len(_SPARK_TICKS) - 1)))]
+        for n in reversed(nums)  # stored newest-first; show chronologically
+    )
+    return f'<span class="sync-spark" title="last {len(nums)} runs, oldest→newest">{ticks}</span>'
+
+
+def _detail_row(label: str, value: str) -> str:
+    return f"<tr><td>{label}</td><td>{value}</td></tr>"
+
+
+def _failing_reason(m: dict) -> str:
+    """The shared 'Failing since …' banner (any source type)."""
+    since = _rel(m.get("failing_since"))
+    streak = m.get("consecutive_failures") or 0
+    err = html.escape(str(m.get("error") or "unknown error"))
+    api = m.get("api_status")
+    api_txt = f" (HTTP {api})" if api else ""
+    return (
+        f'<p class="sync-reason danger">✖ <strong>Failing since {since}</strong> '
+        f'— {streak} run(s) in a row. Last error: <code>{err}</code>{api_txt}</p>'
+    )
+
+
+def _render_synced(m: dict, now: datetime, state: str, tone: str) -> tuple[str, str, list[str]]:
+    """Metrics line, reason banner, detail rows for a *synced* source."""
+    last_data = m.get("last_data_timestamp")
+    last_run = m.get("last_run_at")
+    fresh_val, fresh_cls = _rel(last_data or last_run), ""
+    if state in ("stale", "outage") and last_data:
+        fresh_val = _lag_phrase((now - last_data).total_seconds())
+        fresh_cls = " warn" if state == "stale" else " bad"
+    fresh_label = "data" if m.get("freshness_budget") else "activity"
+
+    runs_7d, ok_7d = m.get("runs_7d") or 0, m.get("ok_7d") or 0
+    sla = f"<b>{100 * ok_7d / runs_7d:.1f}%</b> ({ok_7d}/{runs_7d})" if runs_7d else "<b>—</b>"
+    records = m.get("records") or 0
+    metrics = (
+        '<div class="sync-metrics">'
+        f'<span class="fresh{fresh_cls}"><b>{fresh_val}</b> {fresh_label}</span>'
+        f'<span>SLA (7d) {sla}</span>'
+        f'<span>last run <b>{_rel(last_run)}</b> · {records:,} rec</span>'
+        '</div>'
+    )
+
+    reason = ""
+    if state == "failing":
+        reason = _failing_reason(m)
+    elif state in ("stale", "outage") and last_data:
+        lag = _lag_phrase((now - last_data).total_seconds())
+        head = "Likely upstream outage" if state == "outage" else "Data is stale"
+        reason = (
+            f'<p class="sync-reason {tone}">⚠ <strong>{head}</strong> — no new data for '
+            f'{lag}, but the sync itself is succeeding, so this points upstream '
+            f'(the relay/source), not our pipeline.</p>'
+        )
+
+    recent = m.get("recent_success") or []
+    x_of_y = f"{sum(1 for s in recent if s)} of last {len(recent)} OK" if recent else "—"
+    rows = [
+        _detail_row("Newest data point", _rel(last_data) if last_data else "—"),
+        _detail_row("Recent outcomes", x_of_y),
+        _detail_row("Records / run", _sparkline(m.get("recent_records")) or "—"),
+    ]
+    return metrics, reason, rows
+
+
+def _render_manual(m: dict) -> tuple[str, str, list[str]]:
+    """Metrics line, reason banner, detail rows for a *manual* upload source.
+
+    Event-driven: recency of the last upload, no SLA or freshness/outage.
+    """
+    last_up = m.get("last_run_at") or m.get("last_data_timestamp")
+    records = m.get("records") or 0
+    metrics = (
+        '<div class="sync-metrics">'
+        f'<span>last upload <b>{_rel(last_up)}</b></span>'
+        f'<span><b>{records:,}</b> rows</span>'
+        '</div>'
+    )
+    reason = _failing_reason(m) if not m.get("last_run_success") and m.get("last_run_at") else ""
+    rows = [
+        _detail_row("Newest data point", _rel(m.get("last_data_timestamp"))),
+        _detail_row("Uploads recorded", str(m.get("total_runs") or 0)),
+    ]
+    return metrics, reason, rows
+
+
+def _build_sync_endpoint(m: dict, now: datetime) -> str:
+    """Render one source's health card, shaped by its `source_type`."""
+    endpoint = html.escape(str(m.get("endpoint", "unknown")))
+    stype = m.get("source_type", "synced")
+    state, label, tone = _classify(m, now)
+
+    if stype == "manual":
+        metrics, reason, detail_rows = _render_manual(m)
+    else:  # "synced" (and, later, "live")
+        metrics, reason, detail_rows = _render_synced(m, now, state, tone)
+
+    detail_rows.append(
+        _detail_row(
+            "Lifetime",
+            f"{m.get('total_runs') or 0} runs · {m.get('total_failures') or 0} failures",
+        )
+    )
+    api_detail = m.get("api_error_detail")
+    if state == "failing" and api_detail:
+        preview = html.escape(api_detail[:400])
+        pre = f"<pre style='white-space:pre-wrap;margin:0'>{preview}</pre>"
+        detail_rows.append(_detail_row("Error detail", pre))
+    details = (
+        '<details class="sync-details"><summary>Details</summary>'
+        f'<table>{"".join(detail_rows)}</table></details>'
+    )
+
+    icon, type_label = _SOURCE_TYPES.get(stype, _SOURCE_TYPES["synced"])
+    return (
+        '<article class="sync-endpoint">'
+        '<div class="sync-head">'
+        f'<span class="sync-name"><strong>{endpoint}</strong>'
+        f'<span class="sync-type">{icon} {type_label}</span></span>'
+        f'<span class="sync-badge {tone}">{label}</span></div>'
+        f'{metrics}{reason}{details}</article>'
+    )
+
+
 async def _build_sync_table(provider: SensorDataProvider) -> str | None:
-    """Build the sync status HTML table, or None if no data."""
+    """Build the sync-status cards, or None if no data."""
     try:
         sync_metrics = await provider.fetch_sync_metrics()
     except Exception:
         return None
-
     if not sync_metrics:
         return None
 
-    rows = []
-    for m in sync_metrics:
-        endpoint = m.get("endpoint", "unknown")
-        success = m.get("last_run_success")
-        status_icon = "OK" if success else "FAIL"
-        last_run = m.get("last_run_at")
-        last_run_str = last_run.strftime("%Y-%m-%d %H:%M:%S UTC") if last_run else "Never"
-        duration = m.get("duration_seconds")
-        duration_str = f"{duration:.1f}s" if duration else "-"
-        records = m.get("records") or 0
-        error = m.get("error") or "-"
-        api_status = m.get("api_status")
-        api_detail = m.get("api_error_detail") or ""
-        total_runs = m.get("total_runs") or 0
-        total_failures = m.get("total_failures") or 0
-
-        error_html = f"<code>{error}</code>"
-        if api_status:
-            error_html += f"<br><small>HTTP {api_status}</small>"
-        if api_detail:
-            detail_preview = api_detail[:200].replace("<", "&lt;").replace(">", "&gt;")
-            error_html += (
-                f"<br><small><pre style='white-space:pre-wrap;'>{detail_preview}...</pre></small>"
-            )
-
-        rows.append(f"""
-            <tr>
-                <td>{endpoint}</td>
-                <td>{status_icon}</td>
-                <td>{last_run_str}</td>
-                <td>{duration_str}</td>
-                <td>{records:,}</td>
-                <td>{total_runs}</td>
-                <td>{total_failures}</td>
-                <td>{error_html}</td>
-            </tr>
-        """)
-
-    return f"""
-        <table>
-            <thead>
-                <tr>
-                    <th>Endpoint</th>
-                    <th>Status</th>
-                    <th>Last Run</th>
-                    <th>Duration</th>
-                    <th>Records</th>
-                    <th>Total Runs</th>
-                    <th>Failures</th>
-                    <th>Last Error</th>
-                </tr>
-            </thead>
-            <tbody>
-                {"".join(rows)}
-            </tbody>
-        </table>
-    """
+    now = datetime.now(UTC)
+    return "".join(_build_sync_endpoint(m, now) for m in sync_metrics)
 
 
 def _coverage_legend(mode: str) -> str:
@@ -235,5 +422,5 @@ async def status(
 
     return render_page(
         f"{config.title} - Status", content,
-        show_back_link=True, extra_css=COVERAGE_CSS,
+        show_back_link=True, extra_css=SYNC_CSS + COVERAGE_CSS,
     )

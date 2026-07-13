@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     sync_start: date = date(2024, 1, 1)
     sync_end: date | None = None
 
+    # Data-freshness budget for continuously-synced endpoints, used by /status to
+    # distinguish a healthy feed from an upstream stall (the sync succeeds but no
+    # new data arrives). Applies only to endpoints in `endpoint_list`; manual /
+    # event-driven sources have no freshness expectation.
+    sync_stale_hours: float = 2.0    # data lag over this → "stale"
+    sync_outage_hours: float = 6.0   # data lag over this → "likely outage"
+
     # Endpoints to sync (comma-separated)
     endpoints: str = "yookr-data"
 
