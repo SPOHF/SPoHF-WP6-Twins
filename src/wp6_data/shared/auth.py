@@ -1,27 +1,53 @@
 """Shared OIDC authentication utilities for both dashboards."""
 
+import asyncio
 import hashlib
 import os
 from base64 import urlsafe_b64encode
 from urllib.parse import urlencode
 
 import httpx
+import structlog
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from wp6_data.config import OIDCSettings
 
+log = structlog.get_logger()
+
 _endpoints: dict[str, str] = {}
 _dev_auth: bool = False
+_issuer: str = ""
+_discovery_lock = asyncio.Lock()
 
 
 class NotAuthenticated(Exception):
     pass
 
 
+async def _fetch_discovery(issuer: str) -> dict[str, str]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{issuer}/.well-known/openid-configuration")
+        resp.raise_for_status()
+        doc = resp.json()
+    return {
+        "authorization_endpoint": doc["authorization_endpoint"],
+        "token_endpoint": doc["token_endpoint"],
+        "userinfo_endpoint": doc["userinfo_endpoint"],
+        "end_session_endpoint": doc.get("end_session_endpoint", ""),
+    }
+
+
 async def startup_oidc(settings: OIDCSettings) -> None:
-    """Fetch OIDC discovery document and cache endpoints."""
-    global _endpoints, _dev_auth
+    """Validate OIDC config and warm the discovery cache.
+
+    Fails fast on our own misconfiguration, but *not* on the identity provider
+    being unhealthy. The provider is somebody else's service; a bad certificate
+    or a restart there must not stop this dashboard from serving its public
+    pages and /health. Discovery is retried lazily on the first auth request
+    (see `ensure_endpoints`), so a recovered provider needs no pod restart.
+    """
+    global _endpoints, _dev_auth, _issuer
     if settings.dev_auth:
         # Sanity check
         if settings.redirect_base:
@@ -35,16 +61,35 @@ async def startup_oidc(settings: OIDCSettings) -> None:
         raise RuntimeError("WP6_OIDC_CLIENT_SECRET is not set")
     if not settings.session_secret:
         raise RuntimeError("WP6_OIDC_SESSION_SECRET is not set")
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{settings.issuer}/.well-known/openid-configuration")
-        resp.raise_for_status()
-        doc = resp.json()
-    _endpoints = {
-        "authorization_endpoint": doc["authorization_endpoint"],
-        "token_endpoint": doc["token_endpoint"],
-        "userinfo_endpoint": doc["userinfo_endpoint"],
-        "end_session_endpoint": doc.get("end_session_endpoint", ""),
-    }
+    _issuer = settings.issuer
+    try:
+        _endpoints = await _fetch_discovery(settings.issuer)
+    except Exception:
+        _endpoints = {}
+        log.warning("oidc_discovery_failed_at_startup", issuer=settings.issuer, exc_info=True)
+
+
+async def ensure_endpoints() -> dict[str, str]:
+    """Return the cached OIDC endpoints, re-fetching if startup discovery failed.
+
+    Raises 503 rather than propagating the transport error, so a provider outage
+    degrades authentication instead of the whole application.
+    """
+    global _endpoints
+    if _endpoints:
+        return _endpoints
+    async with _discovery_lock:
+        if _endpoints:
+            return _endpoints
+        try:
+            _endpoints = await _fetch_discovery(_issuer)
+        except Exception as exc:
+            log.warning("oidc_discovery_failed", issuer=_issuer, exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail="Identity provider unavailable — try again shortly.",
+            ) from exc
+    return _endpoints
 
 
 def _pkce_pair() -> tuple[str, str]:
@@ -64,6 +109,7 @@ def make_auth_router(settings: OIDCSettings) -> APIRouter:
             request.session["groups"] = ["/wp6-admins"]
             next_url = request.session.pop("next", "/")
             return RedirectResponse(url=next_url, status_code=302)
+        endpoints = await ensure_endpoints()
         verifier, challenge = _pkce_pair()
         state = urlsafe_b64encode(os.urandom(16)).rstrip(b"=").decode()
         request.session["code_verifier"] = verifier
@@ -77,7 +123,7 @@ def make_auth_router(settings: OIDCSettings) -> APIRouter:
             "code_challenge": challenge,
             "code_challenge_method": "S256",
         }
-        return RedirectResponse(url=f"{_endpoints['authorization_endpoint']}?{urlencode(params)}")
+        return RedirectResponse(url=f"{endpoints['authorization_endpoint']}?{urlencode(params)}")
 
     @router.get("/callback")
     async def callback(
@@ -97,9 +143,10 @@ def make_auth_router(settings: OIDCSettings) -> APIRouter:
         if not code_verifier:
             return RedirectResponse(url="/auth/login", status_code=302)
 
+        endpoints = await ensure_endpoints()
         async with httpx.AsyncClient() as client:
             token_resp = await client.post(
-                _endpoints["token_endpoint"],
+                endpoints["token_endpoint"],
                 data={
                     "grant_type": "authorization_code",
                     "code": code,
@@ -113,7 +160,7 @@ def make_auth_router(settings: OIDCSettings) -> APIRouter:
                 raise HTTPException(status_code=400, detail="Token exchange failed")
 
             userinfo_resp = await client.get(
-                _endpoints["userinfo_endpoint"],
+                endpoints["userinfo_endpoint"],
                 headers={"Authorization": f"Bearer {token_resp.json()['access_token']}"},
             )
             userinfo_resp.raise_for_status()
@@ -131,7 +178,12 @@ def make_auth_router(settings: OIDCSettings) -> APIRouter:
         id_token = request.session.pop("id_token", "")
         request.session.pop("user", None)
         request.session.pop("groups", None)
-        end_session = _endpoints.get("end_session_endpoint", "")
+        # The local session is already gone, so a provider outage must not turn
+        # logout into a 503 — degrade to a local-only logout instead.
+        try:
+            end_session = (await ensure_endpoints()).get("end_session_endpoint", "")
+        except HTTPException:
+            end_session = ""
         if end_session:
             params = urlencode({
                 "post_logout_redirect_uri": f"{settings.redirect_base}/",

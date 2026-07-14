@@ -1,5 +1,6 @@
 """WP6 Red Dashboard - MySQL-backed sensor visualization with DLI analysis."""
 
+import asyncio
 from pathlib import Path
 
 import structlog
@@ -21,6 +22,31 @@ from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 log = structlog.get_logger()
 
 
+# Holds the background boot-training task so it isn't garbage-collected before
+# it runs to completion.
+_bootstrap_task: asyncio.Task | None = None
+
+
+async def _train_dli_model_if_missing() -> None:
+    from wp6_data.red.dli import get_model
+
+    model = get_model()
+    if model.is_trained():
+        log.info("dli_model_loaded_from_disk")
+        return
+    try:
+        stats = await train_model_from_db(deps.db, deps.get_weather_client())
+        log.info(
+            "dli_model_trained",
+            r2=stats.r2_score,
+            r2_stage1=stats.stage1.r2_score,
+            r2_stage2=stats.stage2.r2_score,
+            n_samples=stats.n_samples,
+        )
+    except Exception:
+        log.warning("dli_model_training_failed", exc_info=True)
+
+
 async def _startup() -> None:
     """Connect to MySQL, bootstrap red TSDB schema, and train DLI model if needed."""
     deps.db = MySQLConnection(
@@ -39,23 +65,11 @@ async def _startup() -> None:
     pool = await init_pool(deps.settings.tsdb_url)
     await ensure_schema_red(pool)
 
-    from wp6_data.red.dli import get_model
-
-    model = get_model()
-    if model.is_trained():
-        log.info("dli_model_loaded_from_disk")
-    else:
-        try:
-            stats = await train_model_from_db(deps.db, deps.get_weather_client())
-            log.info(
-                "dli_model_trained",
-                r2=stats.r2_score,
-                r2_stage1=stats.stage1.r2_score,
-                r2_stage2=stats.stage2.r2_score,
-                n_samples=stats.n_samples,
-            )
-        except Exception:
-            log.warning("dli_model_training_failed", exc_info=True)
+    # The DLI model lives on ephemeral storage, so a restart wipes it and a cold
+    # boot retrains from scratch. Backgrounded so a slow first fit can't delay
+    # readiness — mirrors blue's soil-forecast bootstrap.
+    global _bootstrap_task
+    _bootstrap_task = asyncio.create_task(_train_dli_model_if_missing())
 
 
 async def _shutdown() -> None:
