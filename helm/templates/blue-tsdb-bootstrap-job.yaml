@@ -1,0 +1,20 @@
+{{/*
+Blue's database on the shared TimescaleDB.
+
+Historically blue had no bootstrap Job at all: the StatefulSet sets no
+POSTGRES_DB, so Postgres defaulted blue's database to the superuser's own —
+`postgres`. Everywhere else (local dev, .env.example, the platform bootstrap
+script) already says `wp6_blue`; production was the odd one out.
+
+No `role` is passed yet, so `wp6_blue` stays owned by the postgres superuser,
+exactly as the `postgres` database was. Scoping blue to its own role is
+issues/045-blue-connects-as-postgres-superuser.md — at which point this becomes
+a one-line change.
+*/}}
+{{- if .Values.dashboard.enabled }}
+{{- include "wp6-data.tsdbBootstrapJob" (dict
+      "root" $
+      "twin" "blue"
+      "database" "wp6_blue"
+    ) }}
+{{- end }}

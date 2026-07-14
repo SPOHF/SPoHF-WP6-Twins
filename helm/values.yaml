@@ -7,6 +7,16 @@ image:
   pullPolicy: Always
   tag: "latest"
 
+# Per-twin database bootstrap (Helm hook Jobs, see templates/_tsdb-bootstrap.tpl).
+# The TimescaleDB *instance* is owned by the shared chart (helm/shared); each twin
+# owns the *database* it writes to — red: wp6_red, blue: wp6_blue. One instance, so
+# host/port/image are configured once here rather than per twin.
+tsdbBootstrap:
+  defaultImage: "timescale/timescaledb:2.26.4-pg17"
+  image: ""  # override defaultImage
+  tsdbHost: "wp6-data-timescaledb"
+  tsdbPort: "5432"
+
 # Dashboard
 dashboard:
   enabled: true
@@ -109,11 +119,6 @@ red:
   # PVC for manually-uploaded measurement files (Sijia, etc.)
   manualUploads:
     size: "5Gi"
-  # Bootstrap Job (Helm hook) — creates wp6_red role + database in shared TSDB
-  tsdbBootstrap:
-    image: ""  # Defaults to timescale/timescaledb:2.26.4-pg17
-    tsdbHost: "wp6-data-timescaledb"
-    tsdbPort: "5432"
   # CSV export job (runs nightly, generates downloadable CSVs)
   export:
     enabled: true
