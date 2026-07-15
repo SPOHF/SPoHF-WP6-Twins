@@ -8,6 +8,13 @@ metadata:
     app.kubernetes.io/name: {{ .Chart.Name }}-blue-dashboard
 spec:
   replicas: {{ .Values.dashboard.replicas }}
+  # Recreate, not RollingUpdate: this pod mounts ReadWriteOnce PVCs
+  # (manual-uploads, exports). On a block-device StorageClass the volume attaches
+  # to a single node, so RollingUpdate deadlocks — the new pod can't attach the
+  # volume the old pod still holds (Multi-Attach error). Terminate the old pod
+  # first, then start the new one. Fine for a single-replica dashboard.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ .Chart.Name }}-blue-dashboard
