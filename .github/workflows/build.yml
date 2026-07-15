@@ -11,18 +11,12 @@ on:
     branches: [main]
 
 env:
-  # Two registries for the duration of the cluster migration (issue 034).
-  #
-  # V1 lives *on* the old cluster and dies with it. Keeping it fed means old stays
-  # a patchable fallback rather than a frozen one — red/blue feature work continues
-  # while the migration runs, and a fallback you cannot ship a hotfix to is a weak
-  # fallback. Drop V1 when the old cluster is destroyed (issue 043).
-  #
-  # Image tags are v1.0.<n>-<sha> — registry-agnostic and content-addressed by
-  # commit — so the same tag in both registries lets two clusters watching two
-  # different Harbors independently converge on the same build.
-  REGISTRY_V1: harbor.prod.fontysvenlo.dev
-  REGISTRY_V2: harbor.inf.fontysvenlo.dev
+  # Single registry: the v2 cluster's Harbor. Production moved to v2 on 2026-07-15,
+  # so the legacy harbor.prod push has been dropped — old is now a FROZEN fallback
+  # and must not pick up new images (its ImageUpdater watches harbor.prod). The
+  # dual-push to harbor.prod during the parallel run is in git history if a rollback
+  # ever needs to feed old again. harbor.prod itself dies with old (issue 043).
+  REGISTRY: harbor.inf.fontysvenlo.dev
   IMAGE_NAME: spohf/wp6-data
 
 jobs:
@@ -107,46 +101,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # The v2 credentials are created as part of the migration and may not exist
-      # yet. Rather than hard-wire a second login and break every build on main
-      # until someone remembers to add the secrets, resolve the target registries
-      # from what is actually configured — and say loudly when v2 is being skipped.
-      # (`secrets` is not available in a step `if:`, hence the env indirection.)
-      - name: Resolve target registries
-        id: registries
-        env:
-          V2_PASSWORD: ${{ secrets.HARBOR_SPOHF_PASSWORD }}
-        run: |
-          IMAGES="${REGISTRY_V1}/${IMAGE_NAME}${{ matrix.image_suffix }}"
-          if [ -n "$V2_PASSWORD" ]; then
-            IMAGES="${IMAGES}"$'\n'"${REGISTRY_V2}/${IMAGE_NAME}${{ matrix.image_suffix }}"
-            echo "push_v2=true" >> "$GITHUB_OUTPUT"
-            echo "Pushing to both registries: ${REGISTRY_V1}, ${REGISTRY_V2}"
-          else
-            echo "push_v2=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::HARBOR_SPOHF_PASSWORD is not set — skipping ${REGISTRY_V2}. The v2 cluster will NOT receive this build. See issues/034-dual-push-images-to-both-harbors.md"
-          fi
-          {
-            echo "images<<GHA_EOF"
-            echo "$IMAGES"
-            echo "GHA_EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Log in to Harbor (v1, legacy — dies with the old cluster)
+      - name: Log in to Harbor
+        # HARBOR_SPOHF_* are scoped to the spohf project on the v2 Harbor.
         uses: docker/login-action@v4
         with:
-          registry: ${{ env.REGISTRY_V1 }}
-          username: ${{ secrets.HARBOR_USERNAME }}
-          password: ${{ secrets.HARBOR_PASSWORD }}
-
-      - name: Log in to Harbor (v2)
-        # HARBOR_SPOHF_* are scoped to the spohf project on the v2 Harbor — not the
-        # HARBOR_USERNAME/PASSWORD pair above, which targets the legacy harbor.prod.
-        # Mirrors the HARBOR_<TENANT>_* convention used by the platform repo.
-        if: steps.registries.outputs.push_v2 == 'true'
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY_V2 }}
+          registry: ${{ env.REGISTRY }}
           username: ${{ secrets.HARBOR_SPOHF_USERNAME }}
           password: ${{ secrets.HARBOR_SPOHF_PASSWORD }}
 
@@ -154,7 +113,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ steps.registries.outputs.images }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}
           tags: |
             type=raw,value=latest
             type=raw,value=${{ steps.version.outputs.version }}
