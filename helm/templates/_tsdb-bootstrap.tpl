@@ -34,7 +34,13 @@ metadata:
     # waits for TimescaleDB via pg_isready, so ordering against the shared app is safe.
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "1"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    # before-hook-creation ONLY — deliberately NOT hook-succeeded. This job
+    # no-ops in ~1s once the DB exists, and hook-succeeded then deletes it so
+    # fast that ArgoCD can lose the completion event and hang the sync forever
+    # on "waiting for completion of hook …" (observed on red during the v2
+    # migration). Leaving the succeeded job in place until the next sync's
+    # before-hook-creation cleans it avoids the race.
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   backoffLimit: 4
   ttlSecondsAfterFinished: 86400
