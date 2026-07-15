@@ -26,7 +26,13 @@ metadata:
   labels:
     app.kubernetes.io/name: {{ $root.Chart.Name }}-{{ .twin }}-tsdb-bootstrap
   annotations:
-    "helm.sh/hook": post-install,post-upgrade
+    # PRE-sync, not post: this Job creates the database the dashboard connects to.
+    # As a post-install/post-upgrade (ArgoCD PostSync) hook it would only run after
+    # the sync's resources are Healthy — but the dashboard Deployment can never go
+    # Healthy until this database exists, so PostSync deadlocked and the Job never
+    # ran (observed on the fresh v2 bootstrap). PreSync runs it first; it already
+    # waits for TimescaleDB via pg_isready, so ordering against the shared app is safe.
+    "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "1"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
