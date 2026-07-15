@@ -25,6 +25,11 @@ spec:
       labels:
         app.kubernetes.io/name: {{ .Chart.Name }}-red-dashboard
     spec:
+      # appuser (uid/gid 1000) must be able to write the manual-uploads PVC; on a
+      # block-device StorageClass the mount root is root:root, so fsGroup chowns
+      # it to gid 1000. See blue-dashboard.yaml for the full rationale.
+      securityContext:
+        fsGroup: 1000
       containers:
         - name: dashboard
           image: "{{ $redImage }}:{{ $redTag }}"

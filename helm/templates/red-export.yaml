@@ -38,6 +38,10 @@ spec:
           labels:
             app.kubernetes.io/name: {{ .Chart.Name }}-red-export
         spec:
+          # appuser (gid 1000) writes the exports PVC; fsGroup chowns the
+          # block-device volume so it can. See blue-dashboard.yaml for why.
+          securityContext:
+            fsGroup: 1000
           restartPolicy: OnFailure
           containers:
             - name: export

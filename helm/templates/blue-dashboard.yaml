@@ -23,6 +23,13 @@ spec:
       labels:
         app.kubernetes.io/name: {{ .Chart.Name }}-blue-dashboard
     spec:
+      # The container runs as non-root appuser (uid/gid 1000, see Dockerfile).
+      # On a block-device PVC (cloudstack-csi, ext4) the mount root comes up
+      # root:root 0755, so appuser can't write uploads — the manual-upload
+      # feature fails with EACCES. fsGroup makes the kubelet chown the volume to
+      # gid 1000 so appuser can write. local-path didn't need this.
+      securityContext:
+        fsGroup: 1000
       containers:
         - name: dashboard
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
