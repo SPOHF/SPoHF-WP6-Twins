@@ -9,6 +9,13 @@ image:
 # TimescaleDB (shared by blue and red twins)
 timescaledb:
   enabled: true
+  # PGDATA location. Empty → image default (the mount root), which is correct for
+  # local-path volumes and for any EXISTING instance whose data already sits at the
+  # root (e.g. the legacy cluster — do not change it there). Set to a subdirectory
+  # of the data mount for a block-device PVC (ext4/cloudstack-csi), whose lost+found
+  # otherwise makes initdb refuse the "not empty" mount root. Opt in per-cluster via
+  # the wp6-data-shared Application's helm parameters, not here.
+  pgData: ""
 
 # SPoHF datalake sync CronJob (the single automated source)
 sync:

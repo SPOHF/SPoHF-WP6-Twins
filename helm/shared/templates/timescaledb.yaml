@@ -47,6 +47,17 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret | default "wp6-data-secrets" }}
                   key: tsdb-password
+            {{- with .Values.timescaledb.pgData }}
+            # Initialise Postgres in a SUBDIRECTORY of the mount rather than the
+            # mount root. A real block-device PVC (ext4, e.g. cloudstack-csi) has
+            # a lost+found at its root, which makes initdb refuse a "not empty"
+            # data directory; local-path volumes are bare host dirs and don't hit
+            # this. MUST stay empty for any existing instance whose data already
+            # lives at the mount root — changing PGDATA there points Postgres at
+            # an empty subdir and it silently inits a fresh, blank database.
+            - name: PGDATA
+              value: {{ . | quote }}
+            {{- end }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
