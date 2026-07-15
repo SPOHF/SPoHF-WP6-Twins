@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 import structlog
+from opentelemetry import trace
 from tenacity import RetryError
 
 from wp6_data.api import SensorReading, SpoHFClient
@@ -31,6 +32,9 @@ def ensure_utc(dt: datetime) -> datetime:
     return dt
 
 logger = structlog.get_logger()
+
+# No-op when tracing is disabled (no provider configured), so this is always safe.
+tracer = trace.get_tracer(__name__)
 
 BATCH_SIZE = 1000  # Records per transaction
 INCREMENTAL_LOOKBACK_DAYS = 7
@@ -119,37 +123,51 @@ class SyncOrchestrator:
             "errors": [],
         }
 
-        pool = await init_pool(self._dsn)
-        try:
-            await ensure_schema_blue(pool)
+        # Root span for the whole run: without it, each fetch/upsert below would be
+        # an orphaned trace. With it, one CronJob run reads as a single waterfall of
+        # external-API and TimescaleDB spans.
+        with tracer.start_as_current_span("sync.run") as run_span:
+            run_span.set_attribute("sync.mode", self.settings.sync_mode)
+            run_span.set_attribute("sync.endpoint_count", len(self.settings.endpoint_list))
 
-            # Sync each configured endpoint
-            for endpoint in self.settings.endpoint_list:
-                try:
-                    count = await self._sync_endpoint(endpoint)
-                    stats["endpoints"][endpoint] = count
-                    stats["total_records"] += count
-                except Exception as e:
-                    logger.exception("endpoint_sync_failed", endpoint=endpoint)
-                    stats["errors"].append(f"{endpoint}: {e}")
+            pool = await init_pool(self._dsn)
+            try:
+                await ensure_schema_blue(pool)
 
-            # Refresh the cagg so dashboards see freshly-written data
-            # immediately. The background policy runs on its own 15-min
-            # clock (not aligned with sync), so we can't rely on it for
-            # post-sync freshness. Incremental: scope to last 2 days
-            # (bounded, cheap). Full: whole-history refresh once.
-            if self.settings.sync_mode.lower() == "full":
-                await refresh_sensor_summary(pool)
-            else:
-                await refresh_sensor_summary_recent(pool)
+                # Sync each configured endpoint under its own child span, so the
+                # httpx (SPoHF API) and psycopg (TimescaleDB) spans it triggers
+                # nest beneath it automatically.
+                for endpoint in self.settings.endpoint_list:
+                    with tracer.start_as_current_span("sync.endpoint") as ep_span:
+                        ep_span.set_attribute("sync.endpoint", endpoint)
+                        try:
+                            count = await self._sync_endpoint(endpoint)
+                            ep_span.set_attribute("sync.records", count)
+                            stats["endpoints"][endpoint] = count
+                            stats["total_records"] += count
+                        except Exception as e:
+                            ep_span.record_exception(e)
+                            logger.exception("endpoint_sync_failed", endpoint=endpoint)
+                            stats["errors"].append(f"{endpoint}: {e}")
 
-            stats["duration_seconds"] = (
-                datetime.now(UTC) - start_time
-            ).total_seconds()
-            logger.info("sync_completed", **stats)
+                # Refresh the cagg so dashboards see freshly-written data
+                # immediately. The background policy runs on its own 15-min
+                # clock (not aligned with sync), so we can't rely on it for
+                # post-sync freshness. Incremental: scope to last 2 days
+                # (bounded, cheap). Full: whole-history refresh once.
+                if self.settings.sync_mode.lower() == "full":
+                    await refresh_sensor_summary(pool)
+                else:
+                    await refresh_sensor_summary_recent(pool)
 
-        finally:
-            await close_pool()
+                stats["duration_seconds"] = (
+                    datetime.now(UTC) - start_time
+                ).total_seconds()
+                run_span.set_attribute("sync.total_records", stats["total_records"])
+                logger.info("sync_completed", **stats)
+
+            finally:
+                await close_pool()
 
         return stats
 

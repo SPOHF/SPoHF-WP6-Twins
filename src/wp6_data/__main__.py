@@ -15,6 +15,7 @@ import structlog
 
 from wp6_data.config import Settings
 from wp6_data.shared.compat import run_async
+from wp6_data.shared.telemetry import setup_telemetry
 from wp6_data.sync import SyncOrchestrator
 
 # `--spohf` used to select between two syncs. Only one remains, so it is a no-op
@@ -76,6 +77,7 @@ def main() -> int:
     """Main entry point for sync job."""
     settings = Settings()
     configure_logging(settings)
+    setup_telemetry(default_service_name="wp6-sync")
     logger = structlog.get_logger()
 
     unknown = set(sys.argv[1:]) - _ACCEPTED_ARGS
