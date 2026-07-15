@@ -45,6 +45,37 @@ def test_setup_is_noop_without_endpoint(monkeypatch):
     assert telemetry.instrument_fastapi(MagicMock()) is None
 
 
+# --- FastAPI noise reduction ---
+
+
+def test_fastapi_excludes_health_and_asgi_noise(spans, monkeypatch):
+    """Probe URLs produce no trace; kept routes have no http send/receive child spans."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(telemetry, "_initialised", True)
+
+    app = FastAPI()
+
+    @app.get("/health")
+    def health():
+        return {"ok": True}
+
+    @app.get("/ping")
+    def ping():
+        return {"pong": True}
+
+    telemetry.instrument_fastapi(app)
+    client = TestClient(app)
+    assert client.get("/health").status_code == 200
+    assert client.get("/ping").status_code == 200
+
+    names = [s.name for s in spans.get_finished_spans()]
+    assert not any("health" in n for n in names)  # excluded entirely
+    assert len([n for n in names if "ping" in n.lower()]) == 1  # one span, no children
+    assert not any("send" in n or "receive" in n for n in names)
+
+
 # --- sync span tree ---
 
 

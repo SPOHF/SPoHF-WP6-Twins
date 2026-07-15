@@ -91,10 +91,27 @@ def _instrument_libraries() -> None:
     PsycopgInstrumentor().instrument()
 
 
+# Health/readiness probes and the Prometheus scrape are high-frequency, zero-signal
+# noise in traces. Excluded from server spans by default; override per-deployment with
+# the standard OTEL_PYTHON_FASTAPI_EXCLUDED_URLS env var (comma-separated regexes).
+_DEFAULT_EXCLUDED_URLS = "health,metrics"
+
+
 def instrument_fastapi(app) -> None:
-    """Add request/response spans to a FastAPI app. No-op when tracing is disabled."""
+    """Add request spans to a FastAPI app. No-op when tracing is disabled.
+
+    Skips probe/scrape URLs entirely, and drops the per-ASGI-event ``http send`` /
+    ``http receive`` child spans — the parent server span already covers the request,
+    so those are pure noise (two ``send`` spans per response: start + body).
+    """
     if not _initialised:
         return
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-    FastAPIInstrumentor.instrument_app(app)
+    FastAPIInstrumentor.instrument_app(
+        app,
+        excluded_urls=os.environ.get(
+            "OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", _DEFAULT_EXCLUDED_URLS
+        ),
+        exclude_spans=["send", "receive"],
+    )
