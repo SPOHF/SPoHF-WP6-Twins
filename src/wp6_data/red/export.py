@@ -212,8 +212,14 @@ async def _refresh_red_tsdb(tsdb_url: str, records: int, started: float) -> None
 
 def main() -> None:
     """Entry point for the export CLI."""
+    from opentelemetry import trace
+
+    from wp6_data.shared.observability import setup_observability
+
     load_dotenv()
-    asyncio.run(run_export())
+    setup_observability("wp6-red-export")
+    with trace.get_tracer(__name__).start_as_current_span("red.export"):
+        asyncio.run(run_export())
 
 
 if __name__ == "__main__":

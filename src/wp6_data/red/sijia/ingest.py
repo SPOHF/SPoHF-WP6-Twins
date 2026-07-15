@@ -40,15 +40,21 @@ async def _run(path: Path) -> ApplyResult:
 
 def main() -> None:
     """Console-script entry point: `wp6-red-ingest-sijia <path-to-xlsx>`."""
+    from opentelemetry import trace
+
+    from wp6_data.shared.observability import setup_observability
+
     load_dotenv()
+    setup_observability("wp6-red-ingest-sijia")
     if len(sys.argv) != 2:
         print("usage: wp6-red-ingest-sijia <path-to-xlsx>", file=sys.stderr)
         raise SystemExit(2)
     path = Path(sys.argv[1])
-    result = asyncio.run(_run(path))
-    log.info(
-        "sijia_ingest_complete",
-        upload_id=result.upload_id,
-        row_count=result.row_count,
-        path=str(path),
-    )
+    with trace.get_tracer(__name__).start_as_current_span("sijia.ingest"):
+        result = asyncio.run(_run(path))
+        log.info(
+            "sijia_ingest_complete",
+            upload_id=result.upload_id,
+            row_count=result.row_count,
+            path=str(path),
+        )

@@ -15,6 +15,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from wp6_data.shared import telemetry
+from wp6_data.shared.observability import _add_trace_context
 from wp6_data.sync.orchestrator import SyncOrchestrator
 
 # One global provider for the process (set_tracer_provider honours only the first
@@ -76,6 +77,24 @@ async def test_sync_emits_connected_span_tree(spans, mock_settings):
     assert run_span.attributes["sync.total_records"] == 5
     assert ep_span.attributes["sync.endpoint"] == mock_settings.endpoint_list[0]
     assert ep_span.attributes["sync.records"] == 5
+
+
+# --- log <-> trace correlation ---
+
+
+def test_trace_context_added_within_span():
+    """Inside an active span, log events gain 32-hex trace_id + 16-hex span_id."""
+    with trace.get_tracer("t").start_as_current_span("x"):
+        out = _add_trace_context(None, "info", {"event": "hi"})
+    assert len(out["trace_id"]) == 32
+    assert len(out["span_id"]) == 16
+
+
+def test_trace_context_absent_without_span():
+    """No active span → no trace fields (so plain CLI/test logs stay unchanged)."""
+    out = _add_trace_context(None, "info", {"event": "hi"})
+    assert "trace_id" not in out
+    assert "span_id" not in out
 
 
 @pytest.mark.asyncio()

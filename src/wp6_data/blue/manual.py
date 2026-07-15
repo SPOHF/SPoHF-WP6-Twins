@@ -106,19 +106,26 @@ async def _run(source: ManualSource, path: Path) -> ApplyResult:
 
 
 def _cli(source: ManualSource, usage: str) -> None:
+    from opentelemetry import trace
+
+    from wp6_data.shared.observability import setup_observability
+
     load_dotenv()
+    setup_observability(f"wp6-blue-ingest-{source.slug}")
     if len(sys.argv) != 2:
         print(usage, file=sys.stderr)
         raise SystemExit(2)
     path = Path(sys.argv[1])
-    result = asyncio.run(_run(source, path))
-    log.info(
-        "manual_ingest_complete",
-        source=source.slug,
-        upload_id=result.upload_id,
-        row_count=result.row_count,
-        path=str(path),
-    )
+    with trace.get_tracer(__name__).start_as_current_span("manual.ingest") as span:
+        span.set_attribute("source", source.slug)
+        result = asyncio.run(_run(source, path))
+        log.info(
+            "manual_ingest_complete",
+            source=source.slug,
+            upload_id=result.upload_id,
+            row_count=result.row_count,
+            path=str(path),
+        )
 
 
 def ingest_insects() -> None:

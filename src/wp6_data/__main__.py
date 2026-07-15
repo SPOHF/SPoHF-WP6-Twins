@@ -7,7 +7,6 @@ Usage:
     uv run python -m wp6_data
 """
 
-import logging
 import sys
 from typing import Any
 
@@ -15,39 +14,13 @@ import structlog
 
 from wp6_data.config import Settings
 from wp6_data.shared.compat import run_async
-from wp6_data.shared.telemetry import setup_telemetry
+from wp6_data.shared.observability import setup_observability
 from wp6_data.sync import SyncOrchestrator
 
 # `--spohf` used to select between two syncs. Only one remains, so it is a no-op
 # kept so existing CronJob/Job specs keep working. Anything else is a mistake we
 # would rather surface than silently reinterpret as "sync the datalake".
 _ACCEPTED_ARGS = frozenset({"--spohf"})
-
-
-def configure_logging(settings: Settings) -> None:
-    """Configure structlog for JSON or console output."""
-    processors: list[Any] = [
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-    ]
-
-    if settings.log_format == "json":
-        processors.append(structlog.processors.JSONRenderer())
-    else:
-        processors.append(structlog.dev.ConsoleRenderer(colors=True))
-
-    log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
-
-    structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.make_filtering_bound_logger(log_level),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
 
 
 def _run_spohf_sync(settings: Settings, logger: Any) -> int:
@@ -76,8 +49,7 @@ def _run_spohf_sync(settings: Settings, logger: Any) -> int:
 def main() -> int:
     """Main entry point for sync job."""
     settings = Settings()
-    configure_logging(settings)
-    setup_telemetry(default_service_name="wp6-sync")
+    setup_observability("wp6-sync", settings)
     logger = structlog.get_logger()
 
     unknown = set(sys.argv[1:]) - _ACCEPTED_ARGS

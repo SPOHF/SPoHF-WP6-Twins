@@ -120,8 +120,14 @@ async def run_export() -> None:
 
 def main() -> None:
     """Entry point for the export CLI."""
+    from opentelemetry import trace
+
+    from wp6_data.shared.observability import setup_observability
+
     load_dotenv()
-    asyncio.run(run_export())
+    setup_observability("wp6-blue-export")
+    with trace.get_tracer(__name__).start_as_current_span("blue.export"):
+        asyncio.run(run_export())
 
 
 if __name__ == "__main__":

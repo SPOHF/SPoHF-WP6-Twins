@@ -11,8 +11,9 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from wp6_data.shared.auth import NotAuthenticated, verify_session_user
 from wp6_data.shared.export import make_download_router
+from wp6_data.shared.observability import setup_observability
 from wp6_data.shared.routes import api, charts, dashboard_page, health, home, status
-from wp6_data.shared.telemetry import instrument_fastapi, setup_telemetry
+from wp6_data.shared.telemetry import instrument_fastapi
 from wp6_data.shared.templates import _current_user, configure_dashboard
 from wp6_data.shared.twin import TwinConfig
 
@@ -36,12 +37,12 @@ def create_app(config: TwinConfig) -> FastAPI:
     """Build a complete sensor dashboard app from configuration."""
     from wp6_data.config import Settings
 
-    # Enable tracing before the app and its client libraries are wired up. A twin's
-    # id gives each dashboard a sensible default service name (wp6-red/blue/grey),
-    # overridable per-deployment via OTEL_SERVICE_NAME.
-    setup_telemetry(default_service_name=f"wp6-{config.twin_id}")
-
     settings = Settings()
+
+    # Configure logging + enable tracing before the app and its client libraries are
+    # wired up. A twin's id gives each dashboard a sensible default service name
+    # (wp6-red/blue/grey), overridable per-deployment via OTEL_SERVICE_NAME.
+    setup_observability(f"wp6-{config.twin_id}", settings)
     configure_dashboard(
         config.twin_id,
         title=config.title,
