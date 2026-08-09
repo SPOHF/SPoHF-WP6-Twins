@@ -38,6 +38,10 @@ spec:
           labels:
             app.kubernetes.io/name: {{ .Chart.Name }}-red-export
         spec:
+          # Must land on the dashboard's node — the exports PVC is RWO on block
+          # storage. See _export-affinity.tpl.
+          affinity:
+            {{- include "wp6-data.exportPodAffinity" (dict "root" $ "twin" "red") | nindent 12 }}
           # appuser (gid 1000) writes the exports PVC; fsGroup chowns the
           # block-device volume so it can. See blue-dashboard.yaml for why.
           securityContext:
