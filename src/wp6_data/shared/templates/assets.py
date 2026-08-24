@@ -14,7 +14,7 @@ _STATIC_SHARED = Path(__file__).resolve().parents[4] / "static" / "shared"
 
 
 def _load(filename: str) -> str:
-    return (_STATIC_SHARED / filename).read_text()
+    return (_STATIC_SHARED / filename).read_text(encoding="utf-8")
 
 
 @cache
