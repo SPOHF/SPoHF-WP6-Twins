@@ -37,8 +37,8 @@ VARIETY = "Cargo"
 
 # Phenology thresholds — GDD base 0°C accumulated from Jan 1 (European
 # convention). Values from private communication; no published Cargo-
-# specific data. Ripening thresholds are intentionally absent — calibrate
-# locally once observed pick dates are available.
+# specific data. The harvest thresholds are approximate and derived from
+# local observation — refine them as more observed pick dates come in.
 THRESHOLDS = [
     # (243, "Bud break (222–265)", "#cc7716"),
     # (393, "Shoot flowering (376–409)", "#81ec48"),
@@ -51,7 +51,11 @@ THRESHOLDS = [
     # Derrived from manual data gathering:
     (165, "Bud score (165)", "#cc7716"),
     (450, "Flowering score (450)", "#81ec48"),
-    (1175, "First harvest (1175)", "#2790db"),
+    # Harvests share a purple ramp (light -> dark) so they read as one group,
+    # and stay clear of the blue year traces and orange forecast line.
+    (1175, "First harvest (1175)", "#b794f6"),
+    (1300, "Second harvest (1300)", "#8b5cf6"),
+    (1500, "Third harvest (1500)", "#5b21b6"),
 
 ]
 
