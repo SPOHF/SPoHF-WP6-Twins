@@ -76,7 +76,7 @@ class MetadataRegistry:
 
     def __init__(self, yaml_path: Path) -> None:
         if yaml_path.exists():
-            with yaml_path.open() as f:
+            with yaml_path.open(encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
             self._meta = TwinMetadata(**raw)
         else:

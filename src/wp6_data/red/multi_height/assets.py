@@ -11,7 +11,7 @@ _STATIC_RED = Path(__file__).resolve().parents[4] / "static" / "red"
 
 
 def _load(filename: str) -> str:
-    return (_STATIC_RED / filename).read_text()
+    return (_STATIC_RED / filename).read_text(encoding="utf-8")
 
 
 CROP_CLIMATE_JS = f"<script>\n{_load('crop_climate.js')}</script>\n"

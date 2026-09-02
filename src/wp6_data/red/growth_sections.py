@@ -31,5 +31,5 @@ def load_growth_sections(yaml_path: Path) -> list[GrowthSection]:
     """
     if not yaml_path.exists():
         return []
-    raw = yaml.safe_load(yaml_path.read_text()) or {}
+    raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
     return [GrowthSection(**entry) for entry in raw.get("growth_sections", [])]

@@ -60,7 +60,7 @@ def load_risk_thresholds(yaml_path: Path) -> RiskThresholds:
     Raises if the file or the ``risk_thresholds`` key is absent, or if any value
     is missing — the engine must never run on implicit defaults.
     """
-    raw = yaml.safe_load(yaml_path.read_text()) or {}
+    raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
     if "risk_thresholds" not in raw:
         raise ValueError(f"no 'risk_thresholds' block in {yaml_path}")
     return RiskThresholds(**raw["risk_thresholds"])

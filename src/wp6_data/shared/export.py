@@ -31,7 +31,7 @@ def get_export_metadata(export_dir: Path) -> dict | None:
     if not metadata_path.exists():
         return None
     try:
-        return json.loads(metadata_path.read_text())
+        return json.loads(metadata_path.read_text(encoding="utf-8"))
     except Exception:
         return None
 
