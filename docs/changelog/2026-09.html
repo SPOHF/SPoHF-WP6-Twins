@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WP6 Digital Twins — Changelog (July–August 2026)</title>
+<style>
+  :root {
+    --red: #c0392b;   --red-bg: #fdecea;
+    --blue: #2471a3;  --blue-bg: #eaf2fa;
+    --grey: #566573;  --grey-bg: #eef1f3;
+    --shared:#7d3c98; --shared-bg:#f4ecf7;
+    --ink: #1c2833;   --muted: #5d6d7e;
+    --line:#d5dbdb;   --bg:#f7f9f9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink); background: var(--bg); margin: 0; line-height: 1.55;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 24px 80px; }
+  header.page { border-bottom: 3px solid var(--ink); padding-bottom: 18px; margin-bottom: 8px; }
+  header.page h1 { margin: 0 0 4px; font-size: 30px; letter-spacing: -0.5px; }
+  header.page .sub { color: var(--muted); font-size: 15px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 28px; }
+  .pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; }
+  .pill.red   { background: var(--red-bg);   color: var(--red);   border-color: var(--red); }
+  .pill.blue  { background: var(--blue-bg);  color: var(--blue);  border-color: var(--blue); }
+  .pill.grey  { background: var(--grey-bg);  color: var(--grey);  border-color: var(--grey); }
+  .pill.shared{ background: var(--shared-bg);color: var(--shared);border-color: var(--shared); }
+  .tldr { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin-bottom: 36px; }
+  .tldr h2 { margin: 0 0 10px; font-size: 16px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .tldr ul { margin: 0; padding-left: 20px; }
+  .tldr li { margin: 6px 0; }
+  section.theme { margin-bottom: 44px; }
+  section.theme > h2 { font-size: 22px; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+  section.theme > .theme-sub { color: var(--muted); margin: 0 0 20px; font-size: 15px; }
+  .hero { border-left: 5px solid var(--line); padding-left: 18px; }
+  .hero.blue { border-color: var(--blue); }
+  .hero.red  { border-color: var(--red); }
+  .hero.grey { border-color: var(--grey); }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin-bottom: 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 18px; }
+  .card .tags { margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .card p { margin: 0 0 12px; }
+  .card ul { margin: 0 0 12px; padding-left: 20px; }
+  .card ul li { margin: 3px 0; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 4px; }
+  a.btn { display: inline-block; text-decoration: none; font-weight: 600; font-size: 14px; padding: 8px 14px; border-radius: 8px; color: #fff; background: var(--ink); }
+  a.btn.blue { background: var(--blue); }
+  a.btn.red  { background: var(--red); }
+  a.btn.grey { background: var(--grey); }
+  a.btn.shared { background: var(--shared); }
+  a.btn::after { content: " ↗"; font-weight: 400; }
+  .route { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  details.more { margin-top: 6px; }
+  details.more summary { cursor: pointer; font-weight: 600; color: var(--muted); font-size: 14px; }
+  .commitlist { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .commitlist code { color: var(--ink); }
+  footer.page { border-top: 1px solid var(--line); margin-top: 40px; padding-top: 20px; color: var(--muted); font-size: 13.5px; }
+  footer.page code { background: #eef1f3; padding: 1px 5px; border-radius: 4px; }
+  @media print {
+    body { background: #fff; }
+    .card, .tldr { break-inside: avoid; }
+    a.btn { color: #000; background: none; border: 1px solid #999; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <p style="margin:0 0 8px;"><a href="./" style="color:var(--muted); text-decoration:none; font-size:14px;">← All changelogs</a></p>
+    <h1>WP6 Digital Twins — What shipped this update</h1>
+    <div class="sub">Changelog · <strong>update of 2 September 2026</strong> · covering 11 Jul – 1 Sep · branch <code>main</code> · 17 commits · 1 merged PR · 2 contributors</div>
+  </header>
+
+  <div class="legend">
+    <span class="pill blue">Blue — blueberry farm · wp6-blue.spohf.fontysvenlo.dev</span>
+    <span class="pill red">Red — tomato greenhouse · wp6-red.spohf.fontysvenlo.dev</span>
+    <span class="pill grey">Grey — public platform demo · wp6-grey.spohf.fontysvenlo.dev</span>
+    <span class="pill shared">Shared — twin-agnostic platform</span>
+  </div>
+
+  <div class="tldr">
+    <h2>Headlines</h2>
+    <ul>
+      <li><strong>The twins moved house — production now runs on the new cluster.</strong> On 15 July both digital twins were evacuated from the old Kubernetes cluster onto the university's v2 platform: databases dumped, restored and verified (Blue's <strong>5.34 million</strong> readings, full history, plus the yearly manual measurements that exist nowhere else), then the production web addresses flipped over. The old cluster is kept switched off as a rollback that a single DNS change can bring back.</li>
+      <li><strong>The Sync Status page now answers "is it green — and if not, since when, and how bad?"</strong> Each data source shows a health badge, a 7-day reliability score and a records-per-run sparkline, and it now distinguishes <em>our pipeline is broken</em> from <em>the upstream source has gone quiet</em> — two problems that used to look identical.</li>
+      <li><strong>Every page view and every nightly job is now traceable end to end.</strong> The twins emit OpenTelemetry traces, and every log line carries its trace ID — so "the sync was slow last night" can be answered by looking at the actual run instead of guessing.</li>
+      <li><strong>Blue's growth tracker now marks all three harvests.</strong> Observed picking dates gave us approximate Growing Degree Day thresholds for the second (1300) and third (1500) harvest, alongside the existing first (1175).</li>
+      <li><strong>Two failures that had been silent for weeks were found and fixed.</strong> An expired certificate at the login provider was crash-looping both dashboards; and the nightly CSV exports had been failing unnoticed for 23 days after the move.</li>
+    </ul>
+  </div>
+
+  <p style="color:var(--muted); font-size:13.5px; margin:-18px 0 30px;">
+    🔗 The <strong>Open live</strong> buttons (↗) deep-link into the deployed dashboards. Blue and Red require a login on first open; Grey is a public demo (no login).
+  </p>
+
+  <section class="theme">
+    <h2>🚚 Production moved to the new platform</h2>
+    <p class="theme-sub">The single biggest piece of work this period — and deliberately invisible if it went well. It went well.</p>
+    <div class="hero grey">
+
+      <div class="card">
+        <h3>Both twins evacuated onto the v2 cluster</h3>
+        <div class="tags"><span class="pill shared">Shared</span><span class="pill blue">Blue</span><span class="pill red">Red</span></div>
+        <p>The old Kubernetes cluster had become a cluster running nothing but this project, kept alive purely for us. Rather than maintain it, everything was moved to the university's shared v2 platform so the old one can be switched off entirely.</p>
+        <p>Because the two clusters use different storage technology, the data could not simply be copied at disk level — it had to be exported and re-imported. That was done and checked record by record:</p>
+        <ul>
+          <li><strong>Blue:</strong> 5,340,000+ sensor readings, the full pre-aggregated history, and the yearly <code>long_data</code> manual measurements — the one dataset whose source files exist nowhere but the database.</li>
+          <li><strong>Red:</strong> full greenhouse readings history.</li>
+          <li>The sync job resumed from exactly where the restore left off, so there is no gap and no duplication at the seam.</li>
+        </ul>
+        <p>The public web addresses were then pointed at the new cluster after being validated against it <em>first</em>. The old cluster still holds a complete second copy and is a one-step rollback.</p>
+        <div class="actions">
+          <a class="btn grey" href="https://wp6-grey.spohf.fontysvenlo.dev/">Open Grey live (no login)</a>
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/">Open Blue live</a>
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/">Open Red live</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Blue finally got its own database</h3>
+        <div class="tags"><span class="pill blue">Blue</span><span class="pill shared">Shared</span></div>
+        <p>In production, Blue had been writing into the database server's default administrative database — an accident dating back to its first deploy that every other environment (local development, the setup scripts, the documentation) disagreed with. Blue now has a proper <code>wp6_blue</code> database of its own, created automatically, exactly as Red always had.</p>
+        <p>Because Blue is the <em>second</em> twin needing this, the "create a twin's database" step became one shared, reusable piece of configuration instead of a copy-paste — so a third twin is a few lines, not a new script.</p>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>2612ce7</code> feat(helm): give blue its own database (wp6_blue) instead of squatting in postgres<br></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>Six infrastructure faults the move exposed — all fixed</h3>
+        <div class="tags"><span class="pill shared">Shared</span></div>
+        <p>The new cluster stores data on real network block storage rather than plain folders on a machine. That difference is invisible until it isn't: six separate assumptions baked into the old setup broke, each one found and fixed during the move.</p>
+        <ul>
+          <li><strong>The database refused to start</strong> — the new storage arrives with a system folder already present, which the database reads as "this directory isn't empty, I won't initialise here". Now it initialises in a sub-folder — but only where explicitly switched on, so the old cluster's live 2.8 GB database was not touched.</li>
+          <li><strong>The startup deadlocked</strong> — the database-creation step ran <em>after</em> the app was declared healthy, but the app could never become healthy without its database. It now runs first.</li>
+          <li><strong>Deploys hung</strong> — the dashboards hold an exclusive lock on their upload/export storage, so starting a replacement before stopping the old one could never work on this storage type. They now stop then start.</li>
+          <li><strong>Uploads and exports could not be written</strong> — the new storage arrives owned by the system administrator, and the twins deliberately run as an unprivileged user. Ownership is now set correctly at mount time.</li>
+          <li><strong>One deploy wedged indefinitely</strong> — a setup job that finished in about a second was being cleaned up so fast that the deployment tool never saw it succeed, and waited forever for a job that no longer existed.</li>
+          <li><strong>The nightly CSV exports had silently failed for 23 days</strong> (see below).</li>
+        </ul>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist">
+            <code>05320af</code> fix(helm): let TimescaleDB init in a PGDATA subdir on block-device PVCs<br>
+            <code>6abb706</code> fix(helm): run the TSDB bootstrap as a PreSync hook, not PostSync<br>
+            <code>08a01f6</code> fix(helm): Recreate strategy for dashboards mounting RWO volumes<br>
+            <code>aeaa961</code> fix(helm): fsGroup so non-root pods can write PVCs on block storage<br>
+            <code>bba7e54</code> fix(helm): drop hook-succeeded from the TSDB bootstrap delete policy<br>
+            <code>72bf5be</code> fix(helm): pin export CronJobs to the dashboard node so RWO PVCs attach<br>
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>A fallback that stays a fallback</h3>
+        <div class="tags"><span class="pill shared">Shared</span></div>
+        <p>During the changeover, new builds were published to <em>both</em> clusters' image registries — a fallback you cannot ship a fix to is a weak fallback, and feature work continued while the migration ran. Once the new cluster took over production, that second publish was removed on purpose: the old cluster now freezes at its last known-good build instead of quietly rolling forward onto untested code.</p>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist">
+            <code>9814cfe</code> ci: push images to both Harbors for the migration window<br>
+            <code>0b46077</code> ci: push only to harbor.inf; stop feeding old's registry<br>
+          </div>
+        </details>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>🩺 Knowing when the data stops arriving</h2>
+    <p class="theme-sub">A green job is not the same as fresh data. The Sync Status page now says which one you're looking at.</p>
+    <div class="hero grey">
+      <div class="card">
+        <h3>Redesigned, source-aware sync health</h3>
+        <div class="tags"><span class="pill shared">Shared</span><span class="pill blue">Blue</span><span class="pill red">Red</span><span class="pill grey">Grey</span></div>
+        <p>The Sync Status card was rebuilt to answer one question at a glance: <em>is this source healthy, and if not, since when and how badly?</em></p>
+        <ul>
+          <li><strong>Automatic sources</strong> (the datalake feeds) get a data-freshness budget and show <em>Healthy · Stale · Outage · Failing</em>. The important distinction: a sync that keeps succeeding while the data behind it stops advancing is now flagged as <em>stale/outage</em> — an upstream problem — rather than looking indistinguishable from a healthy source.</li>
+          <li><strong>Manual sources</strong> (uploaded spreadsheets, insect-trap counts) are event-driven, so they show upload recency instead of being wrongly judged against a sync schedule.</li>
+          <li>Each source keeps a rolling <strong>30-day run history</strong>, feeding a 7-day reliability figure ("X of the last Y runs succeeded") and a records-per-run sparkline.</li>
+          <li><strong>Failing-since</strong> and a consecutive-failure count replace the previous all-time totals, so an old, long-recovered incident no longer colours today's picture.</li>
+          <li>Fixed: a recovered source kept displaying a fossilised old error. Success now clears the error state.</li>
+        </ul>
+        <p>The whole thing is shared platform code, so all three twins got it at once.</p>
+        <div class="actions">
+          <a class="btn grey" href="https://wp6-grey.spohf.fontysvenlo.dev/status">See it on Grey (no login)</a>
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/status">Blue status</a>
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/status">Red status</a>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>c63bb3f</code> feat(status): visual, type-aware sync health with SLA, outage &amp; failing-since<br></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>🔭 The platform can now explain itself</h2>
+    <p class="theme-sub">Traces and logs, joined up — so slow pages and odd sync runs can be investigated instead of guessed at.</p>
+    <div class="hero grey">
+      <div class="card">
+        <h3>End-to-end tracing across dashboards, sync and CLI jobs</h3>
+        <div class="tags"><span class="pill shared">Shared</span></div>
+        <p>Every web request and every scheduled job now records a <em>trace</em>: a timeline of what it did, including its database queries and its calls out to the external data APIs. A slow page or a stalled sync run can be opened up and read directly.</p>
+        <ul>
+          <li>The 15-minute sync job produces one trace per run, with a segment per data source — so an upstream API being slow is visibly distinct from our own database being slow.</li>
+          <li>The nightly export and manual-ingest command-line jobs are traced too, and gained proper structured logging they previously lacked.</li>
+          <li><strong>Logs are stamped with their trace ID</strong>, so a log line links straight to the request that produced it.</li>
+          <li>Health-check and metrics endpoints are excluded, and per-request internal noise dropped, so each request reads as one clean entry rather than three.</li>
+          <li>Vendor-neutral by design: the twins emit the open OpenTelemetry standard to whatever collector is configured, and do nothing at all when none is. It switched itself on when the new cluster supplied an endpoint — <strong>no application configuration was needed</strong>.</li>
+        </ul>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist">
+            <code>0d287df</code> feat(telemetry): env-gated OpenTelemetry tracing for dashboards and sync job<br>
+            <code>5755dcb</code> feat(telemetry): trace the CLI jobs and correlate logs with traces<br>
+            <code>ba0c611</code> feat(telemetry): exclude probe URLs and drop noisy ASGI send/receive spans<br>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>🫐 Blue — the full harvest sequence on the growth tracker</h2>
+    <p class="theme-sub">Growing Degree Days accumulate heat over the season; crossing a threshold predicts a picking window.</p>
+    <div class="hero blue">
+      <div class="card">
+        <h3>Second and third harvest thresholds</h3>
+        <div class="tags"><span class="pill blue">Blue</span></div>
+        <p>The GDD tracker previously marked only the first harvest. Observed picking dates from the farm now give us working thresholds for the second (~1300 GDD) and third (~1500 GDD) harvests as well, so the whole picking sequence can be read off one chart.</p>
+        <ul>
+          <li>All three harvest lines share a single light-to-dark purple ramp, so they read as one group and their ordering is visible without reading the labels — and they don't compete with the blue trace of the current year's actual accumulation.</li>
+          <li><strong>These are approximate</strong> and derived from a small number of observed pick dates; they are expected to be refined as more seasons are recorded.</li>
+        </ul>
+        <div class="actions">
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/gdd">Open the GDD tracker</a>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>fa5b6af</code> feat(blue): add second and third harvest GDD thresholds<br></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>🛡️ Staying up when someone else goes down</h2>
+    <p class="theme-sub">Two outages that were caused by, or hidden by, something outside the application.</p>
+
+    <div class="card">
+      <h3>A login-provider outage no longer takes the dashboards down</h3>
+      <div class="tags"><span class="pill shared">Shared</span><span class="pill blue">Blue</span><span class="pill red">Red</span></div>
+      <p>On 13 July the central login provider's certificate expired. Both dashboards fetched its configuration during startup, so the failure killed them on boot — they restarted and died 21 times until someone else renewed the certificate. While it was down, <em>nothing</em> served: not the public pages, not even the health check, because the app refused to start over details it wouldn't need until someone clicked "log in".</p>
+      <p>Two genuinely different failures were being treated the same, and are now separated:</p>
+      <ul>
+        <li><strong>A missing secret is our own misconfiguration</strong> — it will never fix itself, so it still fails immediately and loudly.</li>
+        <li><strong>The identity provider being briefly unhealthy is someone else's service</strong> — it does fix itself, so the dashboard now starts anyway, serves everything that doesn't need a login, and picks the provider up automatically once it recovers. No restart needed.</li>
+      </ul>
+      <p>Also: Red now trains its light-prediction model in the background at startup, matching Blue, so a cold start on a fresh cluster can't stall the boot.</p>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist"><code>f9d38b3</code> fix(auth): don't let an OIDC provider outage crash-loop the dashboards<br></div>
+      </details>
+    </div>
+
+    <div class="card">
+      <h3>The nightly CSV exports had been failing silently for 23 days</h3>
+      <div class="tags"><span class="pill blue">Blue</span><span class="pill red">Red</span></div>
+      <p>Both twins' nightly data exports stopped working the moment production moved, and nothing said so — the last successful run was 17 July, discovered on 9 August.</p>
+      <p>The cause is a property of the new storage: an export volume can only be attached to one machine at a time, and the dashboard holds that attachment permanently. On the old cluster there were few enough machines that the export job happened to land on the right one; the new cluster has seven, so it effectively never did. The export would wait, unable to start, until it was timed out and discarded.</p>
+      <p>Export jobs are now explicitly scheduled onto the same machine as their dashboard, where they share the attachment cleanly. Verified on the live cluster before shipping, and written as one shared rule for both twins.</p>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist"><code>72bf5be</code> fix(helm): pin export CronJobs to the dashboard node so RWO PVCs attach<br></div>
+      </details>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>⚙️ Platform &amp; architecture (under the hood)</h2>
+    <p class="theme-sub">Less visible, but it keeps the twins trustworthy and the codebase maintainable.</p>
+    <div class="card">
+      <h3>The twins now run correctly on Windows in any language setting</h3>
+      <div class="tags"><span class="pill shared">Shared</span><span class="pill red">Red</span><span class="pill blue">Blue</span></div>
+      <p>Contributed by <strong>Tim Riebner</strong> &mdash; the first outside contribution to the codebase this period, and a fix for a problem none of us could see.</p>
+      <p>The twins read their sensor definitions from configuration files that contain degree symbols (<code>°C</code>). Those files were being opened without stating which text encoding to expect, so Python fell back to whatever the operating system's language settings suggest. On macOS and Linux that is always UTF-8 and everything works; on a Windows machine set to almost any language it is not, and the degree symbols came out corrupted &mdash; <code>°C</code> rendering as <code>Â°C</code> on a Western European setup, and worse elsewhere.</p>
+      <ul>
+        <li>Six file-reading points now state <code>UTF-8</code> explicitly &mdash; the sensor metadata for all three twins, the greenhouse risk thresholds and growth stages, the export summaries, and the dashboards' own stylesheets and scripts.</li>
+        <li>That is every place the application reads a file, so the whole class of problem is closed rather than patched where it happened to show.</li>
+        <li>Practical effect: a new student or partner on a Windows laptop gets a working dashboard with correct units, instead of one subtly wrong in a way that is easy to mistake for a data problem.</li>
+      </ul>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist"><code>d08b712</code> Fix for Windows with different locales to UTF-8 (PR #28)<br></div>
+      </details>
+    </div>
+
+    <div class="card">
+      <h3>Test and tooling hardening</h3>
+      <div class="tags"><span class="pill shared">Shared</span></div>
+      <ul>
+        <li>Fixed an intermittent test failure that only ever appeared on the slower CI machines: a background database maintenance task could collide with the test's own cleanup. The fix removes the task first and waits for it, rather than papering over the race with a retry that would resurface later inside some unrelated change.</li>
+        <li>The database-bootstrap step is now a shared, reusable template across twins rather than duplicated configuration — the same pattern as the export scheduling rule.</li>
+        <li>Structured logging was extended to the dashboards, which previously had none.</li>
+      </ul>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist"><code>e524a0e</code> test(e2e): stop the cagg refresh policy racing the red schema teardown<br></div>
+      </details>
+    </div>
+  </section>
+
+  <footer class="page">
+    <p>Live dashboards: <code>wp6-blue.spohf.fontysvenlo.dev</code> · <code>wp6-red.spohf.fontysvenlo.dev</code> (login required) · <code>wp6-grey.spohf.fontysvenlo.dev</code> (public demo, synthetic data).</p>
+    <p>Generated from <code>git log --since=2026-07-11</code> on <code>main</code>, plus <code>issues/</code> PRDs. All deep links verified against the live environment.</p>
+  </footer>
+
+</div>
+</body>
+</html>
