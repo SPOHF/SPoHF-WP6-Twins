@@ -96,6 +96,7 @@ class TestSampleAggregation:
         assert len(markers) == 1
         assert markers[0].value == 5.0
         assert markers[0].samples == 3
+        assert markers[0].detail == "mean of 3"
 
     def test_each_cultivar_is_averaged_separately(self):
         target = COHORTS[5]
@@ -130,6 +131,7 @@ class TestSampleAggregation:
         marker = view.measured[0].markers[0]
         assert marker.value == 160.0
         assert marker.samples == 2
+        assert marker.detail == "sum of 2"  # names the aggregation, not just n
 
     def test_an_unknown_measure_agg_raises_rather_than_guessing(self):
         with pytest.raises(ValueError, match="unknown measure agg"):

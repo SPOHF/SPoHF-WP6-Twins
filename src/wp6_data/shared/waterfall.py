@@ -76,6 +76,12 @@ class Marker:
     label: str = ""
     series: str = ""
     samples: int = 1
+    # How the value was arrived at, in the caller's own words ("mean of 8",
+    # "sum of 3 picks, 135 samples"). Shown on hover, because a summarised
+    # figure and a single reading are different claims and must not look alike.
+    # A phrase rather than a rule: what counts as an occasion is the twin's
+    # vocabulary, and this module has none.
+    detail: str = ""
 
 
 @dataclass(frozen=True)
@@ -285,8 +291,7 @@ def _value_chips(lanes, pos, colors, span, marker_label):
                         f"{lane.cohort.label} · "
                         f"{marker.label or marker.series or marker_label}: "
                         f"{marker.value:g}"
-                        + (f" (mean of {marker.samples})" if marker.samples > 1
-                           else "")
+                        + (f" ({marker.detail})" if marker.detail else "")
                     ),
                 )
             )

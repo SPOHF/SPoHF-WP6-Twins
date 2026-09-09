@@ -218,22 +218,25 @@ class TestRenderWaterfall:
         assert "Mean thing" not in html
 
 
-class TestSampleCount:
-    def test_hover_says_when_a_value_summarises_several_samples(self):
+class TestHowTheValueWasReached:
+    """A summarised figure and a single reading must not look alike on hover."""
+
+    def test_hover_carries_the_callers_own_phrasing(self):
         lanes = _lanes(1)
         lanes[0] = Lane(
-            cohort=lanes[0].cohort, markers=[Marker(4.2, "Brix", samples=8)]
+            cohort=lanes[0].cohort,
+            markers=[Marker(4.2, "Brix", detail="sum of 3 picks, 135 samples")],
         )
         chips = [a for a in _annotations(render_waterfall(lanes, _daily()))
                  if a.get("text") == "4.2"]
-        assert "mean of 8" in chips[0]["hovertext"]
+        assert "sum of 3 picks, 135 samples" in chips[0]["hovertext"]
 
-    def test_a_single_sample_says_nothing_extra(self):
+    def test_a_lone_reading_says_nothing_extra(self):
         lanes = _lanes(1)
         lanes[0] = Lane(cohort=lanes[0].cohort, markers=[Marker(4.2, "Brix")])
         chips = [a for a in _annotations(render_waterfall(lanes, _daily()))
                  if a.get("text") == "4.2"]
-        assert "mean of" not in chips[0]["hovertext"]
+        assert chips[0]["hovertext"].endswith("4.2")
 
 
 class TestValueScale:

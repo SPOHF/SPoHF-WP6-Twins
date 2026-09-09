@@ -230,3 +230,20 @@ class TestSensorAgg:
     def test_an_unsupported_agg_fails_loudly_on_load(self):
         with pytest.raises(ValidationError, match="unknown agg"):
             SensorMetadata(agg="median")
+
+    def test_period_agg_defaults_to_flat(self):
+        assert SensorMetadata().period_agg == ""
+
+    def test_a_two_level_measure_can_declare_both(self):
+        m = SensorMetadata(agg="avg", period_agg="sum")
+        assert (m.agg, m.period_agg) == ("avg", "sum")
+
+    def test_an_unsupported_period_agg_fails_loudly_on_load(self):
+        with pytest.raises(ValidationError, match="unknown period_agg"):
+            SensorMetadata(period_agg="median")
+
+    def test_blue_declares_the_two_level_yield(self):
+        """The measure the second level exists for."""
+        blue = MetadataRegistry(BLUE_YAML)
+        yield_meta = blue.sensor_defaults["yield_per_plant"]
+        assert (yield_meta.agg, yield_meta.period_agg) == ("avg", "sum")

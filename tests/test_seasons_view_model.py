@@ -130,6 +130,51 @@ class TestSummarising:
         by_group = {lane.group: lane.markers[0].value for lane in view.measured}
         assert by_group == {"2024 season": 10.0, "2025 season": 13.0}
 
+    def test_two_level_takes_the_mean_per_pick_then_sums_the_picks(self):
+        """A season yield is neither the flat mean nor the flat sum."""
+        view = build_seasons(
+            SEASONS, TREATMENTS,
+            _obs([  # two plants on each of two picks
+                (date(2025, 7, 9), "Std", 100.0), (date(2025, 7, 9), "Std", 200.0),
+                (date(2025, 7, 18), "Std", 300.0), (date(2025, 7, 18), "Std", 500.0),
+            ]),
+            _full_weather(), measure_agg="avg", measure_period_agg="sum",
+        )
+        marker = view.measured[0].markers[0]
+        # mean(100, 200) + mean(300, 500) = 150 + 400
+        assert marker.value == 550.0
+        # ...and neither of the one-level answers
+        assert marker.value != round(sum([100, 200, 300, 500]) / 4, 2)
+        assert marker.value != float(sum([100, 200, 300, 500]))
+        assert marker.samples == 4
+
+    def test_two_level_hover_names_both_levels(self):
+        view = build_seasons(
+            SEASONS, TREATMENTS,
+            _obs([(date(2025, 7, 9), "Std", 100.0),
+                  (date(2025, 7, 18), "Std", 300.0)]),
+            _full_weather(), measure_agg="avg", measure_period_agg="sum",
+        )
+        detail = view.measured[0].markers[0].detail
+        assert "sum of 2 picks" in detail
+        assert "mean of 2 samples" in detail
+
+    def test_no_period_agg_keeps_the_flat_behaviour(self):
+        """Measures that declare one level must not shift underfoot."""
+        rows = [(date(2025, 7, 9), "Std", 100.0), (date(2025, 7, 9), "Std", 200.0),
+                (date(2025, 7, 18), "Std", 300.0)]
+        view = build_seasons(
+            SEASONS, TREATMENTS, _obs(rows), _full_weather(), measure_agg="avg",
+        )
+        assert view.measured[0].markers[0].value == 200.0  # mean of all three
+
+    def test_an_unknown_period_agg_raises_rather_than_guessing(self):
+        with pytest.raises(ValueError, match="unknown measure period agg"):
+            build_seasons(
+                SEASONS, TREATMENTS, _obs([]), _full_weather(),
+                measure_period_agg="median",
+            )
+
     def test_an_unknown_measure_agg_raises_rather_than_guessing(self):
         with pytest.raises(ValueError, match="unknown measure agg"):
             build_seasons(

@@ -153,6 +153,13 @@ sensor_defaults:
     unit: "g"
     alias: "Yield"
     source: "long_data"
+    # The one measure that needs both levels: a season's yield is the mean
+    # across the plants picked on one pass, summed across the passes. Averaging
+    # throughout gives a per-plant-per-pass figure (~a third of the season's);
+    # summing throughout totals every plant and pass into a plot figure still
+    # labelled "per plant".
+    agg: "avg"
+    period_agg: "sum"
   score:
     type: "phenology"
     unit: ""  # ordinal 1-10 (plant vigour/health, 10 best)

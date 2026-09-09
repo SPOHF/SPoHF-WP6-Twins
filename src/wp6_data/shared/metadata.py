@@ -59,6 +59,17 @@ class SensorMetadata(BaseModel):
     # as a yield picked across several harvests: averaging those would report a
     # fraction of the real figure. Validated against CHART_AGG_FUNCS on load.
     agg: str = "avg"
+    # The second level, for a measure sampled on several occasions within one
+    # period: ``agg`` collapses the readings taken *on one occasion* into that
+    # occasion's figure, and ``period_agg`` collapses those into the period's.
+    # A blueberry yield is the case that needs it — mean across the plants
+    # picked on one pass, then summed across the season's passes; neither level
+    # alone gives the season figure. Empty (the default) keeps the flat
+    # behaviour: one aggregation over every reading in the period.
+    #
+    # This mirrors how a climate series already works — the provider buckets
+    # readings into a daily figure, then `cycles.exposure` aggregates the days.
+    period_agg: str = ""
 
     @field_validator("agg")
     @classmethod
@@ -66,6 +77,16 @@ class SensorMetadata(BaseModel):
         if value not in CHART_AGG_FUNCS:
             raise ValueError(
                 f"unknown agg {value!r}; expected one of {sorted(CHART_AGG_FUNCS)}"
+            )
+        return value
+
+    @field_validator("period_agg")
+    @classmethod
+    def _known_period_agg(cls, value: str) -> str:
+        if value and value not in CHART_AGG_FUNCS:
+            raise ValueError(
+                f"unknown period_agg {value!r}; "
+                f"expected one of {sorted(CHART_AGG_FUNCS)} or \"\" for flat"
             )
         return value
 

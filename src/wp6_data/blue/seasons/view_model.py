@@ -11,10 +11,17 @@ picture is for is the *vertical* comparison: nine plots that lived through one
 weather, and how their fruit differed.
 
 A treatment is sampled many times across a season — several plants, and several
-harvest passes — so the rows summarise into one outcome per lane, combined the
-way the measure declares (a Brix is averaged; a yield picked across four passes
-is summed). Measurements that fall in no declared season are carried out, not
-dropped: they are the signal that the season dates are wrong.
+harvest passes — so the rows summarise into one outcome per lane, the way the
+measure declares. Two levels, because one is not enough for a yield: ``agg``
+combines the plants picked on *one* pass, and ``period_agg`` combines those
+passes into the season. A yield is ``avg`` then ``sum``; averaging throughout
+gives a per-plant-per-pass figure about a third of the season's, and summing
+throughout totals every plant and pass into a plot figure still labelled "per
+plant". A measure that declares no ``period_agg`` keeps the flat behaviour: one
+aggregation over every reading in the season.
+
+Measurements that fall in no declared season are carried out, not dropped: they
+are the signal that the season dates are wrong.
 """
 
 from __future__ import annotations
@@ -68,6 +75,24 @@ def _season_for(day: date, seasons: list[SeasonConfig]) -> SeasonConfig | None:
     return None
 
 
+def _summarise(by_day, within, across, agg: str, period_agg: str) -> Marker:
+    """One outcome for a lane, and a plain phrase saying how it was reached."""
+    samples = sum(len(v) for v in by_day.values())
+    if across is None:
+        value = float(within(pd.Series([v for vs in by_day.values() for v in vs])))
+        detail = f"{CHART_AGG_FUNCS[agg]} of {samples}" if samples > 1 else ""
+    else:
+        per_occasion = [
+            float(within(pd.Series(by_day[day]))) for day in sorted(by_day)
+        ]
+        value = float(across(pd.Series(per_occasion)))
+        detail = (
+            f"{CHART_AGG_FUNCS[period_agg]} of {len(per_occasion)} picks "
+            f"({CHART_AGG_FUNCS[agg]} of {samples} samples)"
+        )
+    return Marker(value=round(value, 2), samples=samples, detail=detail)
+
+
 def build_seasons(
     seasons: list[SeasonConfig],
     treatments: dict[str, str],
@@ -76,6 +101,7 @@ def build_seasons(
     *,
     weather_agg: str = "avg",
     measure_agg: str = "avg",
+    measure_period_agg: str = "",
 ) -> SeasonsView:
     """Lanes for every (season, treatment), with outcomes and coverage.
 
@@ -89,30 +115,40 @@ def build_seasons(
             f"unknown measure agg {measure_agg!r}; "
             f"expected one of {sorted(CHART_AGG_FUNCS)}"
         )
-    summarise = getattr(pd.Series, CHART_AGG_FUNCS[measure_agg])
+    if measure_period_agg and measure_period_agg not in CHART_AGG_FUNCS:
+        raise ValueError(
+            f"unknown measure period agg {measure_period_agg!r}; "
+            f'expected one of {sorted(CHART_AGG_FUNCS)} or "" for flat'
+        )
+    within = getattr(pd.Series, CHART_AGG_FUNCS[measure_agg])
+    across = (
+        getattr(pd.Series, CHART_AGG_FUNCS[measure_period_agg])
+        if measure_period_agg else None
+    )
 
-    grouped: dict[tuple[str, str], list[float]] = {}
+    # Keyed by the day as well as the lane: a day's readings are one occasion —
+    # the plants picked on one pass — and `Plant_nr` is discarded on ingest
+    # (ADR 0004), so samples sharing a date *are* the per-plant dimension.
+    grouped: dict[tuple[str, str], dict[date, list[float]]] = {}
     unattached: list[Unattached] = []
     for row in observed.itertuples(index=False):
         season = _season_for(row.date, seasons)
         if season is None or row.device not in treatments:
             unattached.append(Unattached(row.date, row.device, float(row.value)))
             continue
-        grouped.setdefault((season.label, row.device), []).append(float(row.value))
+        by_day = grouped.setdefault((season.label, row.device), {})
+        by_day.setdefault(row.date, []).append(float(row.value))
 
     lanes: list[Lane] = []
     for season in sorted(seasons, key=lambda s: s.start):
         _, coverage = exposure(season.start, season.end, daily, weather_agg)
         for device, label in treatments.items():
-            values = grouped.get((season.label, device), [])
+            by_day = grouped.get((season.label, device), {})
             markers = (
                 # No label: the lane is already named for the treatment, so
                 # the hover reads "Std · Brix: 10.1" rather than "Std · Std".
-                [Marker(
-                    value=round(float(summarise(pd.Series(values))), 2),
-                    samples=len(values),
-                )]
-                if values else []
+                [_summarise(by_day, within, across, measure_agg, measure_period_agg)]
+                if by_day else []
             )
             lanes.append(
                 Lane(
@@ -139,6 +175,7 @@ async def assemble_seasons(
     treatments: dict[str, str],
     timezone: str,
     measure_agg: str = "avg",
+    measure_period_agg: str = "",
 ) -> SeasonsView:
     """:func:`build_seasons` plus the weather and measurement reads.
 
@@ -159,4 +196,5 @@ async def assemble_seasons(
     return build_seasons(
         config.seasons, treatments, observed, daily,
         weather_agg=metric.agg, measure_agg=measure_agg,
+        measure_period_agg=measure_period_agg,
     )

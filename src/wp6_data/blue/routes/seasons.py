@@ -108,12 +108,14 @@ async def seasons_page(
     )
     measure_label = dict(measures).get(measure, measure)
     # How repeat samples of a treatment combine over a season is the measure's
-    # own business, declared beside its unit and alias.
-    measure_agg = deps.metadata.sensor_defaults[measure].agg
+    # own business, declared beside its unit and alias. Two levels: within one
+    # harvest pass, then across the season's passes.
+    declared = deps.metadata.sensor_defaults[measure]
 
     view = await assemble_seasons(
         provider, config, metric, measure, treatments, timezone,
-        measure_agg=measure_agg,
+        measure_agg=declared.agg,
+        measure_period_agg=declared.period_agg,
     )
 
     chart = render_waterfall(

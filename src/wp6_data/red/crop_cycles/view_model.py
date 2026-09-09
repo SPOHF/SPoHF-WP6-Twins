@@ -115,6 +115,10 @@ def build_waterfall(
             Marker(
                 value=round(float(summarise(pd.Series(values))), 2),
                 label=label, series=label, samples=len(values),
+                detail=(
+                    f"{CHART_AGG_FUNCS[measure_agg]} of {len(values)}"
+                    if len(values) > 1 else ""
+                ),
             )
         )
 
@@ -123,7 +127,10 @@ def build_waterfall(
     only_one = len({m.series for markers in by_key.values() for m in markers}) <= 1
     if only_one:
         by_key = {
-            key: [Marker(m.value, m.label, samples=m.samples) for m in markers]
+            key: [
+                Marker(m.value, m.label, samples=m.samples, detail=m.detail)
+                for m in markers
+            ]
             for key, markers in by_key.items()
         }
 
