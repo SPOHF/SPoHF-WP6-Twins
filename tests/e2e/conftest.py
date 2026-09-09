@@ -24,6 +24,49 @@ _TSDB_HINT = (
 )
 
 
+async def remove_cagg_refresh_policy(conn) -> None:
+    """Delete the cagg refresh policy so no background job races the tests.
+
+    `ensure_aggregates` installs a continuous-aggregate refresh policy: a
+    TimescaleDB background job the scheduler picks up the moment it is created
+    (`next_start` is NULL until its first run). On a *fresh* database — which
+    CI always has, and a developer rarely does — that puts a refresh in flight
+    exactly while the first tests run. It then either holds the cagg lock that
+    a foreground `refresh_continuous_aggregate` needs (`LockNotAvailable:
+    concurrent refresh`) or touches the catalog row a teardown DROP is removing
+    (`InternalError: tuple concurrently updated`). Local runs usually win the
+    race because the policy already exists from an earlier run, so its next
+    start is up to 15 minutes away.
+
+    e2e refreshes the cagg explicitly wherever it needs fresh data, so the
+    policy earns nothing here. Removing it deletes the job *and blocks until
+    any in-flight run finishes*, making callers genuinely unraced rather than
+    merely usually-unraced — unlike a sleep or a retry, which would leave a
+    flake to resurface on a slower runner inside some unrelated diff.
+
+    Guarded inside PL/pgSQL, not with a plain `WHERE EXISTS`: the function
+    takes a REGCLASS, and Postgres resolves 'sensors_daily_summary'::regclass
+    at *plan* time — so a top-level SELECT fails to plan at all when the view
+    is absent (the normal case on a pre-test drop against a fresh database),
+    however the WHERE clause is written. Inside a DO block the inner statement
+    is only planned once the IF is reached.
+    """
+    await conn.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM timescaledb_information.continuous_aggregates
+                WHERE view_name = 'sensors_daily_summary'
+            ) THEN
+                PERFORM remove_continuous_aggregate_policy(
+                    'sensors_daily_summary', if_exists => true);
+            END IF;
+        END $$;
+        """
+    )
+
+
 @pytest_asyncio.fixture(scope="session", loop_scope="session", autouse=True)
 async def _bootstrap_blue_schema():
     """Create blue tables once per session so cleanup_e2e_data has something to delete from."""
@@ -82,3 +125,24 @@ async def cleanup_e2e_data(tsdb_conn):
     await _delete_e2e_data(tsdb_conn)
     yield
     await _delete_e2e_data(tsdb_conn)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def disarm_cagg_refresh_policy(tsdb_conn):
+    """Keep blue's cagg refresh policy disarmed for the whole run.
+
+    Removing it once at bootstrap is not enough: every test that enters the
+    blue app's lifespan runs `init_db` -> `ensure_schema_blue` ->
+    `ensure_aggregates`, which re-adds the policy — freshly armed, so the
+    scheduler fires it immediately. Disarming around each test means a re-arm
+    lives only until that test ends, instead of leaving a background refresh
+    running under everything that follows.
+
+    Red's policy is handled by that suite's own schema teardown, which
+    bootstraps and drops the red schema per test.
+    """
+    await remove_cagg_refresh_policy(tsdb_conn)
+    await tsdb_conn.commit()
+    yield
+    await remove_cagg_refresh_policy(tsdb_conn)
+    await tsdb_conn.commit()

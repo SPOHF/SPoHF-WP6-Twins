@@ -7,7 +7,7 @@ import pytest
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from tests.e2e.conftest import RED_TSDB_DSN
+from tests.e2e.conftest import RED_TSDB_DSN, remove_cagg_refresh_policy
 from wp6_data.red.tsdb import ensure_schema_red
 
 pytestmark = pytest.mark.e2e
@@ -18,38 +18,16 @@ async def _drop_red_schema(conn) -> None:
 
     Order matters twice over:
 
-    1. `ensure_aggregates` installs a continuous-aggregate *refresh policy*, which
-       is a TimescaleDB background job that starts running immediately. If its
-       worker is touching the cagg's catalog row while we drop the view, Postgres
-       raises `InternalError: tuple concurrently updated`. Removing the policy
-       first deletes the job *and blocks until any in-flight run finishes*, so the
-       DROP below is genuinely unraced rather than merely usually-unraced. (Seen
-       on CI, which is slow enough to lose this race; local runs win it.)
+    1. Each test here bootstraps the red schema, so each one re-arms the cagg
+       refresh policy — a background job whose worker would raise
+       `InternalError: tuple concurrently updated` if it touched the cagg's
+       catalog row while we drop the view. See remove_cagg_refresh_policy.
 
     2. The cagg depends on the `readings` hypertable, so it must be dropped before
        `DROP TABLE readings CASCADE`.
     """
+    await remove_cagg_refresh_policy(conn)
     async with conn.cursor() as cur:
-        # Guarded inside PL/pgSQL, not with a plain `WHERE EXISTS`: the function
-        # takes a REGCLASS, and Postgres resolves 'sensors_daily_summary'::regclass
-        # at *plan* time — so a top-level SELECT fails to plan at all when the view
-        # is absent (the normal case on the pre-test drop against a fresh database),
-        # however the WHERE clause is written. Inside a DO block the inner statement
-        # is only planned once the IF is reached.
-        await cur.execute(
-            """
-            DO $$
-            BEGIN
-                IF EXISTS (
-                    SELECT 1 FROM timescaledb_information.continuous_aggregates
-                    WHERE view_name = 'sensors_daily_summary'
-                ) THEN
-                    PERFORM remove_continuous_aggregate_policy(
-                        'sensors_daily_summary', if_exists => true);
-                END IF;
-            END $$;
-            """,
-        )
         await cur.execute("DROP MATERIALIZED VIEW IF EXISTS sensors_daily_summary")
         await cur.execute("DROP TABLE IF EXISTS daily_coverage CASCADE")
         await cur.execute("DROP TABLE IF EXISTS sync_metadata CASCADE")
