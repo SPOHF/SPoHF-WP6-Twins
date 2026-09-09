@@ -137,8 +137,13 @@ async def crop_cycles_page(
     variety = variety if variety in {*all_devices, "both"} else "both"
     devices = all_devices if variety == "both" else {variety: all_devices[variety]}
 
+    # How repeat samples of one cohort combine is the measure's own business,
+    # declared beside its unit and alias rather than assumed here.
+    measure_agg = deps.metadata.sensor_defaults[measure].agg
+
     view = await assemble_waterfall(
         provider, config, config.cycles, metric, measure, devices, timezone,
+        measure_agg=measure_agg,
     )
 
     measure_label = dict(measures).get(measure, measure)

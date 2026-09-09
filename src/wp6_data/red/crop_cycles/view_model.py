@@ -19,6 +19,7 @@ from datetime import date
 
 import pandas as pd  # type: ignore[import-untyped]
 
+from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.cycles import (
     Cohort,
     CohortSpec,
@@ -72,6 +73,7 @@ def build_waterfall(
     *,
     device_labels: dict[str, str],
     agg: str = "avg",
+    measure_agg: str = "avg",
 ) -> WaterfallView:
     """Lanes for ``cohorts``, with measurements attached and coverage computed.
 
@@ -80,8 +82,16 @@ def build_waterfall(
     lane — a cohort is keyed by the week fruit set, not by cultivar — so they
     arrive as two markers distinguished by ``series``. That assumes both follow
     the same development model, which is v1's stated simplification.
+
+    A cohort can be sampled more than once for the same cultivar — several
+    berries off one truss, or two passes in the completion week — so the rows
+    are **summarised into one marker per (cohort, cultivar)**. How they combine
+    is ``measure_agg``, which comes from the measure's own metadata: "avg" for
+    anything measured per item (a concentration, a per-berry weight), "sum" for
+    a total over the window such as a yield picked across several harvests.
+    Averaging a total would report a fraction of the real figure.
     """
-    by_key: dict[str, list[Marker]] = {}
+    grouped: dict[tuple[str, str], list[float]] = {}
     unattached: list[Unattached] = []
 
     for row in observations.itertuples(index=False):
@@ -90,8 +100,22 @@ def build_waterfall(
             unattached.append(Unattached(row.date, row.device, float(row.value)))
             continue
         label = device_labels.get(row.device, row.device)
-        by_key.setdefault(cohort.key, []).append(
-            Marker(value=round(float(row.value), 2), label=label, series=label)
+        grouped.setdefault((cohort.key, label), []).append(float(row.value))
+
+    if measure_agg not in CHART_AGG_FUNCS:
+        raise ValueError(
+            f"unknown measure agg {measure_agg!r}; "
+            f"expected one of {sorted(CHART_AGG_FUNCS)}"
+        )
+    summarise = getattr(pd.Series, CHART_AGG_FUNCS[measure_agg])
+
+    by_key: dict[str, list[Marker]] = {}
+    for (key, label), values in grouped.items():
+        by_key.setdefault(key, []).append(
+            Marker(
+                value=round(float(summarise(pd.Series(values))), 2),
+                label=label, series=label, samples=len(values),
+            )
         )
 
     # One series present means no pairing, so drop the series tag and let the
@@ -99,7 +123,7 @@ def build_waterfall(
     only_one = len({m.series for markers in by_key.values() for m in markers}) <= 1
     if only_one:
         by_key = {
-            key: [Marker(m.value, m.label) for m in markers]
+            key: [Marker(m.value, m.label, samples=m.samples) for m in markers]
             for key, markers in by_key.items()
         }
 
@@ -125,6 +149,7 @@ async def assemble_waterfall(
     sensor: str,
     devices: dict[str, str],
     timezone: str,
+    measure_agg: str = "avg",
 ) -> WaterfallView:
     """:func:`build_waterfall` plus the climate and measurement reads.
 
@@ -159,4 +184,5 @@ async def assemble_waterfall(
     return build_waterfall(
         cohorts, spec, observations, daily,
         device_labels=devices, agg=metric.agg,
+        measure_agg=measure_agg,
     )

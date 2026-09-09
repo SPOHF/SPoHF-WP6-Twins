@@ -63,11 +63,19 @@ CHIP_PITCH = 34
 
 @dataclass(frozen=True)
 class Marker:
-    """An outcome observed for a lane. ``series`` pairs markers on one lane."""
+    """An outcome observed for a lane. ``series`` pairs markers on one lane.
+
+    One marker per series per lane: a lane may be sampled several times over
+    its span, but the chip says how the lane *turned out*, so the caller
+    summarises those samples into one value before it gets here. ``samples``
+    carries how many went in, and appears on hover — a mean of eight readings
+    and a single reading are different claims and should not look alike.
+    """
 
     value: float
     label: str = ""
     series: str = ""
+    samples: int = 1
 
 
 @dataclass(frozen=True)
@@ -277,6 +285,8 @@ def _value_chips(lanes, pos, colors, span, marker_label):
                         f"{lane.cohort.label} · "
                         f"{marker.label or marker.series or marker_label}: "
                         f"{marker.value:g}"
+                        + (f" (mean of {marker.samples})" if marker.samples > 1
+                           else "")
                     ),
                 )
             )

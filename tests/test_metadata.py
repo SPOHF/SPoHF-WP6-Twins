@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from wp6_data.red.sijia.parser import COLUMN_TO_SENSOR
 from wp6_data.shared.metadata import (
     DeviceMetadata,
@@ -213,3 +216,17 @@ def test_wildcard_device_supplies_sensor_intention(tmp_path: Path) -> None:
     meta = registry.sensor("shoot_length", "Org1 / plant 7")
     assert meta.unit == "cm"  # from defaults
     assert meta.intention == "Cane length"  # from the matched wildcard device
+
+
+class TestSensorAgg:
+    """How repeat readings of a measure combine is declared, not assumed."""
+
+    def test_defaults_to_avg(self):
+        assert SensorMetadata().agg == "avg"
+
+    def test_a_total_measure_can_declare_sum(self):
+        assert SensorMetadata(agg="sum").agg == "sum"
+
+    def test_an_unsupported_agg_fails_loudly_on_load(self):
+        with pytest.raises(ValidationError, match="unknown agg"):
+            SensorMetadata(agg="median")

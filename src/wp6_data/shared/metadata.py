@@ -32,7 +32,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 
 _GLOB_CHARS = frozenset("*?[")
 
@@ -50,6 +52,22 @@ class SensorMetadata(BaseModel):
     alias: str = ""
     intention: str = ""
     source: str = ""  # routing key; "" = MySQL default for red, datalake for blue
+    # How several readings of this measure combine into one figure for a period.
+    # "avg" is right for anything measured *per item* — a concentration, a
+    # per-berry weight, a score — which is every measure either twin takes
+    # today. Declare "sum" for a measure that is a *total* over the period, such
+    # as a yield picked across several harvests: averaging those would report a
+    # fraction of the real figure. Validated against CHART_AGG_FUNCS on load.
+    agg: str = "avg"
+
+    @field_validator("agg")
+    @classmethod
+    def _known_agg(cls, value: str) -> str:
+        if value not in CHART_AGG_FUNCS:
+            raise ValueError(
+                f"unknown agg {value!r}; expected one of {sorted(CHART_AGG_FUNCS)}"
+            )
+        return value
 
 
 class DeviceMetadata(BaseModel):

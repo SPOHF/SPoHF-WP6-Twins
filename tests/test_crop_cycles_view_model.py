@@ -11,6 +11,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from wp6_data.red.crop_cycles.config import load_crop_cycles, to_cohort_spec, to_cycle_spec
 from wp6_data.red.crop_cycles.view_model import build_waterfall
@@ -77,6 +78,75 @@ class TestAttachment:
             COHORTS, SPEC, _obs([]), _full_daily(), device_labels=DEVICES,
         )
         assert {lane.group for lane in view.lanes} == {CYCLE.label}
+
+
+class TestSampleAggregation:
+    """Several samples of one cohort become one marker, not several chips."""
+
+    def test_repeat_samples_of_one_cultivar_are_averaged(self):
+        target = COHORTS[5]
+        view = build_waterfall(
+            COHORTS, SPEC,
+            _obs([(target.end, "dev-a", 4.0),
+                  (target.end, "dev-a", 5.0),
+                  (target.end + timedelta(days=1), "dev-a", 6.0)]),
+            _full_daily(), device_labels=DEVICES,
+        )
+        markers = view.measured[0].markers
+        assert len(markers) == 1
+        assert markers[0].value == 5.0
+        assert markers[0].samples == 3
+
+    def test_each_cultivar_is_averaged_separately(self):
+        target = COHORTS[5]
+        view = build_waterfall(
+            COHORTS, SPEC,
+            _obs([(target.end, "dev-a", 4.0), (target.end, "dev-a", 6.0),
+                  (target.end, "dev-b", 1.0), (target.end, "dev-b", 3.0)]),
+            _full_daily(), device_labels=DEVICES,
+        )
+        markers = {m.series: m for m in view.measured[0].markers}
+        assert markers["Alpha"].value == 5.0
+        assert markers["Beta"].value == 2.0
+        assert all(m.samples == 2 for m in markers.values())
+
+    def test_a_lone_sample_reports_one_sample(self):
+        """A mean of eight and a single reading must not look alike on hover."""
+        view = build_waterfall(
+            COHORTS, SPEC, _obs([(COHORTS[5].end, "dev-a", 4.2)]),
+            _full_daily(), device_labels=DEVICES,
+        )
+        assert view.measured[0].markers[0].samples == 1
+
+    def test_a_total_measure_sums_rather_than_averages(self):
+        """A yield picked across several passes is a total, not a per-item mean."""
+        target = COHORTS[5]
+        view = build_waterfall(
+            COHORTS, SPEC,
+            _obs([(target.end, "dev-a", 100.0),
+                  (target.end + timedelta(days=1), "dev-a", 60.0)]),
+            _full_daily(), device_labels=DEVICES, measure_agg="sum",
+        )
+        marker = view.measured[0].markers[0]
+        assert marker.value == 160.0
+        assert marker.samples == 2
+
+    def test_an_unknown_measure_agg_raises_rather_than_guessing(self):
+        with pytest.raises(ValueError, match="unknown measure agg"):
+            build_waterfall(
+                COHORTS, SPEC, _obs([(COHORTS[5].end, "dev-a", 4.2)]),
+                _full_daily(), device_labels=DEVICES, measure_agg="median",
+            )
+
+    def test_samples_survive_the_single_series_collapse(self):
+        view = build_waterfall(
+            COHORTS, SPEC,
+            _obs([(COHORTS[5].end, "dev-a", 4.0), (COHORTS[5].end, "dev-a", 6.0)]),
+            _full_daily(), device_labels=DEVICES,
+        )
+        marker = view.measured[0].markers[0]
+        assert marker.series == ""  # collapsed: only one cultivar present
+        assert marker.samples == 2
 
 
 class TestVarieties:
