@@ -129,6 +129,25 @@ def test_parse_scales_water_content_fraction_to_percentage(seed_readings) -> Non
     assert matches[0].value == pytest.approx(expected_pct)
 
 
+def test_parse_scales_brix_fraction_to_degrees_brix(seed_readings) -> None:
+    # Sijia stores 'umgerechnete °Brix' as a mass fraction, like Water Content.
+    # °Brix is g sucrose per 100 g, so the same x100 scaling yields the
+    # conventional 2-7 range a horticulturalist expects to read off a chart.
+    raw_samples = [0.03654, 0.03336, 0.03636, 0.03618]
+    expected_brix = sum(raw_samples) / len(raw_samples) * 100
+
+    matches = [
+        r
+        for r in seed_readings
+        if r.device_name == "neurath-B-2034-strabelina"
+        and r.sensor_tag == "brix"
+        and r.time.date() == date(2025, 8, 7)
+    ]
+
+    assert len(matches) == 1
+    assert matches[0].value == pytest.approx(expected_brix)
+
+
 def test_parse_drops_nan_weight_cells_without_emitting_zero(seed_readings) -> None:
     # All 4 Weight (g) samples for Strabelina @ B-2034 on 2025-08-07 are NaN.
     # All 4 Weight (g) samples for Shivious @ B-2012 on 2025-10-02 are filled.
@@ -160,9 +179,9 @@ def test_validate_seed_returns_report_with_file_facts(seed_bytes) -> None:
     assert all(c in "0123456789abcdef" for c in report.file_hash)
     assert report.file_size == len(seed_bytes)
 
-    # Row counts (seed has 112 populated rows, all dtype-valid)
-    assert report.total_rows == 112
-    assert report.valid_rows == 112
+    # Row counts (seed has 128 populated rows, all dtype-valid)
+    assert report.total_rows == 128
+    assert report.valid_rows == 128
     assert report.skipped_rows == ()
 
     # Distinct devices and sensors derived from emitted readings
@@ -171,7 +190,7 @@ def test_validate_seed_returns_report_with_file_facts(seed_bytes) -> None:
     assert "chlorophyll" in report.sensors
 
     # Date range covers the populated data
-    assert report.date_range == (date(2025, 8, 7), date(2026, 4, 16))
+    assert report.date_range == (date(2025, 8, 7), date(2026, 5, 26))
 
 
 def test_validate_raises_on_wrong_sheet_name() -> None:
@@ -193,6 +212,60 @@ def test_validate_raises_when_em_dash_header_is_replaced_with_hyphen() -> None:
 
     with pytest.raises(SijiaParseError):
         validate(bad)
+
+
+def test_header_mismatch_names_an_added_column_and_its_excel_letter() -> None:
+    """Regression: Sijia inserted '°Brix' mid-sheet and the rejection message
+    truncated the actual header to the expected width — so the added column
+    vanished from the message and the LAST column looked missing instead."""
+    headers = list(EXPECTED_HEADERS)
+    headers.insert(10, "Sugar (g)")  # Excel column K
+    bad = _xlsx_bytes(SHEET_NAME, headers, [])
+
+    with pytest.raises(SijiaParseError) as exc:
+        validate(bad)
+
+    message = str(exc.value)
+    assert "unexpected: K 'Sugar (g)'" in message
+    # Nothing was removed, so no column may be reported missing.
+    assert "missing" not in message
+
+
+def test_header_mismatch_names_a_removed_column() -> None:
+    headers = [h for h in EXPECTED_HEADERS if h != "NFI"]
+    bad = _xlsx_bytes(SHEET_NAME, headers, [])
+
+    with pytest.raises(SijiaParseError) as exc:
+        validate(bad)
+
+    assert "missing: 'NFI'" in str(exc.value)
+
+
+def test_header_mismatch_points_at_the_first_reordered_column() -> None:
+    # Same column names, swapped positions: the parser reads values by index,
+    # so this must be caught and located, not merely reported as "mismatch".
+    headers = list(EXPECTED_HEADERS)
+    chlm = headers.index("ChlM")
+    headers[chlm], headers[chlm + 1] = headers[chlm + 1], headers[chlm]
+    bad = _xlsx_bytes(SHEET_NAME, headers, [])
+
+    with pytest.raises(SijiaParseError) as exc:
+        validate(bad)
+
+    message = str(exc.value)
+    assert "out of order" in message
+    assert "'ChlM'" in message
+
+
+def test_header_with_trailing_blank_columns_is_accepted() -> None:
+    """Excel reports styled-but-empty cells past the last real column. Padding
+    alone must not reject an otherwise-good file."""
+    headers = list(EXPECTED_HEADERS) + [None, None, "  "]
+    padded = _xlsx_bytes(SHEET_NAME, headers, [])
+
+    report = validate(padded)
+
+    assert report.total_rows == 0
 
 
 def test_validate_reports_rows_with_non_numeric_sensor_values_as_skipped() -> None:

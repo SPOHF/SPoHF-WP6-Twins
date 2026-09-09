@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from datetime import datetime, time
 
 import openpyxl
+from openpyxl.utils import get_column_letter
 
 from wp6_data.shared.manual_ingest.parsing import DecodedRow, bind
 from wp6_data.shared.manual_ingest.types import (
@@ -54,6 +55,8 @@ COLUMN_TO_SENSOR: dict[str, str] = {
     "AnthM": "anthocyanins",
     "NFI": "nfi",
     "Water Content (% of weight)": "water_content",
+    # Trailing space is Sijia's, and the header match is exact — keep it.
+    "umgerechnete °Brix ": "brix",
     "Minerals (% of weight)": "minerals",
     "Size Ø (mm)": "diameter",
     "Weight (g)": "weight",
@@ -68,9 +71,12 @@ COLUMN_TO_SENSOR: dict[str, str] = {
 # Headers compared exactly (em-dash sensitive). Order matters.
 EXPECTED_HEADERS: tuple[str, ...] = META_COLUMNS + tuple(COLUMN_TO_SENSOR.keys())
 
-# Sensors whose Excel value is a 0..1 fraction; parser scales to percentage
+# Sensors whose Excel value is a 0..1 fraction; parser scales to per-100 units
 # so Y-axes are consistent with sensor data conventions (e.g. humidity %RH).
-PERCENTAGE_SENSORS: frozenset[str] = frozenset({"water_content", "minerals"})
+# °Brix is a g-per-100-g mass fraction, so it takes the same scaling.
+PERCENTAGE_SENSORS: frozenset[str] = frozenset(
+    {"water_content", "minerals", "brix"}
+)
 
 
 class SijiaParseError(ManualParseError):
@@ -95,6 +101,73 @@ _SENSOR_COL_INDICES: tuple[tuple[int, str], ...] = tuple(
     (EXPECTED_HEADERS.index(col), sensor)
     for col, sensor in COLUMN_TO_SENSOR.items()
 )
+
+
+# Long mismatch lists (a wholly wrong file) are truncated so the rejection
+# page stays readable; the first few names are enough to identify the problem.
+_MAX_LISTED_COLUMNS = 5
+
+
+def _listed(items: list[str]) -> str:
+    shown = ", ".join(items[:_MAX_LISTED_COLUMNS])
+    extra = len(items) - _MAX_LISTED_COLUMNS
+    return f"{shown} (+{extra} more)" if extra > 0 else shown
+
+
+def _strip_trailing_blanks(header_row: tuple) -> tuple:
+    """Header cells with Excel's trailing empty padding removed.
+
+    Excel reports styled-but-empty cells past the last real column, and in
+    read_only mode openpyxl trusts the sheet's declared dimension, so a raw
+    comparison would reject a good file over padding alone. Only *trailing*
+    blanks are dropped — an added column in the middle survives and gets
+    reported, which a truncating slice would have silently swallowed.
+    """
+    cells = list(header_row)
+    while cells and (cells[-1] is None or str(cells[-1]).strip() == ""):
+        cells.pop()
+    return tuple(cells)
+
+
+def _describe_header_mismatch(actual: tuple) -> str:
+    """Explain a header mismatch in terms a spreadsheet author can act on.
+
+    Names the columns that were added (with their Excel letter) and removed,
+    rather than dumping two ~20-column tuples the reader has to diff by eye.
+    """
+    unexpected = [
+        f"{get_column_letter(idx + 1)} {cell!r}"
+        for idx, cell in enumerate(actual)
+        if cell not in EXPECTED_HEADERS
+    ]
+    missing = [repr(h) for h in EXPECTED_HEADERS if h not in actual]
+
+    parts: list[str] = []
+    if unexpected:
+        parts.append(f"unexpected: {_listed(unexpected)}")
+    if missing:
+        parts.append(f"missing: {_listed(missing)}")
+    if not parts:
+        # Same names, so the columns were reordered — point at the first
+        # position that diverges.
+        # strict=False: a duplicated name can leave the lengths unequal
+        # even when both headers carry the same set of names.
+        pairs = zip(actual, EXPECTED_HEADERS, strict=False)
+        for idx, (got, want) in enumerate(pairs):
+            if got != want:
+                parts.append(
+                    f"out of order at column {get_column_letter(idx + 1)}: "
+                    f"expected {want!r}, got {got!r}"
+                )
+                break
+    if not parts:  # e.g. a duplicated column name; fall back to the raw header
+        parts.append(f"got {actual!r}")
+
+    return (
+        f"Column headers mismatch in sheet {SHEET_NAME!r} "
+        f"({len(actual)} columns, expected {len(EXPECTED_HEADERS)}) — "
+        + "; ".join(parts)
+    )
 
 
 def _decode(file_bytes: bytes) -> Iterator[DecodedRow | SkippedRow]:
@@ -127,12 +200,9 @@ def _decode(file_bytes: bytes) -> Iterator[DecodedRow | SkippedRow]:
         except StopIteration:
             raise SijiaParseError(f"Sheet {SHEET_NAME!r} is empty") from None
 
-        actual_headers = tuple(header_row[: len(EXPECTED_HEADERS)])
+        actual_headers = _strip_trailing_blanks(header_row)
         if actual_headers != EXPECTED_HEADERS:
-            raise SijiaParseError(
-                f"Column headers mismatch. Expected {EXPECTED_HEADERS!r}, "
-                f"got {actual_headers!r}"
-            )
+            raise SijiaParseError(_describe_header_mismatch(actual_headers))
 
         for excel_idx, raw_row in enumerate(rows_iter, start=2):
             # First all-empty / NULL-Date row marks end of measurements;

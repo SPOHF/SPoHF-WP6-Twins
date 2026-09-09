@@ -150,6 +150,11 @@ sensor_defaults:
     unit: "%"
     alias: "Water Content"
     source: "sijia"
+  brix:
+    type: "fruit chemistry"
+    unit: "°Brix"
+    alias: "Brix"
+    source: "sijia"
   minerals:
     type: "fruit chemistry"
     unit: "%"
