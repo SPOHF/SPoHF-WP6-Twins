@@ -11,7 +11,6 @@ from wp6_data.blue.routes import api as blue_api
 from wp6_data.blue.routes import charts as blue_charts
 from wp6_data.blue.routes import gdd as gdd_route
 from wp6_data.blue.routes import ops
-from wp6_data.blue.routes import seasons as seasons_route
 from wp6_data.blue.routes.monitor import broken_sensors as broken_sensors_monitor
 from wp6_data.blue.routes.monitor import legacy_router as legacy_monitor_router
 from wp6_data.blue.routes.monitor import manual as manual_monitor
@@ -35,18 +34,6 @@ def _gdd_card() -> str:
             "prediction."
         ),
         card_class="card-bg card-bg-growth",
-    )
-
-
-def _seasons_card() -> str:
-    return render_card(
-        "Seasons",
-        '<a href="/seasons/" role="button">Treatment Seasons</a>',
-        description=(
-            "Each treatment's season, painted with the weather it grew in and "
-            "carrying its fruit measurement."
-        ),
-        card_class="card-bg card-bg-cycles",
     )
 
 
@@ -113,7 +100,6 @@ config = TwinConfig(
         blue_api.router,
         blue_charts.router,
         gdd_route.router,
-        seasons_route.router,
         monitor_router,
         legacy_monitor_router,
         manual_monitor.router,
@@ -127,7 +113,7 @@ config = TwinConfig(
             render_fertilization_strategies_tab(),
         ),
     },
-    hero_cards=[_gdd_card, _seasons_card, _monitor_card],
+    hero_cards=[_gdd_card, _monitor_card],
     status_extras=blue_manual.manual_cards(),
     export_sanitise_names=True,
     # Authenticated twin (TwinConfig.require_auth defaults to True): the app

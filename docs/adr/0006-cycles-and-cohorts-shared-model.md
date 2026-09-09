@@ -95,5 +95,17 @@ reading), and days outside every cohort are not drawn at all.
 - A climate metric is a `(device, sensor)` pair in `metadata.yaml`, so moving one
   onto a per-height wire device later is a config edit, not a redesign — the
   payoff of modelling heights as devices (red ADR 0001).
-- Blue's adapter is unbuilt. The types are shaped for it, and are simpler for
-  having dropped the phase seam that only blue would have used.
+- **Blue was built on this model and then removed** (2026-09). A seasons page
+  gave blue one lane per treatment per season, painted with the farm's weather
+  and carrying each treatment's outcome. It worked — the numbers verified
+  against the source spreadsheets — but the view was not one blue wanted, and
+  the waterfall stays a red feature. Blue keeps its GDD tracker and monitors.
+  Do not rebuild it without asking: the objection was to the view, not to a
+  defect.
+- The consequence is that `shared/cycles.py`, `shared/waterfall.py` and
+  `shared/series.py` have **one consumer, by choice rather than by accident**.
+  They stayed in `shared/` after blue was removed because they name no twin and
+  moving them back is churn that buys nothing; the earlier judgement that a
+  second twin pays for an abstraction still holds, it simply has not been
+  collected. A future twin adopting periods-on-a-calendar starts from types
+  that a second twin has already been fitted to once.

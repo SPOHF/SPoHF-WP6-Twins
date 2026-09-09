@@ -18,8 +18,7 @@ from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.export import get_export_metadata as _get_export_metadata
 from wp6_data.shared.metadata import MetadataRegistry
 
-METADATA_PATH = Path(__file__).parent / "metadata.yaml"
-metadata = MetadataRegistry(METADATA_PATH)
+metadata = MetadataRegistry(Path(__file__).parent / "metadata.yaml")
 
 # Manual-source values written to readings.`source` (e.g. "insects"). Derived
 # from metadata (single source of truth: sensors whose metadata declares a
