@@ -47,6 +47,31 @@ _Avoid_: calling it PAR, or treating it as H1's reading — it sits above H1 and
 When the relay *inserted* a wire reading, not when the sensor measured it — it equals `created_at` on virtually every row. It is **not unique per device**: the relay writes in bursts, so several genuinely different readings routinely share one second. A wire reading is therefore identified by its source row, never by `(device, received_at)`. Trapezoidal **Height DLI** integration is unharmed — a burst spans zero seconds and contributes no area, so the burst's last reading carries the interval — but any consumer that pivots or groups on time will silently average away real readings.
 _Avoid_: treating `received_at` as a measurement timestamp, or as a key.
 
+**Crop cycle**:
+One planting-to-clearing season, declared in `metadata.yaml` under `crop_cycles`
+(red ADR 0006). Cycles are separated by crop-free weeks — red's counterpart to
+the yearly framing blue uses. The declared dates are PROVISIONAL until Neurath
+confirms them; the crop-cycles view reports any measurement that attaches to no
+**Fruit cohort**, which is how a wrong date announces itself.
+_Avoid_: treating a crop cycle as a calendar year — it is neither year-aligned
+nor one-per-year.
+
+**Fruit cohort**:
+The fruit that set in one week, harvested about eight weeks later. A new cohort
+starts every week while a cycle runs, so with the configured 8-week duration
+**eight cohorts are in flight in parallel**, each a different number of weeks
+along. Derived
+per request from config arithmetic — deliberately *not* persisted, unlike a
+**Risk episode**, because there is nothing expensive to detect.
+_Avoid_: "crop cycle" for a cohort — the cycle is the season, the cohort is one
+week's fruit within it.
+
+**Development window**:
+A **Fruit cohort**'s `[start, end)` span — the period over which its climate
+exposure is aggregated. Paired with a *coverage* fraction, since red's
+greenhouse sensors began reporting partway through the first measured season, so
+early cohorts have only partly-observed windows and are drawn faded.
+
 **VPD** (Vapour Pressure Deficit):
 A derived dryness-of-air metric computed from temperature and humidity *at the same height*. Shown per growth section as a trendline against a configured *healthy band*; excursions out of the band signal transpiration stress.
 
@@ -66,6 +91,9 @@ Episodes are **persisted in a rebuildable cache**, maintained by two admin actio
 - A **Risk episode** is a discrete on/off span derived from a risk metric crossing its active threshold; the admin audit lists episodes over a chosen range.
 - The wire **replaced** the retired PAR-only per-height sensors (`s2100-10..15`).
 - **DLI** is derived from **Natural/Total light**, independently of the wire.
+- A **Crop cycle** contains overlapping **Fruit cohorts**, one starting each week.
+- A Sijia measurement attaches to the **Fruit cohort** whose completion week contains
+  its date; one that attaches to nothing is surfaced, never dropped.
 - Each **Height** is exported as its own CSV (`WS_01_01-h1.csv`), one row per source row — because **Reading time** cannot identify a reading.
 - **Solar radiation** belongs to the **Multi-height wire**, not to a measured **Height** — it hangs above H1, modelled as the virtual **height 0** device (`WS_01_0N-h0`) so it fits the `(device, sensor)` contract without a per-wire device kind.
 
@@ -80,5 +108,11 @@ Episodes are **persisted in a rebuildable cache**, maintained by two admin actio
 - "height ordering unknown" — resolved: ordering is now declared by config (H1 highest … H5 root) as a horticultural assumption; only the inter-level *distances* remain unknown. See **Growth section**.
 - "is `received_at` the measurement time?" — resolved (2026-07, while adding wire CSV exports): no, it is the relay's *insert* time and is not unique per device. See **Reading time**. The true measurement time is not recorded anywhere, so sub-burst ordering is unrecoverable.
 - "does every wire sit in the same **Position**?" — open: `WS_01_03` was declared as position "B" to match the others; not yet confirmed with WP1.
+- "**Cohort phase** vs **Growth section** — same labels, different axis?" — dissolved
+  (2026-09, same week): cohort phases were modelled, then removed entirely. Their
+  boundaries were fixed offsets from the set date, so they said nothing the start date
+  did not, and they spent the waterfall's colour on a known schedule. That colour now
+  carries the climate each cohort lived through. **Growth section** is again the only
+  user of those labels. See [ADR 0006](../../../docs/adr/0006-cycles-and-cohorts-shared-model.md).
 - "where does **Solar radiation** hang in the device model?" — resolved: modelled as virtual **height 0** (`WS_01_0N-h0`), a level above H1 that carries `rad` alone and maps onto no growth section. Its **unit** is still unconfirmed with WP1 — declared W/m² because `decimal(5,0)` admits no fraction, but not verified.
 

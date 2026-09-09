@@ -11,6 +11,15 @@ from wp6_data.shared.charts import (
     prepare_comparison,
     render_coverage_grid,
 )
+from wp6_data.shared.cycles import (
+    Cohort,
+    CohortSpec,
+    CycleSpec,
+    cohort_for_date,
+    exposure,
+    generate_cohorts,
+    overlap_at,
+)
 from wp6_data.shared.templates import (
     build_explore_tabs,
     default_date_range,
@@ -31,18 +40,28 @@ from wp6_data.shared.templates import (
     resolve_date_range,
     utc_day_bounds,
 )
+from wp6_data.shared.waterfall import Lane, Marker, render_waterfall
 
 __all__ = [
-    "PRESENCE_NONE_COLOR",
     "build_explore_tabs",
     "build_weekly_coverage",
+    "Cohort",
+    "cohort_for_date",
+    "CohortSpec",
+    "CycleSpec",
     "default_date_range",
+    "exposure",
+    "generate_cohorts",
+    "Lane",
     "make_bar_chart",
     "make_dual_axis_chart",
     "make_line_chart",
     "make_schedule_chart",
     "make_stacked_area_chart",
+    "Marker",
+    "overlap_at",
     "prepare_comparison",
+    "PRESENCE_NONE_COLOR",
     "render_card",
     "render_coverage_grid",
     "render_dashboard_page",
@@ -58,6 +77,7 @@ __all__ = [
     "render_stat_tile",
     "render_table",
     "render_unified_chart_page",
+    "render_waterfall",
     "resolve_date_range",
     "utc_day_bounds",
 ]

@@ -9,7 +9,14 @@ from wp6_data.db.pool import close_pool, init_pool
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
 from wp6_data.red.provider import RedSensorProvider
-from wp6_data.red.routes import browse, dli, dli_model, multi_height, sijia
+from wp6_data.red.routes import (
+    browse,
+    crop_cycles,
+    dli,
+    dli_model,
+    multi_height,
+    sijia,
+)
 from wp6_data.red.routes import charts as red_charts
 from wp6_data.red.routes.dli_model.train import train_model_from_db
 from wp6_data.red.routes.sijia.card import render_sijia_card
@@ -86,6 +93,15 @@ def _dli_card() -> str:
         card_class="card-bg card-bg-sun",
     )
 
+def _crop_cycles_card() -> str:
+    return render_card(
+        "Crop Cycles",
+        '<a href="/crop-cycles/" role="button">Cohort Waterfall</a>',
+        description="Overlapping 8-week fruit cohorts against the climate they grew in.",
+        card_class="card-bg card-bg-cycles",
+    )
+
+
 def _multi_height_card() -> str:
     return render_card(
         "Multi Height",
@@ -116,8 +132,9 @@ config = TwinConfig(
                    dli_model.router, 
                    red_charts.router,
                    multi_height.router, 
+                   crop_cycles.router,
                    sijia.router],
-    hero_cards=[_dli_card, _multi_height_card],
+    hero_cards=[_dli_card, _multi_height_card, _crop_cycles_card],
     status_extras=[render_sijia_card],
 
     home_extra_html=(

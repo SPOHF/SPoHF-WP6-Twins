@@ -145,6 +145,9 @@
     .card-bg-multi-height::after {
         background-image: url(/static/cards/multi_height.svg);
     }
+    .card-bg-cycles::after {
+        background-image: url(/static/cards/cycles.svg);
+    }
 
     /* --- Stats cards --- */
     .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }

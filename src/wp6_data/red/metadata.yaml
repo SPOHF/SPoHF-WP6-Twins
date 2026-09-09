@@ -40,6 +40,59 @@ risk_thresholds:
   episode:
     min_duration_minutes: 30  # shorter spans are suppressed as flapping
 
+# ── Crop cycles and fruit cohorts (red prescriptive view) ──
+# A crop cycle is one planting-to-clearing season. Within it a truss sets every
+# `interval_days` and ripens over the summed phase durations, so several fruit
+# cohorts are always in flight at once (8, with the values below). Phases are
+# declared by growth-section `height`, not by label, so the labels keep a single
+# source of truth above and the future move to per-height wire climate is a
+# config edit rather than a redesign (see red CONTEXT "Cohort phase").
+# PROVISIONAL — the phase split and especially the cycle dates are horticultural
+# assumptions awaiting confirmation from Neurath/WP1; the view reports any Sijia
+# measurement that attaches to no cohort, which is the signal these are wrong.
+# Red-only; the shared metadata model ignores this key.
+crop_cycles:
+  cohort:
+    interval_days: 7       # a new truss sets each week
+    duration_weeks: 8      # anthesis→harvest; PROVISIONAL, awaiting WP1
+  climate:
+    # The (device, sensor) pairs a cohort's exposure is aggregated from. These
+    # are the greenhouse-level sensors because the multi-height wire only began
+    # reporting after the current Sijia season ended, so the two do not yet
+    # overlap. Swapping a metric onto WS_01_0N-hN needs no code change.
+    metrics:
+      - key: temp
+        label: "Mean temperature"
+        unit: "°C"
+        device: s2101-01-temp-hum
+        sensor: temp
+        agg: avg
+      - key: hum
+        label: "Mean humidity"
+        unit: "%RH"
+        device: s2101-01-temp-hum
+        sensor: hum
+        agg: avg
+      - key: co2
+        label: "Mean CO₂"
+        unit: "ppm"
+        device: s2103-01-temp-hum-co2
+        sensor: co2
+        agg: avg
+      - key: par
+        label: "Mean PAR (total light)"
+        unit: "μmol/m²/s"
+        device: s2100-02-par
+        sensor: par
+        agg: avg
+  cycles:
+    - label: "2025 autumn"
+      start: 2025-06-16    # PROVISIONAL
+      end: 2025-12-08      # PROVISIONAL
+    - label: "2026 spring"
+      start: 2026-01-05    # PROVISIONAL
+      end: 2026-06-29      # PROVISIONAL
+
 sensor_defaults:
   temp:
     type: "temperature"
