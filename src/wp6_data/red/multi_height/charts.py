@@ -16,6 +16,7 @@ from .cells import (
     FUNGAL_COLOR,
     HEIGHT_DLI_COLOR,
     MEASUREMENT_COLORS,
+    METRIC_LABELS,
     RISK_LABELS,
     VPD_LINE_COLOR,
     WIRE_MEASUREMENT_LABELS,
@@ -74,6 +75,85 @@ def make_wire_measurement_plot(df, measurement, timezone):
     )
 
     return fig
+
+
+### Uniformity across wires ###
+# One colour per *wire*, distinct from WIRE_HEIGHT_COLORS above: on this chart
+# height is the axis and the wire is the series, so the two palettes never meet.
+WIRE_COLORS = ["#1d4ed8", "#be123c", "#047857", "#a16207", "#6d28d9"]
+
+
+def wire_profile_chart(view, timezone: str) -> str | None:
+    """The selected metric against height, one line per declared wire.
+
+    Read as a shape rather than a table of fifteen numbers: wires that differ by
+    a constant draw parallel lines, and a wire reading a genuinely different
+    microclimate at one section draws a kink there. The vertical axis runs H1 at
+    the top to H5 at the root, matching how the growth sections are declared and
+    how the crop-climate table reads.
+
+    Wires left out of the comparison are drawn dashed and faint rather than
+    dropped, so a wire that reported too little is visibly *not compared* rather
+    than quietly absent. Returns ``None`` when nothing was measured at all —
+    the caller says so in words.
+    """
+    label, unit = METRIC_LABELS[view.metric]
+    comparable = set(view.comparable_wires)
+
+    fig = go.Figure()
+    drawn = False
+    for index, wire in enumerate(view.wires):
+        points = [
+            (row.height, cell.aggregate)
+            for row in view.rows
+            for cell in row.cells
+            if cell.wire == wire and cell.aggregate is not None
+        ]
+        if not points:
+            continue
+        drawn = True
+        included = wire in comparable
+        color = WIRE_COLORS[index % len(WIRE_COLORS)]
+        fig.add_trace(go.Scatter(
+            x=[value for _, value in points],
+            y=[height for height, _ in points],
+            mode="lines+markers",
+            name=wire if included else f"{wire} (not compared)",
+            line=dict(
+                color=color, width=2.5 if included else 1.5,
+                dash="solid" if included else "dash",
+            ),
+            marker=dict(size=9 if included else 7),
+            opacity=1.0 if included else 0.45,
+            hovertemplate=(
+                f"<b>{wire}</b><br>H%{{y}}<br>{label}: %{{x:.2f}} {unit}"
+                "<extra></extra>"
+            ),
+        ))
+    if not drawn:
+        return None
+
+    # A section label per tick, so the axis speaks the twin's language rather
+    # than bare height numbers; taken from the rows so it cannot drift from the
+    # table above it.
+    fig.update_layout(
+        template="plotly_white",
+        height=380,
+        margin=dict(l=140, r=20, t=20, b=40),
+        xaxis_title=f"{label} ({unit})",
+        yaxis=dict(
+            title="", autorange="reversed",
+            tickmode="array",
+            tickvals=[row.height for row in view.rows],
+            ticktext=[f"H{row.height} {row.label}" for row in view.rows],
+        ),
+        hovermode="closest",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+    )
+    return fig.to_html(
+        full_html=False, include_plotlyjs="cdn",
+        config={"responsive": True, "displaylogo": False},
+    )
 
 
 # Lane colour per risk — reuse each metric's own hue so the timeline matches the

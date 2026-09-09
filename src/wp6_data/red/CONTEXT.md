@@ -78,6 +78,13 @@ A derived dryness-of-air metric computed from temperature and humidity *at the s
 **Fungal-risk** (wet-hours):
 A derived Botrytis-pressure proxy: a rolling accumulation of how long humidity at a height has stayed above a high-RH threshold within a trailing window. Rendered as a continuous trendline — its level/slope, not a hard cutoff, conveys risk. Encodes "humidity too high *for too long*" as one curve.
 
+**Wire spread**:
+At one **Growth section**, the gap between the highest and lowest reading of a metric across the declared **Multi-height wires** — the quantity the uniformity view exists to show. Computed only from wires with enough of the day observed, and only where at least two of them reported: one wire is not a comparison. A configured *notable spread* per metric says how far apart is worth reporting; it is both the colour scale's saturation point and the verdict threshold, so the tint and the sentence can never disagree.
+_Avoid_: reading a spread as a fault — the wires hang in different places, so some of it is the greenhouse, not the instrument. Which it is, is what **Consistent offset** distinguishes.
+
+**Consistent offset**:
+A wire reading the same distance from the other wires' median at *every* height. Because the drift does not depend on the section, it points at the wire — how it hangs, or how it is calibrated — rather than at the crop. Its opposite is a wire that disagrees at one section more than elsewhere, which is a genuinely different local microclimate there. The distinction is the uniformity view's finding; the raw spread alone cannot make it.
+
 **Risk episode**:
 A contiguous span where a risk metric (Fungal-risk, out-of-band VPD, canopy light deficit) at one growth section stayed above its "active" threshold — bounded by when the problem was first *present/observed* and when it was *resolved/gone*. A configured minimum duration suppresses flapping.
 Episodes are **persisted in a rebuildable cache**, maintained by two admin actions: **Update** (incremental — extend the log up to now, the manual stand-in for a scheduled job) and **Rebuild** (recompute a *selectable date range* from the forever-retained raw wire data, used after retuning thresholds). Each episode stamps the threshold-set it was computed under. The page reads the last-built state, so the live per-section verdict is *"as of the last Update/Rebuild"* (automatic refresh via a scheduled job is a deferred upgrade). Rebuilding a range rewrites its episodes under current rules — the log is reproducible, not immutable.
@@ -88,6 +95,8 @@ Episodes are **persisted in a rebuildable cache**, maintained by two admin actio
 - A **Growth section** is a labelled view over a **Height** (1:1, fixed order H1→H5 = top→root, same for every wire).
 - **VPD**, **Fungal-risk**, and **Height DLI** are derived per **Growth section** from its **Measurement type** readings (temp+hum; hum-over-time; PAR-over-day).
 - **Canopy light deficit** compares the top section's **Height DLI** to a target; it is the PAR-based **Risk episode** condition.
+- A **Growth section** is comparable *across* **Multi-height wires**: the H→section mapping is declared identical on every wire, so H3 on one wire and H3 on another name the same canopy zone. That is what makes a **Wire spread** a reading about the greenhouse rather than an artefact of the model.
+- A **Wire spread** is observed per **Growth section** per metric; a **Consistent offset** is a claim about a whole wire, read off those spreads across every section it reported.
 - A **Risk episode** is a discrete on/off span derived from a risk metric crossing its active threshold; the admin audit lists episodes over a chosen range.
 - The wire **replaced** the retired PAR-only per-height sensors (`s2100-10..15`).
 - **DLI** is derived from **Natural/Total light**, independently of the wire.
@@ -107,7 +116,8 @@ Episodes are **persisted in a rebuildable cache**, maintained by two admin actio
 - "height" vs "position" — resolved: **position** is horizontal (zone); **height** is vertical (level on the wire, modelled as a device).
 - "height ordering unknown" — resolved: ordering is now declared by config (H1 highest … H5 root) as a horticultural assumption; only the inter-level *distances* remain unknown. See **Growth section**.
 - "is `received_at` the measurement time?" — resolved (2026-07, while adding wire CSV exports): no, it is the relay's *insert* time and is not unique per device. See **Reading time**. The true measurement time is not recorded anywhere, so sub-burst ordering is unrecoverable.
-- "does every wire sit in the same **Position**?" — open: `WS_01_03` was declared as position "B" to match the others; not yet confirmed with WP1.
+- "does every wire sit in the same **Position**?" — now *measurable*, still unconfirmed: `WS_01_03` was declared as position "B" to match the others, and WP1 has yet to confirm it. The uniformity view supplies the evidence — a wire that carries a **Consistent offset** at every height is somewhere the others are not — but a declared position is WP1's to state, not ours to infer.
+- "do all the wires measure the same things?" — no, and this was invisible until the wires were put side by side (2026-09): on the day first examined, `WS_01_01` reported no PAR at H1–H4, `WS_01_03` reported no temperature, humidity or CO₂ at all, and `WS_01_03`-h4 reported nothing. So a **Wire spread** is only ever computed over the wires that actually observed the metric, and coverage is counted against a metric's *source* measurements rather than against the device. Whether the gaps are installation or fault is open with WP1.
 - "**Cohort phase** vs **Growth section** — same labels, different axis?" — dissolved
   (2026-09, same week): cohort phases were modelled, then removed entirely. Their
   boundaries were fixed offsets from the set date, so they said nothing the start date

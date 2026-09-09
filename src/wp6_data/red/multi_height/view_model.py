@@ -40,6 +40,20 @@ class SectionView:
     vpd: list[float]                # kPa
     fungal: list[float]             # trailing wet-hours, trimmed to the day
 
+    def metric_series(self, metric: str) -> list[float]:
+        """This section's day series for any metric in :data:`CROP_METRICS`.
+
+        Measured and derived series live on different attributes because they
+        are computed differently; a caller that treats the seven metrics
+        uniformly (a chart, a cross-wire comparison) should not have to know
+        which kind it holds.
+        """
+        if metric in WIRE_SENSOR_MEASUREMENTS:
+            return self.series[metric]
+        return {
+            "dli": self.height_dli, "vpd": self.vpd, "fungal": self.fungal,
+        }[metric]
+
 
 @dataclass(frozen=True)
 class CropClimateDay:

@@ -1,10 +1,9 @@
 """HTML cell/badge builders for the red "Crop Climate by Height" (prescriptive) page.
 
 The grid is dense (5×4 trends), so cells use lightweight inline-SVG sparklines
-(no per-cell plotly) plus the latest value. The frame-taking cell builders
-(``height_dli_cell``, ``vpd_cell``, ``fungal_cell``) compute their series via
-the shared risk metrics; the ``*_from_values`` variants render series the
-view-model already computed, so the page never computes a series twice.
+(no per-cell plotly) plus the latest value. Every cell builder takes a series
+the view-model already computed (``*_from_values``), so the page never computes
+a series twice and the cells stay free of climate maths.
 """
 
 import html
@@ -16,7 +15,6 @@ import pandas as pd  # type: ignore[import-untyped]
 
 from wp6_data.shared import render_card
 
-from ..risk.metrics import compute_cumulative_dli, vpd_series, wet_hours_series
 from ..utils import value_to_color
 
 MEASUREMENT_COLORS = {
@@ -55,7 +53,7 @@ def plant_zone_cell(index: int, total: int, uri: str) -> str:
     )
 
 
-def _sparkline_svg(values, color, width=96, height=28):
+def sparkline_svg(values, color, width=96, height=28):
     """Minimal inline-SVG sparkline (no JS), self-normalised to its own range."""
     pts = [float(v) for v in values if v is not None and not pd.isna(v)]
     if len(pts) < 2:
@@ -147,7 +145,7 @@ def measurement_cell(series, measurement, vmin, vmax, height, co2_floor=None):
     spark = (
         _co2_sparkline_svg(series, co2_floor)
         if measurement == "co2" and co2_floor is not None
-        else _sparkline_svg(series, MEASUREMENT_COLORS[measurement])
+        else sparkline_svg(series, MEASUREMENT_COLORS[measurement])
     )
     return (
         _cell_open(height, measurement, f"background:{bg};")
@@ -164,7 +162,29 @@ def measurement_cell(series, measurement, vmin, vmax, height, co2_floor=None):
 HEIGHT_DLI_COLOR = MEASUREMENT_COLORS["par"]
 FUNGAL_COLOR = MEASUREMENT_COLORS["hum"]
 VPD_LINE_COLOR = "#0ea5e9"
-DERIVED_COLUMNS = ["Height DLI", "VPD", "Fungal risk"]
+# Display name + unit per derived metric, keyed like the measured ones above so
+# a caller holding any of the seven metric keys can label it without knowing
+# which kind it is. The table's derived headers are read straight off this, so a
+# renamed column and its chart title can never drift apart.
+DERIVED_METRIC_LABELS = {
+    "dli": ("Height DLI", "mol/m²"),
+    "vpd": ("VPD", "kPa"),
+    "fungal": ("Fungal risk", "h"),
+}
+METRIC_LABELS = {**WIRE_MEASUREMENT_LABELS, **DERIVED_METRIC_LABELS}
+DERIVED_COLUMNS = [label for label, _ in DERIVED_METRIC_LABELS.values()]
+
+# One colour per metric, so a metric reads the same on every multi-height page.
+# The derived ones inherit their source's hue (see the lineage note below).
+
+# Every metric's line colour in one lookup, so a caller holding any of the seven
+# keys can draw it without knowing whether it is measured or derived.
+METRIC_COLORS = {
+    **MEASUREMENT_COLORS,
+    "dli": HEIGHT_DLI_COLOR,
+    "vpd": VPD_LINE_COLOR,
+    "fungal": FUNGAL_COLOR,
+}
 
 # Vertical separator between the measured (left) and derived (right) blocks.
 SEP_BORDER = "border-left:2px solid #cbd5e1;"
@@ -230,16 +250,10 @@ def vpd_sparkline_svg(values, band_min, band_max, width=96, height=28):
 def height_dli_cell_from_values(values, height):
     """Height-DLI cell from a precomputed cumulative-DLI value series."""
     if not values:
-        return _derived_cell("—", _sparkline_svg([], HEIGHT_DLI_COLOR), height, "dli")
+        return _derived_cell("—", sparkline_svg([], HEIGHT_DLI_COLOR), height, "dli")
     return _derived_cell(
-        f"{values[-1]:.1f} mol", _sparkline_svg(values, HEIGHT_DLI_COLOR), height, "dli"
+        f"{values[-1]:.1f} mol", sparkline_svg(values, HEIGHT_DLI_COLOR), height, "dli"
     )
-
-
-def height_dli_cell(par_df, height):
-    cum = compute_cumulative_dli(par_df)
-    values = [] if cum is None or cum.empty else cum["cumulative_dli"].tolist()
-    return height_dli_cell_from_values(values, height)
 
 
 def vpd_cell_from_values(values, band_min, band_max, height):
@@ -252,30 +266,13 @@ def vpd_cell_from_values(values, band_min, band_max, height):
     )
 
 
-def vpd_cell(height_df, band_min, band_max, height):
-    v = vpd_series(height_df)
-    values = [] if v.empty else v["value"].tolist()
-    return vpd_cell_from_values(values, band_min, band_max, height)
-
-
 def fungal_cell_from_values(values, height):
     """Fungal wet-hours cell from a precomputed (day-trimmed) wet-hours series."""
     if not values:
-        return _derived_cell("—", _sparkline_svg([], FUNGAL_COLOR), height, "fungal")
+        return _derived_cell("—", sparkline_svg([], FUNGAL_COLOR), height, "fungal")
     return _derived_cell(
-        f"{values[-1]:.1f} h", _sparkline_svg(values, FUNGAL_COLOR), height, "fungal"
+        f"{values[-1]:.1f} h", sparkline_svg(values, FUNGAL_COLOR), height, "fungal"
     )
-
-
-def fungal_cell(hum_df, rh_pct, window_hours, height, day_start=None):
-    """Fungal wet-hours cell. ``hum_df`` may include the pre-day look-back so the
-    trailing window accumulates across the prior night; the displayed series is
-    trimmed back to ``day_start`` (when given) so only the shown day is drawn."""
-    w = wet_hours_series(hum_df, rh_pct, window_hours)
-    if day_start is not None and not w.empty:
-        w = w[w["time"] >= day_start]
-    values = [] if w.empty else w["value"].tolist()
-    return fungal_cell_from_values(values, height)
 
 
 def section_label_cell(section, state, vpd_band_min, vpd_band_max):

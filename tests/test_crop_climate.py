@@ -17,13 +17,13 @@ from wp6_data.red.db import WIRE_SENSOR_HEIGHTS, wire_device_id
 from wp6_data.red.growth_sections import load_growth_sections
 from wp6_data.red.multi_height.cells import (
     _fmt_duration,
-    _sparkline_svg,
     admin_build_panel,
     audit_table,
-    fungal_cell,
-    height_dli_cell,
+    fungal_cell_from_values,
+    height_dli_cell_from_values,
     section_badges,
-    vpd_cell,
+    sparkline_svg,
+    vpd_cell_from_values,
     vpd_sparkline_svg,
 )
 from wp6_data.red.multi_height.data import series_for
@@ -68,17 +68,17 @@ class TestLoadGrowthSections:
 
 class TestSparklineSvg:
     def test_too_few_points_renders_placeholder(self):
-        assert "polyline" not in _sparkline_svg([], "#000")
-        assert "polyline" not in _sparkline_svg([1.0], "#000")
-        assert "—" in _sparkline_svg([1.0], "#000")
+        assert "polyline" not in sparkline_svg([], "#000")
+        assert "polyline" not in sparkline_svg([1.0], "#000")
+        assert "—" in sparkline_svg([1.0], "#000")
 
     def test_polyline_has_one_point_per_value(self):
-        svg = _sparkline_svg([1.0, 2.0, 3.0], "#000")
+        svg = sparkline_svg([1.0, 2.0, 3.0], "#000")
         points = re.search(r'points="([^"]+)"', svg).group(1)
         assert len(points.split()) == 3
 
     def test_nan_values_are_dropped(self):
-        svg = _sparkline_svg([1.0, float("nan"), 2.0], "#000")
+        svg = sparkline_svg([1.0, float("nan"), 2.0], "#000")
         points = re.search(r'points="([^"]+)"', svg).group(1)
         assert len(points.split()) == 2
 
@@ -149,35 +149,33 @@ class TestMeasurementCell:
 
 
 class TestDerivedCells:
+    """The derived cells render a series the view-model already computed.
+
+    They take values, not frames: the metric maths belongs to
+    ``risk.metrics`` and is exercised there, so what is pinned here is purely
+    what a reader sees.
+    """
+
     def test_height_dli_cell_shows_total_and_sparkline(self):
-        # n readings -> n-1 cumulative points; need 3+ for a drawable line.
-        df = pd.DataFrame({"time": [_at(0), _at(15), _at(30)], "value": [100.0] * 3})
-        out = height_dli_cell(df, 1)
-        assert "mol" in out
+        out = height_dli_cell_from_values([1.0, 5.0, 9.0], 1)
+        assert "9.0 mol" in out
         assert "polyline" in out
         assert 'data-metric="dli"' in out  # clickable
 
     def test_height_dli_cell_empty(self):
-        assert "—" in height_dli_cell(pd.DataFrame(columns=["time", "value"]), 1)
+        assert "—" in height_dli_cell_from_values([], 1)
 
     def test_vpd_cell_renders_value_and_band(self):
-        df = pd.DataFrame({
-            "time": [_at(0), _at(0), _at(15), _at(15)],
-            "measurement": ["temp", "hum", "temp", "hum"],
-            "value": [25.0, 60.0, 26.0, 55.0],
-        })
-        out = vpd_cell(df, 0.4, 1.2, 1)
-        assert "kPa" in out
+        out = vpd_cell_from_values([0.5, 0.9], 0.4, 1.2, 1)
+        assert "0.90 kPa" in out
         assert "<rect" in out  # shaded healthy band
 
     def test_vpd_cell_empty(self):
-        empty = pd.DataFrame(columns=["time", "measurement", "value"])
-        assert "—" in vpd_cell(empty, 0.4, 1.2, 1)
+        assert "—" in vpd_cell_from_values([], 0.4, 1.2, 1)
 
     def test_fungal_cell_shows_hours(self):
-        df = pd.DataFrame({"time": [_at(0), _at(15), _at(30)], "value": [90.0, 90.0, 90.0]})
-        out = fungal_cell(df, 85.0, 24.0, 1)
-        assert " h" in out
+        out = fungal_cell_from_values([1.0, 2.0, 3.5], 1)
+        assert "3.5 h" in out
         assert "polyline" in out
 
     def test_vpd_sparkline_has_band_and_line(self):
@@ -191,18 +189,24 @@ class TestDerivedCells:
     def test_dli_value_uses_source_colour_and_separator(self):
         from wp6_data.red.multi_height.cells import HEIGHT_DLI_COLOR
 
-        df = pd.DataFrame({"time": [_at(0), _at(15), _at(30)], "value": [100.0] * 3})
-        out = height_dli_cell(df, 1)
+        out = height_dli_cell_from_values([1.0, 5.0, 9.0], 1)
         assert HEIGHT_DLI_COLOR in out  # DLI value coloured like its source (PAR)
         assert "border-left" in out     # vertical separator before the derived block
 
     def test_vpd_value_uses_two_parent_gradient(self):
-        df = pd.DataFrame({
-            "time": [_at(0), _at(0), _at(15), _at(15)],
-            "measurement": ["temp", "hum", "temp", "hum"],
-            "value": [25.0, 60.0, 26.0, 55.0],
-        })
-        assert "background-clip:text" in vpd_cell(df, 0.4, 1.2, 1)
+        assert "background-clip:text" in vpd_cell_from_values([0.5, 0.9], 0.4, 1.2, 1)
+
+    def test_derived_headers_come_from_the_metric_labels(self):
+        from wp6_data.red.multi_height.cells import (
+            DERIVED_COLUMNS,
+            DERIVED_METRIC_LABELS,
+            METRIC_LABELS,
+        )
+        from wp6_data.red.multi_height.config import CROP_METRICS
+
+        assert [label for label, _ in DERIVED_METRIC_LABELS.values()] == DERIVED_COLUMNS
+        # Every metric a view can chart must be labellable without a lookup miss.
+        assert set(METRIC_LABELS) == set(CROP_METRICS)
 
 
 class TestSectionBadges:

@@ -62,6 +62,8 @@ For SPoHF, wireless sensors were developed and installed.
   - **Detailed views** with _prescriptive_ insight around the microclimate, to support actions on the different growth stages of the plants, including leaf maintenance, heat control, light control and positioning and water control.
   ![Red Twin Prescriptive Detail view](./assets/red-proto-prescriptive1.png)
 
+  - **Uniformity across wires** — the same growth sections on every installed wire, side by side, so the greenhouse can be asked whether it is uniform: how far apart the wires read at each height, and whether a wire drifts the same way everywhere (where it hangs, or how it is calibrated) or disagrees at just one height (a genuinely different microclimate there).
+
   - **3D visualization** of the microclimates in the entire greenhouse, incorporating multiple multi-height setups
   ![Red Twin 3D](./assets/red-proto-3d.png) (AI-generated prototype)
 

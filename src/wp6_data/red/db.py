@@ -208,6 +208,30 @@ def unpivot_wire_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return records
 
 
+# Column order and dtypes of the tidy wire-readings frame every multi-height
+# view consumes. Declared here so an empty result is typed exactly like a full
+# one: callers do ``df["time"].dt`` and pandas only offers ``.dt`` on a
+# datetime-dtype column, so an untyped empty frame raises rather than yielding
+# an empty view.
+WIRE_READING_COLUMNS = ["device", "height", "measurement", "time", "value"]
+
+
+def wire_readings_frame(records: list[dict[str, Any]]) -> pd.DataFrame:
+    """Tidy, time-sorted readings frame from unpivoted records — empty or not.
+
+    An empty run is still a *typed* frame (UTC ``time``, numeric ``value``), so
+    a day the wire never reported flows through the day filters and metrics as
+    "no rows" instead of raising on a missing ``.dt`` accessor.
+    """
+    df = pd.DataFrame(records, columns=WIRE_READING_COLUMNS)
+    df["time"] = pd.to_datetime(df["time"], utc=True)
+    # Cast rather than infer: on an empty run ``to_numeric`` would land on int64,
+    # so a caller's min/max would change dtype with the weather.
+    df["value"] = pd.to_numeric(df["value"], errors="coerce").astype("float64")
+    df["height"] = pd.to_numeric(df["height"], errors="coerce").astype("int64")
+    return df.sort_values("time")
+
+
 def split_wire_rows_by_height(
     rows: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
@@ -684,13 +708,7 @@ class MySQLConnection:
             await cursor.execute(query, params)
             rows = list(reversed(await cursor.fetchall()))
 
-        columns = ["device", "height", "measurement", "time", "value"]
-        records = unpivot_wire_rows(rows)
-        df = pd.DataFrame(records, columns=columns)
-        if not df.empty:
-            df["time"] = pd.to_datetime(df["time"], utc=True)
-            df = df.sort_values("time")
-        return df
+        return wire_readings_frame(unpivot_wire_rows(rows))
 
     @_retry_on_disconnect()
     async def get_wire_rows(self, physical_device_id: str) -> list[dict[str, Any]]:

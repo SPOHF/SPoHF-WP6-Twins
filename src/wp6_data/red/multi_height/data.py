@@ -11,36 +11,38 @@ from ..db import (
 )
 from ..risk.metrics import compute_dli
 
-USE_LATEST_DATE_IN_DATA = False
-
-
-async def load_wire_sensor_data(start, end):
-    """Tidy long wire-sensor readings for a UTC window: time, height, measurement, value."""
-    df = await deps.db.get_wire_sensor_readings(start=start, end=end)
-
-    if df.empty:
-        return df
-
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
-    return df.dropna(subset=["time", "value"])
-
 
 ### Load data ###
 async def load_wire_readings(start=None, end=None):
-    # All measurements per height from the wire (devices WS_01_01-h1..h5); the
-    # retired s2100-10..15 sensors are gone (ADR 0001). Keeps the height and
-    # measurement columns so the view can pivot per selected measurement.
-    # ``start``/``end`` (UTC) bound the fetch so a dense day-view never scans the
-    # whole wire_sensors table; unbounded only where a view genuinely needs it.
+    """Tidy long wire readings for a UTC window: device, height, measurement, time, value.
+
+    All measurements per height from every declared wire (devices
+    ``WS_01_01-h1``..``-h5``); the retired ``s2100-10..15`` sensors are gone
+    (ADR 0001). Keeps the height and measurement columns so a view can pivot per
+    selected measurement, and the device column so it can scope to one wire.
+
+    ``start``/``end`` (UTC) bound the fetch so a dense day-view never scans the
+    whole ``wire_sensors`` table; unbounded only where a view genuinely needs it.
+    An empty window yields a typed empty frame, not an untyped one — see
+    :func:`~wp6_data.red.db.wire_readings_frame`.
+    """
     df = await deps.db.get_wire_sensor_readings(start=start, end=end)
-
-    if df.empty:
-        return df
-
-    df["time"] = pd.to_datetime(df["time"], utc=True)
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
-
     return df.dropna(subset=["time", "device", "value"])
+
+
+def _latest_local_day(summary: dict, wires, timezone: str) -> date | None:
+    """Most recent local day any of ``wires`` reported, from a device summary."""
+    seens = [
+        summary[device]["last_seen"]
+        for wire in wires
+        for device in (wire_device_id(wire, h) for h in WIRE_SENSOR_HEIGHTS)
+        if device in summary and summary[device].get("last_seen") is not None
+    ]
+    if not seens:
+        return None
+    ts = pd.Timestamp(max(seens))
+    ts = ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+    return ts.tz_convert(timezone).date()
 
 
 async def latest_wire_date(wire: str, timezone: str) -> date | None:
@@ -51,16 +53,17 @@ async def latest_wire_date(wire: str, timezone: str) -> date | None:
     scan. ``None`` when the wire has no readings yet.
     """
     summary = await deps.db.get_wire_device_summary()
-    seens = [
-        summary[device]["last_seen"]
-        for device in (wire_device_id(wire, h) for h in WIRE_SENSOR_HEIGHTS)
-        if device in summary and summary[device].get("last_seen") is not None
-    ]
-    if not seens:
-        return None
-    ts = pd.Timestamp(max(seens))
-    ts = ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
-    return ts.tz_convert(timezone).date()
+    return _latest_local_day(summary, [wire], timezone)
+
+
+async def latest_reporting_date(wires, timezone: str) -> date | None:
+    """Most recent local day *any* of ``wires`` reported — one aggregate, not N.
+
+    A cross-wire view opens on the last day there was anything to compare, and
+    asking each wire in turn would run the same GROUP BY once per wire.
+    """
+    summary = await deps.db.get_wire_device_summary()
+    return _latest_local_day(summary, wires, timezone)
 
 
 def day_window_utc(local_date: date, timezone: str, lookback_hours: float):
@@ -77,24 +80,22 @@ def day_window_utc(local_date: date, timezone: str, lookback_hours: float):
 
 
 ### Filter to a single day ###
-def filter_for_day(
-    df, timezone, target_date=None, use_latest_date_in_data=USE_LATEST_DATE_IN_DATA,
-):
+def filter_for_day(df, timezone, target_date=None):
     """Return the readings for one local day plus that day's start timestamp.
 
     ``target_date`` (a ``datetime.date``) pins an explicit day — used by the
-    ``?date=`` URL param. When it's ``None`` the day defaults to today (or the
-    latest day present in the data when ``use_latest_date_in_data`` is set).
+    ``?date=`` URL param. When it's ``None`` the day defaults to today; callers
+    that want "the latest day with data" resolve it up front via
+    :func:`latest_wire_date`, which costs one aggregate instead of a scan.
     """
     df_local = df.copy()
     df_local["time_local"] = df_local["time"].dt.tz_convert(timezone)
 
-    if target_date is not None:
-        target_day = pd.Timestamp(target_date, tz=timezone).normalize()
-    elif use_latest_date_in_data:
-        target_day = df_local["time_local"].max().normalize()
-    else:
-        target_day = pd.Timestamp.now(tz=timezone).normalize()
+    target_day = (
+        pd.Timestamp(target_date, tz=timezone).normalize()
+        if target_date is not None
+        else pd.Timestamp.now(tz=timezone).normalize()
+    )
 
     next_day = target_day + pd.Timedelta(days=1)
 

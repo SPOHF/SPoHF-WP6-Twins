@@ -93,6 +93,29 @@ crop_cycles:
       start: 2026-01-05    # PROVISIONAL
       end: 2026-06-29      # PROVISIONAL
 
+# ── Wire uniformity (red cross-wire view) ──
+# What it takes for the declared wires to be "reading the same thing". Growth
+# sections map onto the same heights on every wire (see CONTEXT "Growth
+# section"), so H3 on one wire is directly comparable to H3 on another — these
+# numbers say how far apart they may drift before that is worth reporting.
+# PROVISIONAL: horticultural/instrument judgement, not measured. Retune once
+# three wires have been seen side by side. Red-only; the shared metadata model
+# ignores this key.
+uniformity:
+  # A wire reporting less than this on the shown day is excluded from the
+  # spread and said so, rather than averaged in and reading as agreement.
+  min_coverage_hours: 12
+  # Per metric, the spread at which the tint saturates — and the same number
+  # decides whether a wire is offset, divergent, or in agreement.
+  notable_spread:
+    par: 50        # µmol/m²/s
+    temp: 1.0      # °C
+    hum: 5.0       # %RH
+    co2: 50        # ppm
+    dli: 2.0       # mol/m²
+    vpd: 0.15      # kPa
+    fungal: 2.0    # h
+
 sensor_defaults:
   temp:
     type: "temperature"

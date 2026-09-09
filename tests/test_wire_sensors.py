@@ -9,12 +9,15 @@ a live MySQL connection.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+
+import pandas as pd
 
 from wp6_data.red.db import (
     WIRE_DEVICE_HEIGHTS,
     WIRE_RADIATION_HEIGHT,
     WIRE_RADIATION_MEASUREMENT,
+    WIRE_READING_COLUMNS,
     WIRE_SENSOR_HEIGHTS,
     WIRE_SENSOR_MEASUREMENTS,
     split_wire_rows_by_height,
@@ -22,8 +25,10 @@ from wp6_data.red.db import (
     wire_device_id,
     wire_height_from_device,
     wire_physical_id,
+    wire_readings_frame,
     wire_value_columns,
 )
+from wp6_data.red.multi_height.data import filter_for_day
 
 TS = datetime(2026, 5, 26, 14, 17, 28)
 
@@ -291,3 +296,67 @@ class TestSplitWireRowsByHeight:
         assert by_device["WS_01_01-h1"] == [
             {"received_at": TS, "par": 7.0, "temp": None, "hum": None, "co2": None}
         ]
+
+
+class TestWireReadingsFrame:
+    """A day the wire never reported must still be a usable frame.
+
+    Views reach for ``df["time"].dt`` and pandas only offers ``.dt`` on a
+    datetime column, so an untyped empty frame raises instead of yielding no
+    rows — the whole crop-climate page used to 500 on any gap in the feed.
+    """
+
+    def test_empty_run_carries_the_numeric_and_time_dtypes(self):
+        empty = wire_readings_frame([])
+        full = wire_readings_frame(unpivot_wire_rows([_full_row()]))
+
+        assert list(empty.columns) == WIRE_READING_COLUMNS
+        assert empty.empty
+        # The columns views compute on must not change type with the weather;
+        # pandas is free to pick its own storage for the label columns.
+        for column in ("time", "value", "height"):
+            assert empty[column].dtype.kind == full[column].dtype.kind
+        assert str(empty["time"].dt.tz) == "UTC"
+
+    def test_empty_frame_survives_the_day_filter(self):
+        df_day, day_start = filter_for_day(wire_readings_frame([]), "Europe/Amsterdam")
+
+        assert df_day.empty
+        assert day_start.tzinfo is not None
+
+    def test_time_is_utc_and_sorted(self):
+        rows = [
+            {"device_id": "WS_01_01", "received_at": datetime(2026, 5, 26, 9), "par1": 1.0},
+            {"device_id": "WS_01_01", "received_at": datetime(2026, 5, 26, 7), "par1": 2.0},
+        ]
+        df = wire_readings_frame(unpivot_wire_rows(rows))
+
+        assert str(df["time"].dt.tz) == "UTC"
+        assert df["time"].is_monotonic_increasing
+        assert df["value"].tolist() == [2.0, 1.0]
+
+    def test_values_are_float_and_heights_int(self):
+        df = wire_readings_frame(unpivot_wire_rows([_full_row()]))
+
+        assert df["value"].dtype == "float64"
+        assert df["height"].dtype == "int64"
+        assert set(df["height"]) == set(WIRE_DEVICE_HEIGHTS)
+
+
+class TestFilterForDay:
+    def test_target_date_pins_the_day(self):
+        rows = [
+            {"device_id": "WS_01_01", "received_at": datetime(2026, 5, 26, 9), "par1": 1.0},
+            {"device_id": "WS_01_01", "received_at": datetime(2026, 5, 27, 9), "par1": 2.0},
+        ]
+        df = wire_readings_frame(unpivot_wire_rows(rows))
+
+        df_day, day_start = filter_for_day(df, "UTC", target_date=date(2026, 5, 26))
+
+        assert day_start == pd.Timestamp("2026-05-26", tz="UTC")
+        assert df_day["value"].tolist() == [1.0]
+
+    def test_no_target_date_defaults_to_today(self):
+        _, day_start = filter_for_day(wire_readings_frame([]), "UTC")
+
+        assert day_start == pd.Timestamp.now(tz="UTC").normalize()

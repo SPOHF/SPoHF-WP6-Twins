@@ -24,6 +24,7 @@ from ..multi_height.cells import (
     DERIVED_COLUMNS,
     DERIVED_HEADER_ACCENTS,
     MEASUREMENT_COLORS,
+    METRIC_LABELS,
     PLANT_SVG_PATH,
     WIRE_MEASUREMENT_LABELS,
     admin_build_panel,
@@ -42,16 +43,25 @@ from ..multi_height.charts import (
     make_mh_greenhouse_plot,
     make_wire_measurement_plot,
     risk_gantt,
+    wire_profile_chart,
 )
+from ..multi_height.config import CROP_METRICS, load_uniformity_config
 from ..multi_height.data import (
     compute_sensor_metrics,
     day_window_utc,
     filter_for_day,
+    latest_reporting_date,
     latest_wire_date,
     load_wire_readings,
-    load_wire_sensor_data,
 )
 from ..multi_height.svg import SVG_LAYOUT_PATH, parse_svg
+from ..multi_height.uniformity import build_uniformity_day
+from ..multi_height.uniformity_cells import (
+    aggregate_phrase,
+    spread_legend,
+    uniformity_table,
+    verdict_list,
+)
 from ..multi_height.view_model import assemble_crop_climate_day
 from ..risk import service, store
 from ..risk.config import load_risk_thresholds
@@ -62,6 +72,10 @@ router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 # Views available under the Multi Height section. Each entry becomes a hub card
 # on the landing page below. Add more here as additional height views are built.
+# Temperature leads the uniformity view: it is the metric most likely to differ
+# with where a wire hangs, so it is the one that shows the page working.
+DEFAULT_UNIFORMITY_METRIC = "temp"
+
 MULTI_HEIGHT_VIEWS = [
     {
         "href": "/multi_height/single-simple",
@@ -83,6 +97,13 @@ MULTI_HEIGHT_VIEWS = [
         "label": "Open view",
         "description": "Per growth section (canopy top to root zone): the day's "
         "PAR, temperature, humidity and CO₂ as compact trends.",
+    },
+    {
+        "href": "/multi_height/uniformity",
+        "title": "Uniformity across Wires",
+        "label": "Open view",
+        "description": "The same growth sections on every declared wire, side "
+        "by side — where the greenhouse agrees, and where it doesn't.",
     },
 ]
 
@@ -325,7 +346,7 @@ async def wire_trends_page(
         .to_pydatetime()
     )
 
-    df = await load_wire_sensor_data(start_utc, end_utc)
+    df = await load_wire_readings(start_utc, end_utc)
     # Scope to the selected wire so heights don't merge across wires.
     wire_devices = [wire_device_id(wire, h) for h in WIRE_SENSOR_HEIGHTS]
     df = df[df["device"].isin(wire_devices)] if not df.empty else df
@@ -365,12 +386,23 @@ async def wire_trends_page(
     )
 
 
-def _date_form(base_path: str, day: date, wire: str) -> str:
-    """Single-date picker that GETs back to this view (keeps the wire)."""
+def _date_form(base_path: str, day: date, wire: str | None, extra=None) -> str:
+    """Single-date picker that GETs back to this view, keeping its selection.
+
+    The picker is a form while the other selectors are pill links, so whatever
+    those selected has to ride along as hidden inputs or submitting the date
+    would silently reset them.
+    """
+    carried = {"wire": wire, **(extra or {})}
+    hidden = "".join(
+        f'<input type="hidden" name="{name}" value="{html.escape(str(value))}">'
+        for name, value in carried.items()
+        if value
+    )
     return f"""
     <form method="get" action="{base_path}" style="display:flex;gap:12px;
         align-items:flex-end;margin-bottom:16px;flex-wrap:wrap;">
-        <input type="hidden" name="wire" value="{wire}">
+        {hidden}
         <label>Date<br>
             <input type="date" name="date" value="{day.isoformat()}">
         </label>
@@ -515,7 +547,8 @@ async def crop_climate_page(
     <a href="/multi_height" class="back-link">← Multi Height</a>
     <h1>Crop Climate by Height</h1>
     <p>Measured values are left of the plant, derived metrics on the right.
-    Click any cell to expand its chart.</p>
+    Click any cell to expand its chart.
+    <a href="/multi_height/uniformity?date={table_date}">Compare wires →</a></p>
 
     {wire_pills}
     {date_form}
@@ -583,6 +616,121 @@ async def crop_climate_rebuild(
     )
 
 
+### Uniformity across wires ###
+# No ``wire`` param on purpose: this page exists to compare them, and making the
+# reader pick one would hide the comparison (the reversal ``crop_cycles`` already
+# recorded). Growth sections map onto the same heights on every wire, which is
+# what makes the columns comparable at all — see CONTEXT "Growth section".
+@router.get("/multi_height/uniformity", response_class=HTMLResponse)
+async def uniformity_page(
+    config: Annotated[TwinConfig, Depends(get_twin_config)],
+    day: Annotated[
+        date | None,
+        Query(alias="date", description="Day to view (YYYY-MM-DD); defaults to latest with data"),
+    ] = None,
+    metric: Annotated[
+        str,
+        Query(description="Metric to compare (par/temp/hum/co2/dli/vpd/fungal)"),
+    ] = DEFAULT_UNIFORMITY_METRIC,
+):
+    if metric not in CROP_METRICS:
+        metric = DEFAULT_UNIFORMITY_METRIC
+
+    timezone = deps.base_settings.display_timezone
+    wires = wire_ids()
+    risk_t = load_risk_thresholds(deps._METADATA_PATH)
+    # Read per request beside the risk thresholds, not cached at import: both are
+    # PROVISIONAL, and retuning either is meant to stay a YAML edit rather than a
+    # redeploy.
+    uniformity_cfg = load_uniformity_config(deps._METADATA_PATH)
+
+    # Default to the latest day any wire reported, so a lagging feed never opens
+    # on an empty page. One cheap aggregate covers every wire, not one each.
+    target_date = day or await latest_reporting_date(wires, timezone)
+
+    # One fetch covers every wire: the readings query is not scoped by device, so
+    # the comparison costs the same as the single-wire page it sits beside.
+    fetch_start, fetch_end = day_window_utc(
+        target_date or date.today(), timezone, risk_t.fungal.window_hours,
+    )
+    df = await load_wire_readings(fetch_start, fetch_end)
+
+    view = build_uniformity_day(
+        df, wires, deps.growth_sections, risk_t, uniformity_cfg,
+        metric, timezone, target_date=target_date,
+    )
+    table_date = view.day_start.date().isoformat()
+    label, unit = METRIC_LABELS[metric]
+
+    metric_pills = pill_row(
+        "/multi_height/uniformity", "metric",
+        [(m, METRIC_LABELS[m][0]) for m in CROP_METRICS], metric,
+        {"date": day.isoformat() if day else None}, label="Metric",
+    )
+    date_form = _date_form(
+        "/multi_height/uniformity", view.day_start.date(), None,
+        extra={"metric": metric},
+    )
+
+    worst = view.worst_spread
+    if worst is None:
+        headline = (
+            "Not enough wires reported this day to compare — "
+            "every column stands alone."
+        )
+    else:
+        headline = (
+            f"Widest disagreement today: <b>{worst:.2f} {unit}</b> "
+            f"({len(view.comparable_wires)} of {len(wires)} wires compared, "
+            f"against a notable spread of {view.notable_spread:g} {unit})."
+        )
+
+    profile = wire_profile_chart(view, timezone)
+    profile_card = render_card(
+        f"Profile — {table_date}",
+        profile or '<p style="color:#6b7280;margin:0;">Nothing measured today.</p>',
+        description="The same reading against height. Wires that differ by a "
+        "constant draw parallel lines; one reading a different microclimate at "
+        "a single section draws a kink there. Dashed = not compared.",
+        card_class="card",
+    )
+
+    content = f"""
+    <a href="/multi_height" class="back-link">← Multi Height</a>
+    <h1>Uniformity across Wires</h1>
+    <p>Every declared wire's growth sections side by side. The bold number is
+    what the wires are compared on — {aggregate_phrase(metric)} — with the
+    latest reading under it. Only the Spread column is coloured, and on an
+    absolute scale, so it means the same thing on every metric and every day; a
+    wire that reported too little is greyed and left out of the comparison.</p>
+
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center;">
+        {metric_pills}
+    </div>
+    {date_form}
+
+    {render_card(
+        f"{label} by wire — {table_date}",
+        uniformity_table(view) + spread_legend(view),
+        description=headline,
+        card_class="card",
+    )}
+
+    {profile_card}
+
+    {render_card(
+        "Verdict",
+        verdict_list(view, uniformity_cfg.min_coverage_hours),
+        description="A wire that drifts the same way at every height is placed "
+        "or calibrated differently; one that disagrees at a single height is "
+        "reading a genuinely different microclimate there.",
+        card_class="card",
+    )}
+    """
+
+    return render_page(config.title, content)
+
+
 ### Risk-episode audit log (issue 018) ###
 @router.get(
     "/multi_height/crop-climate/audit",
@@ -640,8 +788,6 @@ async def crop_climate_audit(
 
 
 ### Crop-climate cell detail chart (click-to-expand) ###
-# Metrics the chart endpoint will serve (measured + derived); anything else 400s.
-CROP_CHART_METRICS = (*WIRE_SENSOR_MEASUREMENTS, "dli", "vpd", "fungal")
 
 
 @router.get("/multi_height/crop-climate/chart", response_class=HTMLResponse)
@@ -657,7 +803,7 @@ async def crop_climate_chart(
     timezone = deps.base_settings.display_timezone
 
     # Validate against allowlists — these params arrive from client-built URLs.
-    if metric not in CROP_CHART_METRICS or height not in WIRE_SENSOR_HEIGHTS:
+    if metric not in CROP_METRICS or height not in WIRE_SENSOR_HEIGHTS:
         return HTMLResponse(
             '<p style="font:14px sans-serif;padding:1rem;color:#b91c1c;">'
             "Unknown chart.</p>",
