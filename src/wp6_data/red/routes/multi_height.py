@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from wp6_data.db.pool import get_pool
-from wp6_data.shared import render_card, render_hub_card, render_hub_grid, render_page
+from wp6_data.shared import pill_row, render_card, render_hub_card, render_hub_grid, render_page
 from wp6_data.shared.auth import is_admin, verify_session_admin, verify_session_user
 from wp6_data.shared.routes.deps import get_provider, get_twin_config
 from wp6_data.shared.twin import SensorDataProvider, TwinConfig
@@ -32,7 +32,6 @@ from ..multi_height.cells import (
     fungal_cell_from_values,
     height_dli_cell_from_values,
     measurement_cell,
-    pill_row,
     plant_zone_cell,
     section_label_cell,
     vpd_cell_from_values,

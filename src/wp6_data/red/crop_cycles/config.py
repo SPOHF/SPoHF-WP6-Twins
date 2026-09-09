@@ -17,14 +17,14 @@ spending the chart's colour on a schedule instead of on observed conditions.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel
 
-from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.cycles import CohortSpec, CycleSpec
+from wp6_data.shared.series import PeriodConfig, SeriesMetric
 
 
 class CohortConfig(BaseModel):
@@ -34,30 +34,16 @@ class CohortConfig(BaseModel):
     duration_weeks: int
 
 
-class ClimateMetric(BaseModel):
-    """One selectable climate series, as a (device, sensor) pair.
-
-    This *is* the wire-ready seam: because red models wire heights as devices
-    (ADR 0001), pointing a metric at a growth section later means changing
-    ``device`` to ``WS_01_01-h3``, with no code change and no new abstraction.
-    """
-
-    key: str
-    label: str
-    unit: str
-    device: str
-    sensor: str
-    agg: str
+# Red's names for the shared vocabulary. A climate metric *is* the wire-ready
+# seam: because red models wire heights as devices (ADR 0001), pointing one at a
+# growth section later means changing ``device`` to ``WS_01_01-h3``, with no
+# code change and no new abstraction.
+ClimateMetric = SeriesMetric
+CycleConfig = PeriodConfig
 
 
 class ClimateConfig(BaseModel):
     metrics: list[ClimateMetric]
-
-
-class CycleConfig(BaseModel):
-    label: str
-    start: date
-    end: date
 
 
 class CropCyclesConfig(BaseModel):
@@ -84,15 +70,9 @@ def load_crop_cycles(yaml_path: Path) -> CropCyclesConfig:
     raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
     if "crop_cycles" not in raw:
         raise ValueError(f"no 'crop_cycles' block in {yaml_path}")
-    config = CropCyclesConfig(**raw["crop_cycles"])
-
-    unknown = [m.key for m in config.climate.metrics if m.agg not in CHART_AGG_FUNCS]
-    if unknown:
-        raise ValueError(
-            f"climate metrics {unknown} declare an unsupported agg; "
-            f"expected one of {sorted(CHART_AGG_FUNCS)}"
-        )
-    return config
+    # Each metric validates its own agg (SeriesMetric), so a bad one fails here
+    # rather than reaching a provider call.
+    return CropCyclesConfig(**raw["crop_cycles"])
 
 
 def to_cohort_spec(config: CropCyclesConfig) -> CohortSpec:

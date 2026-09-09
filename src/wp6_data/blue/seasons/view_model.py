@@ -1,0 +1,162 @@
+"""View model for the blue "Seasons" page.
+
+Same split as red's crop-cycles view model, and as ``monitor``'s: a pure
+computation that turns config plus two frames into drawable lanes, and a thin
+wrapper adding the provider reads.
+
+Blue's lane axis is the **treatment**, not a cohort. Every treatment is measured
+over the same season, so the lanes stack rather than stagger — there is no
+overlap to draw, because a blueberry bush carries one crop per season. What the
+picture is for is the *vertical* comparison: nine plots that lived through one
+weather, and how their fruit differed.
+
+A treatment is sampled many times across a season — several plants, and several
+harvest passes — so the rows summarise into one outcome per lane, combined the
+way the measure declares (a Brix is averaged; a yield picked across four passes
+is summed). Measurements that fall in no declared season are carried out, not
+dropped: they are the signal that the season dates are wrong.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date
+
+import pandas as pd  # type: ignore[import-untyped]
+
+from wp6_data.shared.aggregation import CHART_AGG_FUNCS
+from wp6_data.shared.cycles import Cohort, exposure
+from wp6_data.shared.series import SeriesMetric, daily_series, observations
+from wp6_data.shared.twin import SensorDataProvider
+from wp6_data.shared.waterfall import Lane, Marker
+
+from .config import SeasonConfig, SeasonsConfig
+
+
+@dataclass(frozen=True)
+class Unattached:
+    """A measurement that fell outside every declared season."""
+
+    day: date
+    device: str
+    value: float
+
+
+@dataclass(frozen=True)
+class SeasonsView:
+    """Everything the blue seasons page renders, across every declared season."""
+
+    lanes: list[Lane] = field(default_factory=list)
+    daily: pd.DataFrame = field(default_factory=pd.DataFrame)
+    unattached: list[Unattached] = field(default_factory=list)
+
+    @property
+    def partial(self) -> list[Lane]:
+        """Lanes whose season is incompletely covered by weather data."""
+        return [lane for lane in self.lanes if lane.coverage < 1.0]
+
+    @property
+    def measured(self) -> list[Lane]:
+        return [lane for lane in self.lanes if lane.markers]
+
+
+def _season_for(day: date, seasons: list[SeasonConfig]) -> SeasonConfig | None:
+    """The season containing ``day``, or None. Seasons do not overlap."""
+    for season in seasons:
+        if season.start <= day < season.end:
+            return season
+    return None
+
+
+def build_seasons(
+    seasons: list[SeasonConfig],
+    treatments: dict[str, str],
+    observed: pd.DataFrame,
+    daily: pd.DataFrame,
+    *,
+    weather_agg: str = "avg",
+    measure_agg: str = "avg",
+) -> SeasonsView:
+    """Lanes for every (season, treatment), with outcomes and coverage.
+
+    ``treatments`` maps device name to display label, in the order lanes should
+    be drawn. A lane is emitted for every declared treatment even when it was
+    never sampled — an absent plot is a fact about the season worth seeing, and
+    the bar shows it by carrying no chip.
+    """
+    if measure_agg not in CHART_AGG_FUNCS:
+        raise ValueError(
+            f"unknown measure agg {measure_agg!r}; "
+            f"expected one of {sorted(CHART_AGG_FUNCS)}"
+        )
+    summarise = getattr(pd.Series, CHART_AGG_FUNCS[measure_agg])
+
+    grouped: dict[tuple[str, str], list[float]] = {}
+    unattached: list[Unattached] = []
+    for row in observed.itertuples(index=False):
+        season = _season_for(row.date, seasons)
+        if season is None or row.device not in treatments:
+            unattached.append(Unattached(row.date, row.device, float(row.value)))
+            continue
+        grouped.setdefault((season.label, row.device), []).append(float(row.value))
+
+    lanes: list[Lane] = []
+    for season in sorted(seasons, key=lambda s: s.start):
+        _, coverage = exposure(season.start, season.end, daily, weather_agg)
+        for device, label in treatments.items():
+            values = grouped.get((season.label, device), [])
+            markers = (
+                # No label: the lane is already named for the treatment, so
+                # the hover reads "Std · Brix: 10.1" rather than "Std · Std".
+                [Marker(
+                    value=round(float(summarise(pd.Series(values))), 2),
+                    samples=len(values),
+                )]
+                if values else []
+            )
+            lanes.append(
+                Lane(
+                    cohort=Cohort(
+                        cycle_label=season.label,
+                        key=f"{season.label}:{device}",
+                        label=label,
+                        start=season.start,
+                        end=season.end,
+                    ),
+                    group=season.label,
+                    markers=markers,
+                    coverage=coverage,
+                )
+            )
+    return SeasonsView(lanes=lanes, daily=daily, unattached=unattached)
+
+
+async def assemble_seasons(
+    provider: SensorDataProvider,
+    config: SeasonsConfig,
+    metric: SeriesMetric,
+    sensor: str,
+    treatments: dict[str, str],
+    timezone: str,
+    measure_agg: str = "avg",
+) -> SeasonsView:
+    """:func:`build_seasons` plus the weather and measurement reads.
+
+    Both reads span every declared season in one call rather than one per
+    season: the gap between seasons is a few months, so a single window costs
+    less than the extra round trips.
+    """
+    if not config.seasons:
+        return SeasonsView()
+
+    first = min(s.start for s in config.seasons)
+    last = max(s.end for s in config.seasons)
+
+    daily = await daily_series(provider, metric, first, last, timezone)
+    observed = await observations(
+        provider, list(treatments), sensor, first, last, timezone,
+    )
+    return build_seasons(
+        config.seasons, treatments, observed, daily,
+        weather_agg=metric.agg, measure_agg=measure_agg,
+    )

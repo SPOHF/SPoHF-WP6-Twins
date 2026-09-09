@@ -27,10 +27,10 @@ from wp6_data.shared.cycles import (
     exposure,
     generate_cohorts,
 )
+from wp6_data.shared.series import daily_series, observations
 from wp6_data.shared.twin import SensorDataProvider
 from wp6_data.shared.waterfall import Lane, Marker
 
-from .climate import daily_climate, measurements
 from .config import ClimateMetric, CropCyclesConfig, CycleConfig, to_cohort_spec, to_cycle_spec
 
 
@@ -177,12 +177,12 @@ async def assemble_waterfall(
     first = min(c.start for c in cycles)
     last = max(c.end for c in cycles)
 
-    daily = await daily_climate(provider, metric, first, last, timezone)
-    observations = await measurements(
+    daily = await daily_series(provider, metric, first, last, timezone)
+    observed = await observations(
         provider, list(devices), sensor, first, last + spec.interval, timezone,
     )
     return build_waterfall(
-        cohorts, spec, observations, daily,
+        cohorts, spec, observed, daily,
         device_labels=devices, agg=metric.agg,
         measure_agg=measure_agg,
     )

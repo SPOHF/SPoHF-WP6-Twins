@@ -23,6 +23,7 @@ from wp6_data.shared.cycles import (
 from wp6_data.shared.templates import (
     build_explore_tabs,
     default_date_range,
+    pill_row,
     render_card,
     render_dashboard_page,
     render_date_filter,
@@ -62,6 +63,7 @@ __all__ = [
     "overlap_at",
     "prepare_comparison",
     "PRESENCE_NONE_COLOR",
+    "pill_row",
     "render_card",
     "render_coverage_grid",
     "render_dashboard_page",

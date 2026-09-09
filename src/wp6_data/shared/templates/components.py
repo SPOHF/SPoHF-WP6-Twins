@@ -137,6 +137,32 @@ def render_hub_card(
     return f"<article{cls}><h3>{title}</h3>{desc}{body}{action}</article>"
 
 
+def pill_row(base_path, param, choices, active, preserve, label):
+    """A labelled segmented toggle that swaps ``param`` (preserving other params).
+
+    Reuses the shared ``.group-toggle`` / ``.group-btn`` styling from the chart
+    page; each segment is a navigation link. ``choices`` is a list of
+    ``(value, text)``; ``preserve`` a dict of other query params (falsy dropped);
+    ``label`` is the row caption (e.g. "Device").
+    """
+    qs = "".join(f"&amp;{key}={val}" for key, val in preserve.items() if val)
+    segments = []
+    for value, text in choices:
+        cls = "group-btn active" if value == active else "group-btn"
+        segments.append(
+            f'<a class="{cls}" style="text-decoration:none;" '
+            f'href="{base_path}?{param}={value}{qs}">{text}</a>'
+        )
+    return (
+        '<div style="display:flex;align-items:center;gap:0.75rem;'
+        'margin-bottom:0.5rem;flex-wrap:wrap;">'
+        f'<span style="font-weight:600;min-width:6rem;">{label}:</span>'
+        '<div class="group-toggle" style="width:fit-content;">'
+        + "".join(segments)
+        + "</div></div>"
+    )
+
+
 def render_hub_grid(cards: list[str]) -> str:
     """Wrap hub navigation cards in a responsive auto-fit grid."""
     return f'<div class="hub-grid">{"".join(cards)}</div>'

@@ -25,7 +25,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 
-from wp6_data.shared import render_card, render_page
+from wp6_data.shared import pill_row, render_card, render_page
 from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.twin import SensorDataProvider
@@ -39,7 +39,6 @@ from wp6_data.shared.waterfall import (
 from .. import deps
 from ..crop_cycles.config import load_crop_cycles
 from ..crop_cycles.view_model import assemble_waterfall
-from ..multi_height.cells import pill_row
 
 router = APIRouter(prefix="/crop-cycles", dependencies=[Depends(verify_session_user)])
 

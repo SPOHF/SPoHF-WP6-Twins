@@ -377,3 +377,42 @@ devices:
     position: "V_K_G_CaBrP"
     type: "Blueberry plant (manual)"
     source: "long_data"
+
+# Growing seasons for the Seasons page (blue-only; the shared metadata registry
+# ignores this block). Unlike red, blue declares no cohort rhythm: a blueberry
+# bush carries one crop per season, so a season *is* the period a treatment is
+# measured over.
+#
+# The dates are PROVISIONAL — generous windows around the observed measurement
+# spans, not horticultural boundaries confirmed with WP1. A measurement landing
+# outside every season is surfaced on the page rather than dropped, which is the
+# feedback loop that corrects them.
+seasons:
+  weather:
+    # Farm-wide, from the weather station. Only Std and Org1 carry plot-level
+    # climate sensors, so painting each lane with its own plot would leave seven
+    # of nine bars blank; when the other plots are instrumented, pointing a
+    # metric at them is a config edit here, not a code change.
+    metrics:
+      - key: temp
+        label: Mean air temperature
+        unit: "°C"
+        device: weatherstation
+        sensor: airTemperature
+        agg: avg
+      - key: rad
+        label: Mean solar radiation
+        unit: "W/m²"
+        device: weatherstation
+        sensor: solarRadiation
+        agg: avg
+  seasons:
+    - label: "2024 season"
+      start: 2024-03-01
+      end: 2024-11-01
+    - label: "2025 season"
+      start: 2025-03-01
+      end: 2025-11-01
+    - label: "2026 season"
+      start: 2026-03-01
+      end: 2026-11-01

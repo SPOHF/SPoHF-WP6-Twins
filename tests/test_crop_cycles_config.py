@@ -27,7 +27,7 @@ crop_cycles:
         unit: "C"
         device: dev-1
         sensor: temp
-        agg: mean
+        agg: avg
   cycles:
     - label: "one"
       start: 2025-06-16
@@ -60,8 +60,8 @@ class TestLoadCropCycles:
 
     def test_unsupported_agg_raises(self, tmp_path):
         p = tmp_path / "m.yaml"
-        p.write_text(MINIMAL.replace("agg: mean", "agg: median"))
-        with pytest.raises(ValueError, match="unsupported agg"):
+        p.write_text(MINIMAL.replace("agg: avg", "agg: median"))
+        with pytest.raises(ValueError, match="unknown agg"):
             load_crop_cycles(p)
 
 
