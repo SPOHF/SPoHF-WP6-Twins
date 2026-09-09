@@ -52,3 +52,5 @@ dev/
 issues/
 CLAUDE.md
 
+# Local MySQL backups (scripts/backup-red-mysql.sh)
+backups/
