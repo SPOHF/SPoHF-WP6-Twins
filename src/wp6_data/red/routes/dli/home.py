@@ -66,6 +66,11 @@ async def dli_home(request: Request) -> str:
                 href="/dli/forecast", label="View Forecast", card_class="card-primary",
             ),
             render_hub_card(
+                "Lamp Calendar",
+                "Which hours the lamps actually ran, read off the two PAR sensors.",
+                href="/dli/lamps", label="View Calendar",
+            ),
+            render_hub_card(
                 "Performance",
                 "Compare model predictions with actual sensor readings over time.",
                 href="/dli/performance", label="View Performance",
