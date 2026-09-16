@@ -8,6 +8,7 @@ red (DLI / solar radiation) and blue (GDD / temperature) use it. It lives in
 import os
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from typing import Any
 
 import httpx
 import pandas as pd
@@ -22,15 +23,23 @@ DEFAULT_LON = float(os.getenv("WP6_RED_WEATHER_LON", "6.613721"))
 OPENMETEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 OPENMETEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
+# Both radiation components are fetched alongside the global total, because a
+# model fitted on beam radiation cannot be served global radiation in its place.
+HOURLY_VARIABLES = (
+    "shortwave_radiation,direct_radiation,diffuse_radiation,cloud_cover,temperature_2m"
+)
+
 
 @dataclass
 class HourlyWeather:
     """Hourly weather data point."""
 
     datetime: datetime
-    solar_radiation: float  # W/m²
+    solar_radiation: float  # W/m², shortwave (global = direct + diffuse)
     cloud_cover: float  # 0-100%
     temperature: float  # °C
+    direct_radiation: float = 0.0  # W/m², beam component
+    diffuse_radiation: float = 0.0  # W/m², scattered component
 
 
 @dataclass
@@ -44,8 +53,23 @@ class DailyForecast:
 
     @property
     def total_radiation(self) -> float:
-        """Total daily solar radiation in Wh/m²."""
+        """Total daily *shortwave* radiation in Wh/m² (global = direct + diffuse).
+
+        Used for the intraday shape. Not interchangeable with
+        :attr:`direct_radiation_sum`: a model fitted on beam radiation given this
+        instead is being handed a different physical quantity.
+        """
         return sum(h.solar_radiation for h in self.hourly)
+
+    @property
+    def direct_radiation_sum(self) -> float:
+        """Daily sum of the beam component, in Wh/m²."""
+        return sum(h.direct_radiation for h in self.hourly)
+
+    @property
+    def diffuse_radiation_sum(self) -> float:
+        """Daily sum of the scattered component, in Wh/m²."""
+        return sum(h.diffuse_radiation for h in self.hourly)
 
     @property
     def avg_cloud_cover(self) -> float:
@@ -102,7 +126,7 @@ class OpenMeteoClient:
         params = {
             "latitude": self.latitude,
             "longitude": self.longitude,
-            "hourly": "shortwave_radiation,cloud_cover,temperature_2m",
+            "hourly": HOURLY_VARIABLES,
             "daily": "sunrise,sunset",
             "forecast_days": min(days, 16),
             "timezone": "UTC",
@@ -135,7 +159,7 @@ class OpenMeteoClient:
         params = {
             "latitude": self.latitude,
             "longitude": self.longitude,
-            "hourly": "shortwave_radiation,cloud_cover,temperature_2m",
+            "hourly": HOURLY_VARIABLES,
             "daily": "sunrise,sunset",
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
@@ -155,6 +179,8 @@ class OpenMeteoClient:
 
         times = hourly.get("time", [])
         radiation = hourly.get("shortwave_radiation", [])
+        direct = hourly.get("direct_radiation", [])
+        diffuse = hourly.get("diffuse_radiation", [])
         cloud = hourly.get("cloud_cover", [])
         temp = hourly.get("temperature_2m", [])
 
@@ -177,6 +203,8 @@ class OpenMeteoClient:
                     solar_radiation=radiation[i] if i < len(radiation) else 0.0,
                     cloud_cover=cloud[i] if i < len(cloud) else 0.0,
                     temperature=temp[i] if i < len(temp) else 0.0,
+                    direct_radiation=direct[i] if i < len(direct) else 0.0,
+                    diffuse_radiation=diffuse[i] if i < len(diffuse) else 0.0,
                 )
             )
 
@@ -219,6 +247,72 @@ class OpenMeteoClient:
         forecasts = await self.get_historical(start, end)
         return self._forecasts_to_dataframe(forecasts)
 
+    async def get_hourly(
+        self,
+        variables: list[str],
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        forecast_days: int = 0,
+        past_days: int = 0,
+    ) -> pd.DataFrame:
+        """Arbitrary hourly variables as a DataFrame, one column per variable.
+
+        Two modes, mirroring the two OpenMeteo endpoints:
+
+        - ``start``/``end`` given — the ERA5 **archive**. Authoritative, but it
+          lags roughly five days behind now.
+        - ``forecast_days``/``past_days`` given — the **forecast** endpoint,
+          which both bridges that lag and reaches into the future.
+
+        Returns ``datetime`` plus one column per variable the API actually
+        returned. A variable the API omits is **absent**, not zero-filled, so a
+        caller can tell "not returned" from "returned as zero" — the same
+        distinction ``shared/series.daily_series`` preserves for readings.
+        """
+        if not variables:
+            raise ValueError("no hourly variables requested")
+        archive = start is not None or end is not None
+        if archive and (start is None or end is None):
+            raise ValueError("archive mode needs both start and end")
+        if not archive and not forecast_days:
+            raise ValueError("pass start/end for the archive, or forecast_days")
+
+        client = await self._get_client()
+        params: dict[str, Any] = {
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "hourly": ",".join(variables),
+            "timezone": "UTC",
+        }
+        if archive:
+            params["start_date"] = start.isoformat()
+            params["end_date"] = end.isoformat()
+            url = OPENMETEO_ARCHIVE_URL
+        else:
+            params["forecast_days"] = min(forecast_days, 16)
+            if past_days:
+                params["past_days"] = min(past_days, 92)
+            url = OPENMETEO_FORECAST_URL
+
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        hourly = response.json().get("hourly", {})
+
+        times = hourly.get("time", [])
+        data: dict[str, Any] = {
+            "datetime": [datetime.fromisoformat(s).replace(tzinfo=UTC) for s in times]
+        }
+        for var in variables:
+            values = hourly.get(var)
+            if values is not None:
+                data[var] = values
+
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
+        return df
+
     async def get_historical_dataframe_multi(
         self,
         start: date,
@@ -227,6 +321,11 @@ class OpenMeteoClient:
         include_diffuse: bool = False,
     ) -> pd.DataFrame:
         """Get historical data with selectable radiation variable.
+
+        A thin shaping layer over :meth:`get_hourly`: it renames the requested
+        radiation variable to the generic ``solar_radiation`` column its callers
+        expect, and defaults the three long-standing columns to 0.0 so existing
+        arithmetic keeps working.
 
         Args:
             start: Start date
@@ -243,51 +342,24 @@ class OpenMeteoClient:
             DataFrame with columns: datetime, solar_radiation (or direct_radiation),
             cloud_cover, temperature, and optionally diffuse_radiation
         """
-        client = await self._get_client()
-
-        # Build hourly variables list
-        hourly_vars = [radiation_var, "cloud_cover", "temperature_2m"]
+        variables = [radiation_var, "cloud_cover", "temperature_2m"]
         if include_diffuse and radiation_var != "diffuse_radiation":
-            hourly_vars.append("diffuse_radiation")
+            variables.append("diffuse_radiation")
 
-        params = {
-            "latitude": self.latitude,
-            "longitude": self.longitude,
-            "hourly": ",".join(hourly_vars),
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
-            "timezone": "UTC",
-        }
+        df = await self.get_hourly(variables, start=start, end=end)
+        if df.empty:
+            return df
 
-        response = await client.get(OPENMETEO_ARCHIVE_URL, params=params)
-        response.raise_for_status()
-        data = response.json()
-
-        hourly = data.get("hourly", {})
-        times = hourly.get("time", [])
-        radiation = hourly.get(radiation_var, [])
-        cloud = hourly.get("cloud_cover", [])
-        temp = hourly.get("temperature_2m", [])
-        diffuse = hourly.get("diffuse_radiation", []) if include_diffuse else []
-
-        records = []
-        for i, time_str in enumerate(times):
-            record = {
-                "datetime": datetime.fromisoformat(time_str).replace(tzinfo=UTC),
-                "solar_radiation": radiation[i] if i < len(radiation) else 0.0,
-                "cloud_cover": cloud[i] if i < len(cloud) else 0.0,
-                "temperature": temp[i] if i < len(temp) else 0.0,
-            }
-            # Also store as direct_radiation if that's what was requested
-            if radiation_var == "direct_radiation":
-                record["direct_radiation"] = record["solar_radiation"]
-            if include_diffuse:
-                record["diffuse_radiation"] = diffuse[i] if i < len(diffuse) else 0.0
-            records.append(record)
-
-        df = pd.DataFrame(records)
-        if not df.empty:
-            df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
+        df = df.rename(
+            columns={radiation_var: "solar_radiation", "temperature_2m": "temperature"}
+        )
+        for column in ("solar_radiation", "cloud_cover", "temperature"):
+            if column not in df:
+                df[column] = 0.0
+        if radiation_var == "direct_radiation":
+            df["direct_radiation"] = df["solar_radiation"]
+        if include_diffuse and "diffuse_radiation" not in df:
+            df["diffuse_radiation"] = 0.0
         return df
 
     def _forecasts_to_dataframe(self, forecasts: list[DailyForecast]) -> pd.DataFrame:

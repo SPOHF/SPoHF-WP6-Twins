@@ -1,9 +1,11 @@
 """Tests for wp6_data.red.dli.diagnostics functions."""
 
+from datetime import UTC, date, datetime, timedelta
+
 import pandas as pd
 import pytest
 
-from wp6_data.red.dli.lamp import (
+from wp6_data.red.lamp import (
     derive_daily_lamp_profile,
     subtract_lamp_from_sensor,
 )
@@ -112,6 +114,51 @@ class TestDeriveDailyLampProfile:
 
 
 class TestSubtractLampFromSensor:
+    def test_a_schedule_across_midnight_only_subtracts_its_own_hours(self):
+        """Regression: red's real December schedule runs 23:00-06:00.
+
+        Its lit hours are {23, 0..6}, whose min is 0 and max is 23 — as a
+        start/end range that is the whole day, so the lamp power was stripped
+        out of every daylight hour and attenuation collapsed to 1.0.
+        """
+        import math
+
+        from wp6_data.red.lamp import compute_attenuation, derive_daily_lamp_profile
+
+        attenuation, lamp_power = 0.72, 190.0
+        sunrise, sunset = 8.5, 16.0
+        lit_hours = {23, 0, 1, 2, 3, 4, 5, 6}
+
+        above_rows, canopy_rows = [], []
+        for offset in range(30):
+            day = date(2025, 12, 20) - timedelta(days=offset)
+            for hour in range(24):
+                above = (
+                    max(0.0, 220 * math.sin(math.pi * (hour - sunrise) / (sunset - sunrise)))
+                    if sunrise <= hour <= sunset
+                    else 0.0
+                )
+                canopy = above * attenuation + (lamp_power if hour in lit_hours else 0.0)
+                stamp = datetime(day.year, day.month, day.day, hour, tzinfo=UTC)
+                above_rows.append({"device": "a", "sensor": "par",
+                                   "time": stamp, "value": above})
+                canopy_rows.append({"device": "c", "sensor": "par",
+                                    "time": stamp, "value": canopy})
+
+        above_df = pd.DataFrame(above_rows)
+        canopy_df = pd.DataFrame(canopy_rows)
+
+        profile = derive_daily_lamp_profile(above_df, canopy_df)
+        assert profile.iloc[5]["lamp_hours"] == frozenset(lit_hours)
+
+        corrected = subtract_lamp_from_sensor(canopy_df, profile)
+        noon = corrected[pd.to_datetime(corrected["time"]).dt.hour == 12]["value"]
+        assert noon.median() > 0, "daylight was stripped away with the lamp"
+
+        measured, days = compute_attenuation(above_df, canopy_df)
+        assert measured == pytest.approx(attenuation, abs=0.01)
+        assert days == 30
+
     def _make_lamp_profile(self, lamp_power=50.0, lamp_start=4, lamp_end=22):
         """Helper to create a single-day lamp profile."""
         return pd.DataFrame([{

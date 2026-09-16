@@ -6,8 +6,9 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from wp6_data.red.dli.calculator import calculate_hourly_par, estimate_hourly_natural_par
+from wp6_data.red.dli.calculator import estimate_hourly_natural_par
 from wp6_data.red.dli.constants import READING_INTERVAL_SECONDS, SECONDS_PER_HOUR, UMOL_TO_MOL
+from wp6_data.red.lamp import LampModel
 
 if False:  # TYPE_CHECKING
     from wp6_data.red.dli.model import TwoStageLightModel
@@ -60,45 +61,28 @@ def predict_natural_dli_from_weather(
         model: Trained two-stage light model
         forecasts: List of daily weather forecasts
 
+    Passes the features stage 1 was *fitted* on. Earlier this handed
+    ``total_radiation`` — summed **shortwave**, i.e. direct + diffuse — to the
+    ``direct_radiation_sum`` slot, left diffuse at zero and let cloud cover fall
+    back to a hardcoded 50%, so two of three weather features were wrong and the
+    third was a different physical quantity than the coefficients were fitted on.
+
+    ``day_of_year`` comes from each forecast's own date. Without it the model
+    defaulted to *today* for every row, which froze the seasonal term across a
+    whole hindcast window.
+
     Returns:
         Dict mapping date to predicted natural DLI (mol/m²/day)
     """
-    return {f.date: model.predict_dli(f.total_radiation) for f in forecasts}
-
-
-def infer_lamp_schedule_hourly(
-    actual_hourly_df: pd.DataFrame,
-    natural_dli: float,
-    hourly_forecasts: list,
-    total_radiation: float,
-) -> dict[int, float]:
-    """Infer lamp schedule from actual vs predicted natural light.
-
-    Args:
-        actual_hourly_df: Hourly PAR averages with datetime and par_avg columns
-        natural_dli: Predicted daily natural DLI
-        hourly_forecasts: List of hourly forecast objects with datetime and solar_radiation
-        total_radiation: Total daily solar radiation
-
-    Returns:
-        Dict mapping hour (0-23) to inferred lamp PAR contribution
-    """
-    inferred_lamp_hourly: dict[int, float] = {}
-
-    for h in hourly_forecasts:
-        hour = h.datetime.hour
-        natural_par = estimate_hourly_natural_par(
-            natural_dli, h.solar_radiation, total_radiation
+    return {
+        f.date: model.predict_dli(
+            f.direct_radiation_sum,
+            diffuse_radiation_sum=f.diffuse_radiation_sum,
+            cloud_cover_avg=f.avg_cloud_cover,
+            day_of_year=f.date.timetuple().tm_yday,
         )
-
-        # Get actual PAR for this hour
-        hour_data = actual_hourly_df[actual_hourly_df["datetime"].dt.hour == hour]
-        actual_par = hour_data["par_avg"].iloc[0] if not hour_data.empty else 0.0
-
-        # Infer lamp contribution (clamp to 0)
-        inferred_lamp_hourly[hour] = max(0.0, actual_par - natural_par)
-
-    return inferred_lamp_hourly
+        for f in forecasts
+    }
 
 
 def distribute_dli_across_hours(
@@ -207,90 +191,33 @@ def estimate_remaining_dli(
     return remainder_dli
 
 
-_MIN_HOURS_FOR_LAMP_INFERENCE = 6
+def lamp_hourly_par(lamp: LampModel | None) -> dict[int, float]:
+    """Lamp PAR per hour-of-day, or a day of zeros when the lamps are not running.
 
-
-def try_infer_lamp_from_day(
-    par_df: pd.DataFrame,
-    target_date: date,
-    forecast_by_date: dict[date, object],
-    model: object,
-) -> dict[int, float] | None:
-    """Try to infer a lamp schedule from a specific day's actual PAR data.
-
-    Returns None if insufficient data or no weather available for that day.
+    The single place a ``None`` lamp model (sensors silent, or never derived)
+    and a lamp model that is simply *off* collapse to the same thing, so callers
+    do not each invent their own empty schedule.
     """
-    if par_df.empty:
-        return None
-
-    par_copy = par_df.copy()
-    par_copy["time"] = pd.to_datetime(par_copy["time"], utc=True)
-    day_mask = par_copy["time"].dt.date == target_date
-    day_df = par_copy[day_mask]
-
-    if day_df.empty:
-        return None
-
-    hourly_df = calculate_hourly_par(day_df)
-    if len(hourly_df) < _MIN_HOURS_FOR_LAMP_INFERENCE:
-        return None
-
-    forecast = forecast_by_date.get(target_date)
-    if forecast is None:
-        return None
-
-    natural_dli = model.predict_dli(forecast.total_radiation)
-    return infer_lamp_schedule_hourly(
-        hourly_df, natural_dli, forecast.hourly, forecast.total_radiation
-    )
-
-
-def build_lamp_schedules(
-    par_df: pd.DataFrame,
-    forecasts: list,
-    forecast_by_date: dict[date, object],
-    model: object,
-    seed_schedule: dict[int, float],
-    lamp_ref_day: date,
-) -> tuple[dict[date, dict[int, float]], dict[int, float]]:
-    """Build per-day lamp schedules iteratively from previous day's data.
-
-    Returns (lamp_schedules, last_good_schedule).
-    """
-    lamp_schedules: dict[date, dict[int, float]] = {}
-    last_good_schedule = seed_schedule
-
-    for forecast in forecasts:
-        d = forecast.date
-        prev_day = d - timedelta(days=1)
-
-        if prev_day != lamp_ref_day:
-            inferred = try_infer_lamp_from_day(
-                par_df, prev_day, forecast_by_date, model
-            )
-            if inferred is not None:
-                last_good_schedule = inferred
-
-        lamp_schedules[d] = last_good_schedule
-
-    return lamp_schedules, last_good_schedule
+    return lamp.hourly_schedule() if lamp is not None else dict.fromkeys(range(24), 0.0)
 
 
 def compute_daily_predicted_dli(
     forecasts: list,
     natural_dli: dict[date, float],
-    lamp_schedules: dict[date, dict[int, float]],
-    fallback_schedule: dict[int, float],
+    lamp: LampModel | None,
 ) -> dict[date, float]:
-    """Compute predicted total DLI per day (natural + lamp)."""
-    result: dict[date, float] = {}
-    for f in forecasts:
-        nat = natural_dli.get(f.date, 0.0)
-        lamp_sched = lamp_schedules.get(f.date, fallback_schedule)
-        lamp_dli = (
-            sum(lamp_sched.get(h.datetime.hour, 0.0) for h in f.hourly)
-            * SECONDS_PER_HOUR
-            / UMOL_TO_MOL
-        )
-        result[f.date] = nat + lamp_dli
-    return result
+    """Predicted total DLI per day: predicted natural light + the observed lamps.
+
+    The lamp half is *measured* — the level the lamps run at, over the hours they
+    have recently been on — never a residual against the natural prediction. When
+    the lamps are off, every hour contributes zero and predicted equals natural,
+    which is the behaviour a long summer day should show.
+    """
+    schedule = lamp_hourly_par(lamp)
+    return {
+        f.date: natural_dli.get(f.date, 0.0)
+        + sum(schedule.get(h.datetime.hour, 0.0) for h in f.hourly)
+        * SECONDS_PER_HOUR
+        / UMOL_TO_MOL
+        for f in forecasts
+    }

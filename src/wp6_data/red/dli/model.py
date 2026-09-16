@@ -27,7 +27,7 @@ from wp6_data.red.dli.aggregation import (
     align_weather_to_outdoor_daily,
     encode_day_of_year,
 )
-from wp6_data.red.dli.constants import MIN_INDOOR_PAR, NATURAL_LIGHT_SENSOR, WEATHER_STATION_SENSOR
+from wp6_data.red.dli.constants import NATURAL_LIGHT_SENSOR, WEATHER_STATION_SENSOR
 
 
 def _default_model_path() -> Path:
@@ -293,45 +293,15 @@ class TwoStageLightModel:
     def _compute_attenuation(
         self, above_lamp_df: pd.DataFrame, plant_level_df: pd.DataFrame
     ) -> tuple[float, int]:
-        """Compute attenuation factor from lamp-corrected s2100-02/s2100-01 daily ratio.
+        """Attenuation factor; see :func:`wp6_data.red.lamp.compute_attenuation`.
 
-        Returns:
-            Tuple of (median_ratio, n_days_used)
+        Kept as a method for the existing callers and tests; the arithmetic
+        moved to ``lamp.py`` so the climate model can use the same number
+        instead of computing its own.
         """
-        from wp6_data.red.dli.lamp import (
-            derive_daily_lamp_profile,
-            subtract_lamp_from_sensor,
-        )
+        from wp6_data.red.lamp import compute_attenuation
 
-        # Lamp-correct the plant-level sensor
-        lamp_profile = derive_daily_lamp_profile(above_lamp_df, plant_level_df)
-        corrected_plant = subtract_lamp_from_sensor(plant_level_df, lamp_profile)
-
-        # Aggregate both to daily sums
-        above = above_lamp_df.copy()
-        above["time"] = pd.to_datetime(above["time"], utc=True)
-        above["date"] = above["time"].dt.date
-        above_daily = above.groupby("date")["value"].sum().reset_index()
-        above_daily.columns = ["date", "above_sum"]
-
-        corrected = corrected_plant.copy()
-        corrected["time"] = pd.to_datetime(corrected["time"], utc=True)
-        corrected["date"] = corrected["time"].dt.date
-        plant_daily = corrected.groupby("date")["value"].sum().reset_index()
-        plant_daily.columns = ["date", "plant_sum"]
-
-        # Merge and compute per-day ratio
-        merged = above_daily.merge(plant_daily, on="date", how="inner")
-        # Filter out days with negligible light
-        merged = merged[(merged["above_sum"] > MIN_INDOOR_PAR) & (merged["plant_sum"] > 0)]
-
-        if merged.empty:
-            return 1.0, 0
-
-        merged["ratio"] = merged["plant_sum"] / merged["above_sum"]
-        median_ratio = float(merged["ratio"].median())
-
-        return median_ratio, len(merged)
+        return compute_attenuation(above_lamp_df, plant_level_df)
 
     def predict_daily(
         self,
@@ -354,7 +324,9 @@ class TwoStageLightModel:
         if not self.is_trained():
             raise RuntimeError("Model not trained. Call train() or load() first.")
 
-        # Default day_of_year to today
+        # Default day_of_year to today. Only right for a prediction *about* today:
+        # a caller predicting any other date must say which, or the seasonal term
+        # is silently frozen (see predict_natural_dli_from_weather).
         if day_of_year is None:
             day_of_year = datetime.now().timetuple().tm_yday
 
@@ -362,13 +334,23 @@ class TwoStageLightModel:
         day_sin, day_cos = encode_day_of_year(day_of_year)
 
         # Build Stage 1 feature vector based on what was used during training
+        # A feature the model was *fitted* on has no sensible default: standing in
+        # 0.0 diffuse or 50% cloud applies coefficients to a number the weather
+        # never produced, and the result reads like a working prediction. Refuse
+        # instead, so a caller that forgets one finds out.
         feature_values = {
             "direct_radiation_sum": direct_radiation_sum,
-            "diffuse_radiation_sum": diffuse_radiation_sum or 0.0,
-            "cloud_cover_avg": cloud_cover_avg or 50.0,  # Default to 50% if not provided
+            "diffuse_radiation_sum": diffuse_radiation_sum,
+            "cloud_cover_avg": cloud_cover_avg,
             "day_of_year_sin": day_sin,
             "day_of_year_cos": day_cos,
         }
+        missing = [f for f in self.stage1_features if feature_values.get(f) is None]
+        if missing:
+            raise ValueError(
+                f"Stage 1 was trained on {missing} but they were not supplied. "
+                "Pass them from the forecast rather than letting a default stand in."
+            )
 
         X1 = np.array([[feature_values[f] for f in self.stage1_features]])
 

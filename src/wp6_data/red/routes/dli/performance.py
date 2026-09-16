@@ -15,15 +15,14 @@ from wp6_data.red.dli import (
     PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT,
     PERFORMANCE_ERROR_WARN_THRESHOLD_PCT,
     TOTAL_LIGHT_SENSOR,
-    build_lamp_schedules,
     calculate_daily_dli,
     compute_daily_predicted_dli,
     fetch_weather_for_range,
     get_model,
     predict_natural_dli_from_weather,
-    try_infer_lamp_from_day,
 )
 from wp6_data.red.dli import data as dli_data
+from wp6_data.red.lamp import RECENT_DAYS, derive_lamp_model
 from wp6_data.shared import render_date_filter, render_page, render_stat_grid, utc_day_bounds
 
 router = APIRouter()
@@ -57,25 +56,42 @@ async def dli_performance(
         end = yesterday
     end = min(end, yesterday)
 
-    lamp_ref_day = start - timedelta(days=1)
-    lamp_ref_dt, _ = utc_day_bounds(lamp_ref_day)
+    # The lamp schedule is read from the fortnight *before* the scored window,
+    # so this page hindcasts with only what was knowable on day one — the same
+    # "recent schedule continues" assumption the forecast page makes. Attenuation
+    # is not read from that fortnight; see derive_lamp_model on why a short
+    # winter window cannot identify it.
+    lamp_window_start, _ = utc_day_bounds(start - timedelta(days=RECENT_DAYS))
+    _, lamp_window_end = utc_day_bounds(start - timedelta(days=1))
+    start_dt, _ = utc_day_bounds(start)
     _, end_dt = utc_day_bounds(end)
 
     filter_html = render_date_filter(start, end)
 
-    # Fetch actual PAR data for both sensors (include lamp_ref_day for seed)
+    # Fetch actual PAR data for both sensors
     try:
         par_df = await dli_data.get_par_readings(
-            device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR], start=lamp_ref_dt, end=end_dt
+            device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR], start=start_dt, end=end_dt
+        )
+        lamp_par_df = await dli_data.get_par_readings(
+            device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR],
+            start=lamp_window_start, end=lamp_window_end,
         )
     except Exception as e:
         return render_page(PAGE_TITLE, f"<h1>Error: {e}</h1>",
                           show_back_link=True, back_url="/dli")
 
-    # Fetch weather data including lamp_ref_day for lamp inference
+    lamp = None
+    if not lamp_par_df.empty:
+        lamp = derive_lamp_model(
+            lamp_par_df[lamp_par_df["device"] == NATURAL_LIGHT_SENSOR],
+            lamp_par_df[lamp_par_df["device"] == TOTAL_LIGHT_SENSOR],
+            attenuation=model.attenuation_factor if model.is_trained() else None,
+        )
+
     client = deps.get_weather_client()
     try:
-        forecasts = await fetch_weather_for_range(client, lamp_ref_day, end)
+        forecasts = await fetch_weather_for_range(client, start, end)
         predicted_natural = predict_natural_dli_from_weather(model, forecasts)
     except Exception as e:
         return render_page(PAGE_TITLE,
@@ -96,20 +112,10 @@ async def dli_performance(
             elif row["device"] == NATURAL_LIGHT_SENSOR:
                 actual_natural_dli[d] = row["dli"]
 
-    # Build lamp schedules from total sensor data (true forecast approach)
-    total_par_df = par_df[par_df["device"] == TOTAL_LIGHT_SENSOR] if not par_df.empty else par_df
-    forecast_by_date = {f.date: f for f in forecasts}
-    seed = try_infer_lamp_from_day(total_par_df, lamp_ref_day, forecast_by_date, model)
-    seed_schedule = seed if seed is not None else {}
-
     range_forecasts = [f for f in forecasts if start <= f.date <= end]
-    lamp_schedules, last_good = build_lamp_schedules(
-        total_par_df, range_forecasts, forecast_by_date, model, seed_schedule, lamp_ref_day
-    )
-
     predicted_natural_range = {d: v for d, v in predicted_natural.items() if start <= d <= end}
     predicted_total_dli = compute_daily_predicted_dli(
-        range_forecasts, predicted_natural_range, lamp_schedules, last_good
+        range_forecasts, predicted_natural_range, lamp
     )
 
     # Two modes: total (actual total vs predicted total) and natural (actual natural vs predicted)

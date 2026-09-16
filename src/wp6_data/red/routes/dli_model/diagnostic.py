@@ -12,11 +12,10 @@ from wp6_data.red.dli import (
     NATURAL_LIGHT_SENSOR,
     TOTAL_LIGHT_SENSOR,
     WEATHER_STATION_SENSOR,
-    derive_daily_lamp_profile,
     get_model,
-    subtract_lamp_from_sensor,
 )
 from wp6_data.red.dli import data as dli_data
+from wp6_data.red.lamp import derive_daily_lamp_profile, subtract_lamp_from_sensor
 from wp6_data.shared import render_page, render_stat_grid, render_stat_tile
 
 router = APIRouter()
@@ -96,12 +95,13 @@ async def dli_model_diagnostic() -> str:
             lamp_powers = lamp_profile["lamp_power_par"].dropna()
             median_lamp_power = float(lamp_powers.median()) if len(lamp_powers) > 0 else 0.0
 
-            lamp_days = lamp_profile.dropna(subset=["lamp_start", "lamp_end"])
+            lamp_days = lamp_profile[lamp_profile["lamp_power_par"].notna()]
             if not lamp_days.empty:
+                # Count the lit hours, not the span between the first and last.
+                # A schedule that runs across midnight spans 0-23 and would read
+                # as a 24-hour day.
                 lamp_hours = lamp_days.apply(
-                    lambda r: (r["lamp_end"] - r["lamp_start"] + 1)
-                    if r["lamp_start"] <= r["lamp_end"]
-                    else (24 - r["lamp_start"] + r["lamp_end"] + 1),
+                    lambda r: len(r["lamp_hours"]),
                     axis=1,
                 )
                 avg_lamp_hours = float(lamp_hours.mean())

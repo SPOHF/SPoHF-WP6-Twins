@@ -32,10 +32,6 @@ from wp6_data.red.dli.constants import (
     UMOL_TO_MOL,
     WEATHER_STATION_SENSOR,
 )
-from wp6_data.red.dli.lamp import (
-    derive_daily_lamp_profile,
-    subtract_lamp_from_sensor,
-)
 from wp6_data.red.dli.model import (
     LightCorrelationModel,
     ModelStats,
@@ -44,15 +40,13 @@ from wp6_data.red.dli.model import (
     get_model,
 )
 from wp6_data.red.dli.schedule import (
-    build_lamp_schedules,
     compute_daily_predicted_dli,
     distribute_dli_across_hours,
     estimate_remaining_dli,
     fetch_weather_for_range,
-    infer_lamp_schedule_hourly,
+    lamp_hourly_par,
     predict_natural_dli_from_weather,
     prepare_daily_dli_summary,
-    try_infer_lamp_from_day,
 )
 from wp6_data.shared.weather import OpenMeteoClient
 
@@ -87,18 +81,13 @@ __all__ = [
     "align_weather_to_outdoor_daily",
     "encode_day_of_year",
     # Schedule functions
-    "build_lamp_schedules",
     "compute_daily_predicted_dli",
     "distribute_dli_across_hours",
     "estimate_remaining_dli",
     "fetch_weather_for_range",
-    "infer_lamp_schedule_hourly",
+    "lamp_hourly_par",
     "predict_natural_dli_from_weather",
     "prepare_daily_dli_summary",
-    "try_infer_lamp_from_day",
-    # Lamp functions
-    "derive_daily_lamp_profile",
-    "subtract_lamp_from_sensor",
     # Model classes and functions
     "get_model",
     "LightCorrelationModel",
