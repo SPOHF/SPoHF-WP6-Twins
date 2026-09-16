@@ -112,6 +112,98 @@ def add_day_of_year_features(df: pd.DataFrame, date_col: str = "date") -> pd.Dat
     return df
 
 
+HOURS_PER_DAY = 24
+
+# Pandas resample/date_range frequency for one-hour bins.
+HOURLY = "1h"
+
+
+def resample_to(
+    df: pd.DataFrame,
+    rule: str,
+    *,
+    time_col: str = "time",
+    value_col: str = "value",
+    how: str = "mean",
+) -> pd.DataFrame:
+    """Collapse raw readings to one value per ``rule`` interval.
+
+    ``rule`` is any pandas offset alias — ``"1h"`` for the resolution models
+    train at, ``"10min"`` for drawing measured history at something closer to
+    the sensors' own cadence.
+
+    Buckets with no readings are **absent**, not zero-filled — the caller turns
+    absence into a gap, and zero-filling would drag every aggregate down.
+
+    Returns ``time_col, value_col`` sorted by time.
+    """
+    if df.empty:
+        return pd.DataFrame({time_col: pd.Series(dtype="datetime64[ns, UTC]"),
+                             value_col: pd.Series(dtype=float)})
+
+    frame = df[[time_col, value_col]].copy()
+    frame[time_col] = pd.to_datetime(frame[time_col], utc=True)
+    frame = frame.dropna(subset=[time_col, value_col])
+    if frame.empty:
+        return frame.reset_index(drop=True)
+
+    resampled = frame.set_index(time_col)[value_col].resample(rule).agg(how).dropna()
+    return resampled.reset_index()
+
+
+def resample_hourly(
+    df: pd.DataFrame,
+    *,
+    time_col: str = "time",
+    value_col: str = "value",
+    how: str = "mean",
+) -> pd.DataFrame:
+    """Collapse raw readings to one value per hour — what the models train on.
+
+    Sensor relays write in bursts, and an insert timestamp is neither evenly
+    spaced nor unique per device. Resampling absorbs both: a burst of readings
+    inside one hour becomes one row, without anything having to assume a cadence.
+    """
+    return resample_to(
+        df, HOURLY, time_col=time_col, value_col=value_col, how=how,
+    )
+
+
+
+def encode_hour_of_day(hour: int) -> tuple[float, float]:
+    """Encode hour of day as cyclical sin/cos features.
+
+    The hour-of-day sibling of :func:`encode_day_of_year`, and cyclical for the
+    same reason: 23:00 and 00:00 are adjacent, but a linear encoding places them
+    as far apart as the scale allows.
+
+    Args:
+        hour: Hour of day (0-23)
+
+    Returns:
+        Tuple of (sin, cos) encoding that handles midnight wrap-around
+    """
+    angle = 2 * np.pi * hour / HOURS_PER_DAY
+    return float(np.sin(angle)), float(np.cos(angle))
+
+
+def add_hour_of_day_features(df: pd.DataFrame, time_col: str = "time") -> pd.DataFrame:
+    """Add cyclical hour-of-day features (sin/cos encoding) to DataFrame.
+
+    Args:
+        df: DataFrame with a timestamp column
+        time_col: Name of the timestamp column
+
+    Returns:
+        DataFrame with added hour_of_day_sin and hour_of_day_cos columns
+    """
+    df = df.copy()
+    hour = pd.to_datetime(df[time_col], utc=True).dt.hour
+    df["hour_of_day_sin"] = np.sin(2 * np.pi * hour / HOURS_PER_DAY)
+    df["hour_of_day_cos"] = np.cos(2 * np.pi * hour / HOURS_PER_DAY)
+    return df
+
+
 def aggregate_to_daily(
     df: pd.DataFrame,
     time_col: str,
