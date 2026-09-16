@@ -1,11 +1,98 @@
 """Shared Plotly chart helpers."""
 
 from datetime import date
+from typing import Any
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+# Continuous colour scales, by the job the number does.
+#
+# DIVERGING has a meaningful zero — two hues either side of a neutral grey
+# midpoint, never a hue at the middle, so "no different from the baseline" reads
+# as no colour at all and a loss reads as the opposite of a gain.
+# SEQUENTIAL is one hue light→dark: magnitude with no crossing point, where more
+# ink means more of the quantity.
+DIVERGING_SCALE = [[0.0, "#e34948"], [0.5, "#f0efec"], [1.0, "#2a78d6"]]
+SEQUENTIAL_SCALE = [[0.0, "#cde2fb"], [0.5, "#3987e5"], [1.0, "#0d366b"]]
+
+
+def render_matrix_heatmap_html(
+    z: list[list[float | None]],
+    x_labels: list[str],
+    y_labels: list[str],
+    *,
+    colorscale: Any = None,
+    reversescale: bool = False,
+    zmin: float | None = None,
+    zmax: float | None = None,
+    value_label: str = "value",
+    value_format: str = ".2f",
+    include_js: bool = True,
+    height: int | None = None,
+    x_title: str = "",
+    y_title: str = "",
+) -> str:
+    """Render any rectangular matrix as a Plotly heatmap HTML fragment.
+
+    Values are printed into the cells as well as encoded as colour, so the
+    matrix doubles as a table for anyone the colour does not reach — which is
+    also the relief a pale end of a scale obliges.
+
+    ``value_label`` names the quantity *and its unit* on the colour bar as well
+    as in the hover, so the scale is never a gradient of unlabelled colour: the
+    reader can tell 5.08 °C from 5.08 ppm without leaving the chart.
+
+    ``None`` and NaN are drawn as gaps rather than as zero: a combination that
+    was never fitted is not a score of nothing.
+    """
+    import math
+
+    def _blank(value):
+        return value is None or (isinstance(value, float) and math.isnan(value))
+
+    text = [
+        ["" if _blank(v) else format(v, value_format) for v in row] for row in z
+    ]
+    fig = go.Figure(
+        go.Heatmap(
+            z=z,
+            x=x_labels,
+            y=y_labels,
+            colorscale=colorscale if colorscale is not None else SEQUENTIAL_SCALE,
+            reversescale=reversescale,
+            zmin=zmin,
+            zmax=zmax,
+            text=text,
+            texttemplate="%{text}",
+            textfont={"size": 11},
+            hoverongaps=False,
+            colorbar={
+                "title": {"text": value_label, "side": "right"},
+                "thickness": 12,
+                "tickfont": {"size": 10},
+            },
+            hovertemplate=(
+                f"%{{y}} · %{{x}}<br>{value_label} = %{{z:{value_format}}}"
+                "<extra></extra>"
+            ),
+        ),
+    )
+    fig.update_layout(
+        template="plotly_white",
+        height=height or max(240, 120 + len(y_labels) * 42),
+        margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis={"title": x_title, "side": "top"},
+        yaxis={"title": y_title, "autorange": "reversed"},
+    )
+    return fig.to_html(
+        full_html=False,
+        include_plotlyjs="cdn" if include_js else False,
+    )
 
 
 def render_correlation_heatmap_html(
@@ -17,6 +104,10 @@ def render_correlation_heatmap_html(
 ) -> str:
     """Render a correlation matrix as a Plotly heatmap HTML fragment.
 
+    A square special case of :func:`render_matrix_heatmap_html`, keeping its own
+    fixed -1..1 scale: a correlation is always on that range, so pinning it
+    makes two matrices comparable at a glance.
+
     Args:
         corr: Square DataFrame from ``df.corr()``; columns/index must match
               ``labels`` in order.
@@ -26,42 +117,11 @@ def render_correlation_heatmap_html(
         value_label: Symbol shown in hover tooltip (``"r"`` for Pearson,
                      ``"ρ"`` for Spearman).
     """
-    import math
-
-    z = corr.values.tolist()
-    text = [
-        [
-            "NaN" if (v is None or (isinstance(v, float) and math.isnan(v)))
-            else f"{v:.2f}"
-            for v in row
-        ]
-        for row in z
-    ]
-    fig = go.Figure(
-        go.Heatmap(
-            z=z,
-            x=labels,
-            y=labels,
-            colorscale="RdBu",
-            reversescale=True,
-            zmin=-1,
-            zmax=1,
-            text=text,
-            texttemplate="%{text}",
-            textfont={"size": 11},
-            hovertemplate=f"X: %{{x}}<br>Y: %{{y}}<br>{value_label} = %{{z:.3f}}<extra></extra>",
-        ),
-    )
-    fig.update_layout(
-        template="plotly_white",
+    return render_matrix_heatmap_html(
+        corr.values.tolist(), labels, labels,
+        colorscale="RdBu", reversescale=True, zmin=-1, zmax=1,
+        value_label=value_label, include_js=include_js,
         height=max(400, 150 + len(labels) * 55),
-        margin={"l": 20, "r": 20, "t": 20, "b": 20},
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-    )
-    return fig.to_html(
-        full_html=False,
-        include_plotlyjs="cdn" if include_js else False,
     )
 
 

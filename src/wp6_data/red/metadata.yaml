@@ -116,6 +116,106 @@ uniformity:
     vpd: 0.15      # kPa
     fungal: 2.0    # h
 
+# ── Climate model: weather → greenhouse level → per-height wire ──
+# Three links, each trained where the data supports it. Links 1-2 have ~9.7
+# months across a full seasonal cycle; link 3 (the per-height deviation) has
+# only the wire history, which is summer-only — hence no day-of-year feature
+# there. Evidence for every date and sensor choice below is in
+# docs/red/wire-data-coverage.md (probed 2026-09-16).
+# Red-only; the shared metadata model ignores this key.
+climate_model:
+  # Earliest date any link may train from: the first greenhouse-level reading.
+  # Supersedes the former DEFAULT_TRAINING_START code constant.
+  training_start: 2025-10-08
+
+  # Outdoor reference. A full weather station, not just the lux source the DLI
+  # model uses it for.
+  outdoor:
+    device: s1000-wetherstation
+    sensors: [temp, hum, lux, wind_sp]
+
+  # Greenhouse-level reference that per-height deviations are measured against.
+  # Both candidates are fitted and compared: s2101 is what crop_cycles uses,
+  # s2103 is the steadier of the two (mean daily range 11-18°C vs 23-30°C, and
+  # no >50°C maxima). Which one wins is reported, not assumed.
+  references:
+    - key: s2103
+      device: s2103-01-temp-hum-co2
+      sensors: {temp: temp, hum: hum, co2: co2}
+    - key: s2101
+      device: s2101-01-temp-hum
+      sensors: {temp: temp, hum: hum}
+  # Light needs two references, because canopy PAR is part weather and part
+  # operator decision. Link 2 predicts the NATURAL part from weather (the
+  # above-lamp sensor); the lamp contribution is observed and added back before
+  # link 3, whose reference stays the canopy sensor — like-for-like with the
+  # wire PAR sensors, which also hang under the lamps. See MODEL_PAPER §7.5 and
+  # dli/MODEL_PAPER.md §5.1 for why predicting the canopy sensor from weather
+  # does not work.
+  par:
+    natural:
+      device: s2100-01-par
+      sensor: par
+    canopy:
+      device: s2100-02-par
+      sensor: par
+
+  # Hourly resolution; horizons in hours ahead.
+  # Every horizon listed here is a separately fitted and separately scored
+  # model — not interpolation — so adding one costs a fit per target and a
+  # row on the model page.
+  #
+  # Dense at the front, where indoor climate turns over in a few hours, and
+  # dense again from 12h out: skill against persistence collapses at the
+  # multiples of 24h, where "same time yesterday" is a strong guess, and
+  # recovers in between. Three-hourly through that range resolves the shape
+  # of the dip rather than just its existence.
+  horizons_hours: [1, 2, 3, 4, 6, 8, 12, 15, 18, 21, 24, 27, 30, 33, 36, 42, 48]
+  # Lags of the indoor state, in hours, available at prediction time.
+  lag_hours: [1, 2, 3, 6, 12, 24]
+
+  # Link 3 seasonality is not configured: each (wire, measurement, height) is
+  # fitted both with and without a day-of-year term and the better out-of-fold
+  # score wins. Measured, because the answer differs by measurement — see
+  # climate/MODEL_PAPER.md §5.4.
+  # Reference PAR (µmol/m²/s) below which the per-height light ratio is not
+  # fitted: at night the ratio is a division by noise, not an attenuation.
+  par_floor: 5.0
+
+  # Spans excluded from every fit. PROVISIONAL — the dates are measured, the
+  # *cause* is not confirmed. Correct the reason here, not in code.
+  exclusions:
+    - start: 2026-05-28
+      end: 2026-07-13          # exclusive; normal behaviour resumes 2026-07-13
+      reason: >-
+        Greenhouse-level sensors s2101 and s2103 both flatlined to 0.2-1.5°C of
+        daily range (normal: 6-30°C) with sharp boundaries, while the wires read
+        outdoor-like values. Spans the declared end of the 2026 spring crop
+        cycle, so an empty house during changeover is the likely cause — UNCONFIRMED,
+        awaiting Neurath/WP1.
+
+  # Per-wire, per-measurement availability. Each wire is broken differently, so
+  # link 3 must not assume a wire reports everything. See the coverage doc.
+  wire_availability:
+    WS_01_01:
+      from: 2026-07-16
+      temp: [1, 2, 3, 4, 5]
+      hum: [1, 2, 3, 4, 5]
+      co2: [1, 2, 3, 4, 5]
+      par: [5]               # H1-H4 PAR dead since 2026-08
+    WS_01_02:
+      from: 2026-07-13
+      temp: [1, 2, 3, 4, 5]
+      hum: [1, 2, 3, 4, 5]
+      co2: [1, 2, 3, 4, 5]
+      par: [1, 2, 3, 4, 5]   # the only complete wire
+    WS_01_03:
+      from: 2026-07-13
+      temp: []               # temp/hum/co2 dead since 2026-08
+      hum: []
+      co2: []
+      par: [1, 2, 3, 5]
+
 sensor_defaults:
   temp:
     type: "temperature"

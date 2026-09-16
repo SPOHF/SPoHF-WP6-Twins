@@ -105,6 +105,24 @@ A wire reading the same distance from the other wires' median at *every* height.
 A contiguous span where a risk metric (Fungal-risk, out-of-band VPD, canopy light deficit) at one growth section stayed above its "active" threshold — bounded by when the problem was first *present/observed* and when it was *resolved/gone*. A configured minimum duration suppresses flapping.
 Episodes are **persisted in a rebuildable cache**, maintained by two admin actions: **Update** (incremental — extend the log up to now, the manual stand-in for a scheduled job) and **Rebuild** (recompute a *selectable date range* from the forever-retained raw wire data, used after retuning thresholds). Each episode stamps the threshold-set it was computed under. The page reads the last-built state, so the live per-section verdict is *"as of the last Update/Rebuild"* (automatic refresh via a scheduled job is a deferred upgrade). Rebuilding a range rewrites its episodes under current rules — the log is reproducible, not immutable.
 
+**Reference sensor**:
+The greenhouse-level sensor a per-height prediction is expressed relative to — `s2103-01-temp-hum-co2` for temp/hum/CO₂, `s2100-02-par` for light. Chosen by evidence, not decree: every candidate declared in `climate_model.references` is trained and compared, and coverage beats a marginally better score. It is a *whole-house* reading, not a **Height** reading, and the gap between the two is the **Deviation**.
+
+**Deviation**:
+How one **Height** differs from the **Reference sensor** at the same moment — the quantity the climate model actually fits, rather than the height's absolute value. Taken in whatever form is physically additive: a difference for temperature and CO₂, a *ratio* for PAR (canopy attenuation is multiplicative), and a difference in **absolute** humidity for RH, because the same air reads a different RH at a different temperature. Fitting the deviation makes the profile shape the thing being learnt.
+
+**Horizon**:
+How far ahead a prediction reaches, in hours. Each horizon is a separate model fitted directly on that distance, never a one-step model rolled forward — rolling forward compounds its own error. A prediction is only meaningful paired with its horizon: the same target is easy at +1 h and hard at +6 h.
+
+**Skill**:
+The fraction of a baseline's error a model removes. Zero means no better than the baseline; **negative means worse, and is reported as such**. Skill, not R², is how a climate prediction is judged here, because a slowly-moving indoor quantity scores a high R² simply by echoing the present. The baselines are *persistence* (the value now, carried forward), *climatology* (the mean for this hour and month), and — for a per-height model — *reference-as-is* (assume the height equals the **Reference sensor**, i.e. ignore the **Deviation** entirely).
+
+**Excluded window**:
+A dated span no model may train on, declared in `climate_model.exclusions`. Not low-quality data to be down-weighted: a period the sensors were not measuring what their names say. The current one (2026-05-28 → 2026-07-12) has measured boundaries and an unconfirmed cause — see `docs/red/wire-data-coverage.md`.
+
+**Forecast profile**:
+The predicted value at every **Growth section** of one wire at a single **Horizon** — read as a shape down the crop, the same way the measured crop-climate profile is read. Drawn as discrete profiles rather than a curve through time, because the chain is fitted and scored only at its horizons; the hours between them are not predicted and are not drawn. Each point carries the two links' combined held-out error as a *measured spread*, which is not a confidence interval.
+
 ## Relationships
 
 - A **Multi-height wire** is surfaced as five per-**Height** devices, each carrying the four **Measurement type** sensors.

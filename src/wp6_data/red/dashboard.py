@@ -11,6 +11,8 @@ from wp6_data.red.db import MySQLConnection
 from wp6_data.red.provider import RedSensorProvider
 from wp6_data.red.routes import (
     browse,
+    climate_forecast,
+    climate_model,
     crop_cycles,
     dli,
     dli_model,
@@ -32,6 +34,7 @@ log = structlog.get_logger()
 # Holds the background boot-training task so it isn't garbage-collected before
 # it runs to completion.
 _bootstrap_task: asyncio.Task | None = None
+_climate_bootstrap_task: asyncio.Task | None = None
 
 
 async def _train_dli_model_if_missing() -> None:
@@ -52,6 +55,36 @@ async def _train_dli_model_if_missing() -> None:
         )
     except Exception:
         log.warning("dli_model_training_failed", exc_info=True)
+
+
+async def _train_climate_model_if_missing() -> None:
+    """Fit the climate chain on boot when ephemeral storage has no copy.
+
+    Never raises: a failure here must not take down startup, and the admin
+    Retrain button remains the fallback. Heavier than the DLI bootstrap — two
+    candidate references, three targets, six horizons and every wire height —
+    so it is backgrounded for the same reason, only more so.
+    """
+    from wp6_data.red.climate.config import load_climate_model
+    from wp6_data.red.climate.training import load_chain, train_chain
+
+    if load_chain() is not None:
+        log.info("climate_model_loaded_from_disk")
+        return
+    try:
+        chain = await train_chain(
+            load_climate_model(deps._METADATA_PATH), deps.get_weather_client()
+        )
+        log.info(
+            "climate_model_trained",
+            reference=chain.chosen_reference,
+            span_days=chain.span_days,
+            beat_persistence=len(chain.stats.horizons_beating_persistence)
+            if chain.stats else 0,
+            suggestions=len(chain.suggestions),
+        )
+    except Exception:
+        log.warning("climate_model_training_failed", exc_info=True)
 
 
 async def _startup() -> None:
@@ -75,8 +108,9 @@ async def _startup() -> None:
     # The DLI model lives on ephemeral storage, so a restart wipes it and a cold
     # boot retrains from scratch. Backgrounded so a slow first fit can't delay
     # readiness — mirrors blue's soil-forecast bootstrap.
-    global _bootstrap_task
+    global _bootstrap_task, _climate_bootstrap_task
     _bootstrap_task = asyncio.create_task(_train_dli_model_if_missing())
+    _climate_bootstrap_task = asyncio.create_task(_train_climate_model_if_missing())
 
 
 async def _shutdown() -> None:
@@ -129,7 +163,9 @@ config = TwinConfig(
 
     extra_routers=[browse.router, 
                    dli.router, 
-                   dli_model.router, 
+                   dli_model.router,
+                   climate_model.router,
+                   climate_forecast.router,
                    red_charts.router,
                    multi_height.router, 
                    crop_cycles.router,

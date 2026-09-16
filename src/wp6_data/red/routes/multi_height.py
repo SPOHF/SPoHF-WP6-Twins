@@ -99,6 +99,14 @@ MULTI_HEIGHT_VIEWS = [
         "PAR, temperature, humidity and CO₂ as compact trends.",
     },
     {
+        "href": "/climate/forecast",
+        "title": "Climate Forecast by Section",
+        "label": "Open view",
+        "description": "The same growth sections 48 hours ahead: predicted "
+        "temperature, humidity and CO₂ against the outdoor conditions, with "
+        "the held-out error the prediction was measured at.",
+    },
+    {
         "href": "/multi_height/uniformity",
         "title": "Uniformity across Wires",
         "label": "Open view",
@@ -548,7 +556,8 @@ async def crop_climate_page(
     <h1>Crop Climate by Height</h1>
     <p>Measured values are left of the plant, derived metrics on the right.
     Click any cell to expand its chart.
-    <a href="/multi_height/uniformity?date={table_date}">Compare wires →</a></p>
+    <a href="/multi_height/uniformity?date={table_date}">Compare wires →</a>
+    <a href="/climate/forecast?wire={wire}">What is coming →</a></p>
 
     {wire_pills}
     {date_form}
