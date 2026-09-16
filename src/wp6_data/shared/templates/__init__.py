@@ -20,6 +20,7 @@ from wp6_data.shared.templates.assets import (
     UNIFIED_CHART_JS,
 )
 from wp6_data.shared.templates.components import (
+    DEFAULT_ALL_START,
     EXPLORE_TAB_IDS,
     EXPLORE_TAB_LABELS,
     build_explore_tabs,
@@ -72,6 +73,7 @@ __all__ = [
     "pill_row",
     "render_card",
     "render_dashboard_page",
+    "DEFAULT_ALL_START",
     "render_date_filter",
     "render_device_table",
     "render_explore_tabs",

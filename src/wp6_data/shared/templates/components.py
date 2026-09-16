@@ -36,9 +36,27 @@ def resolve_date_range(
     return start, end, start_dt, end_dt
 
 
-def render_date_filter(start: date, end: date, extra_params: dict[str, str] | None = None) -> str:
-    """Render an HTML date-range filter with quick-select presets and custom inputs."""
+# Where the "All" preset reaches back to when a page does not say. A page that
+# knows when its own data begins should pass ``all_start`` instead — "All"
+# landing on a date with no readings behind it is a range the page cannot fill.
+DEFAULT_ALL_START = date(2024, 1, 1)
+
+
+def render_date_filter(
+    start: date,
+    end: date,
+    extra_params: dict[str, str] | None = None,
+    *,
+    all_start: date | None = None,
+) -> str:
+    """Render an HTML date-range filter with quick-select presets and custom inputs.
+
+    ``all_start`` is where the "All" preset begins; pass the first day the page
+    actually has data for, so "All" means all of *this page's* data rather than
+    an arbitrary epoch.
+    """
     today = date.today()
+    all_start = all_start or DEFAULT_ALL_START
     presets = [
         ("1d", 1),
         ("7d", 7),
@@ -51,7 +69,7 @@ def render_date_filter(start: date, end: date, extra_params: dict[str, str] | No
     active = None
     for label, days in presets:
         if days is None:
-            if start == date(2024, 1, 1) and end == today:
+            if start == all_start and end == today:
                 active = label
         elif start == today - timedelta(days=days) and end == today:
             active = label
@@ -93,7 +111,7 @@ def render_date_filter(start: date, end: date, extra_params: dict[str, str] | No
     function setRange(days) {{
         var end = new Date();
         var start = days === null
-            ? new Date('2024-01-01')
+            ? new Date('{all_start.isoformat()}')
             : new Date(end.getTime() - days * 86400000);
         document.getElementById('df-start').value = start.toISOString().slice(0, 10);
         document.getElementById('df-end').value = end.toISOString().slice(0, 10);

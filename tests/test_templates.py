@@ -12,6 +12,7 @@ from wp6_data.shared.metadata import (
     TwinMetadata,
 )
 from wp6_data.shared.templates import (
+    DEFAULT_ALL_START,
     build_explore_tabs,
     configure_dashboard,
     default_date_range,
@@ -141,8 +142,32 @@ class TestRenderDateFilter:
         today = date(2026, 3, 15)
         mock_date.today.return_value = today
         mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
-        html = render_date_filter(date(2024, 1, 1), today)
+        html = render_date_filter(DEFAULT_ALL_START, today)
         assert 'class="contrast" onclick="setRange(null)">All</button>' in html
+
+    @patch("wp6_data.shared.templates.components.date")
+    def test_all_start_moves_where_all_reaches_back_to(self, mock_date):
+        """A page that knows when its data begins says so, and "All" honours it."""
+        today = date(2026, 3, 15)
+        mock_date.today.return_value = today
+        mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
+        first_reading = date(2025, 11, 4)
+
+        html = render_date_filter(first_reading, today, all_start=first_reading)
+
+        # The preset button lands on the data, not on the shared epoch.
+        assert f"new Date('{first_reading.isoformat()}')" in html
+        assert DEFAULT_ALL_START.isoformat() not in html
+        # ...and the page loaded on that range is recognised as "All".
+        assert 'class="contrast" onclick="setRange(null)">All</button>' in html
+
+    @patch("wp6_data.shared.templates.components.date")
+    def test_all_start_defaults_to_the_shared_epoch(self, mock_date):
+        today = date(2026, 3, 15)
+        mock_date.today.return_value = today
+        mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
+        html = render_date_filter(date(2026, 1, 1), today)
+        assert f"new Date('{DEFAULT_ALL_START.isoformat()}')" in html
 
     @patch("wp6_data.shared.templates.components.date")
     def test_no_active_preset_for_custom_range(self, mock_date):
