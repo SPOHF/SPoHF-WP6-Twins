@@ -27,6 +27,8 @@ import pandas as pd  # type: ignore[import-untyped]
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from wp6_data.shared.artifacts import fingerprint
+
 
 class OutdoorReference(BaseModel):
     """The local outdoor weather station link 1 calibrates the API against."""
@@ -107,6 +109,18 @@ class ClimateModelConfig(BaseModel):
     par_floor: float
     exclusions: list[Exclusion]
     wire_availability: dict[str, WireAvailability]
+
+    def fit_fingerprint(self) -> str:
+        """Identifies the configuration a model was fitted under.
+
+        Every field is included, because every field shapes the fit: the
+        training window, the horizons, the lag set, the references, the PAR
+        floor, the exclusions and which heights each wire is declared to
+        report. A model whose fingerprint does not match the config now on disk
+        was fitted to answer a different question, and is refused rather than
+        served — see `shared.artifacts`.
+        """
+        return fingerprint(self.model_dump(mode="json"))
 
     def reference(self, key: str) -> GreenhouseReference:
         """The declared reference named ``key``; raises if it isn't declared."""

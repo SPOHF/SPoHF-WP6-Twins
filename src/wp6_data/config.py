@@ -51,11 +51,17 @@ class Settings(BaseSettings):
 
     # Directory for trained soil-forecast models. Deliberately NOT under
     # blue_export_dir: that PVC is the nightly CSV export, mounted read-only in
-    # the dashboard. Models are dashboard-owned and, like red's DLI model, live
-    # on ephemeral storage — retrained on boot rather than persisted (see
-    # blue.routes.monitor.soil_forecast.bootstrap_models_if_missing). Empty
-    # (the default) resolves to a writable home path at runtime.
+    # the dashboard. Models are dashboard-owned and get their own writable
+    # volume, so they survive a deploy and the dashboard does not refit on every
+    # cold boot (see blue.routes.monitor.soil_forecast.bootstrap_models_if_missing).
+    # Empty (the default) resolves to a writable home path at runtime.
     blue_model_dir: str = ""
+
+    # Time of day (UTC, "HH:MM") to refit the soil-forecast models. Models now
+    # persist across a deploy, so this schedule is what keeps them current
+    # rather than a cold boot. Empty disables it, which is the right default
+    # off-cluster.
+    blue_retrain_at: str = ""
 
     # Optional CSV path for farm-wide fertigation events overlay in /chart.
     # If empty, blue routes use the newest manual upload under
@@ -133,3 +139,11 @@ class RedSettings(BaseSettings):
     # PVC mount for manual uploads (issue 008). Files land at
     # {upload_dir}/{source}/{sha256}.xlsx; only the latest 2 per source kept.
     upload_dir: str = "/data/manual-uploads"
+
+    # Time of day (UTC, "HH:MM") to refit the DLI and climate models. Models now
+    # persist on the models PVC across a deploy, so a cold boot no longer
+    # refits them and this schedule is what keeps them current. Empty disables
+    # the schedule, which is the right default off-cluster: a dev machine left
+    # running overnight should not start training at 3 a.m.
+    retrain_at: str = ""
+

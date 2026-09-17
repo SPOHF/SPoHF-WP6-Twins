@@ -54,9 +54,14 @@ from wp6_data.red.fitting import (
     score_holdout,
 )
 
-# Bumped whenever the pickle layout or the feature contract changes. `load`
-# refuses anything older rather than silently mixing eras, so a stale model on
-# ephemeral disk degrades to "retrain" instead of to wrong numbers.
+# Bumped for a *deliberate* break: a change in the pickle layout, or in what the
+# stored numbers mean when their shape is unchanged. `load` refuses anything
+# older rather than silently mixing eras, so a stale model degrades to "retrain"
+# instead of to wrong numbers.
+#
+# Changes nobody thinks to declare — a widened training window, an added
+# horizon, a new feature in the fit — are caught by the fingerprint stored
+# alongside, which is computed rather than maintained. See `shared.artifacts`.
 #
 # v2: the lamp model moved from `climate/lamp.py` to `red/lamp.py`. A pickle
 # records a class by module path, so every v1 artifact names a module that no
@@ -91,7 +96,7 @@ OUTDOOR_PREFIX = "out_"
 PREDICTED_OUTDOOR_PREFIX = "outhat_"
 
 
-def read_artifact(path: Path) -> dict | None:
+def read_artifact(path: Path, *, expect_fingerprint: str | None = None) -> dict | None:
     """The pickled artifact at ``path``, or ``None`` when it cannot be used.
 
     A version check only protects against artifacts we can still *read*. Pickle
@@ -113,6 +118,12 @@ def read_artifact(path: Path) -> dict | None:
     except Exception:
         return None
     if not isinstance(data, dict) or data.get("version", 0) != MODEL_VERSION:
+        return None
+    if expect_fingerprint is not None and data.get("fingerprint") != expect_fingerprint:
+        # Fitted under a different configuration — a widened training window, a
+        # new horizon, a changed exclusion. The layout is fine, so the version
+        # gate above waves it through; what has moved is the question the model
+        # was fitted to answer. Same verdict as a missing file: refit.
         return None
     return data
 
@@ -496,6 +507,10 @@ class IndoorClimateModel:
             pickle.dump(
                 {
                     "version": MODEL_VERSION,
+                    # What the config looked like when this was fitted. Checked
+                    # on load so a config edit cannot be served by a model that
+                    # predates it — see `shared.artifacts`.
+                    "fingerprint": self.config.fit_fingerprint(),
                     "reference_key": self.reference_key,
                     "link1_models": self.link1_models,
                     "link2_models": self.link2_models,

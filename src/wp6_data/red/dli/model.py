@@ -27,7 +27,40 @@ from wp6_data.red.dli.aggregation import (
     align_weather_to_outdoor_daily,
     encode_day_of_year,
 )
-from wp6_data.red.dli.constants import NATURAL_LIGHT_SENSOR, WEATHER_STATION_SENSOR
+from wp6_data.red.dli.constants import (
+    DEFAULT_TRAINING_START,
+    NATURAL_LIGHT_SENSOR,
+    TOTAL_LIGHT_SENSOR,
+    WEATHER_STATION_SENSOR,
+)
+from wp6_data.shared.artifacts import fingerprint
+
+# Bumped for a deliberate break: a change in the pickle layout, or in what the
+# stored numbers mean when their shape is unchanged. Unlike earlier revisions
+# this is an *equality* check, not a floor — see `load`.
+MODEL_VERSION = 7
+
+
+def fit_fingerprint() -> str:
+    """Identifies the inputs this model would be fitted from today.
+
+    Not a config object like the climate chain's, because the DLI model's inputs
+    are still module constants (moving them into `metadata.yaml` is filed as
+    follow-up work). What matters is that they are all here: change the training
+    start, swap a sensor, or alter which weather variables are requested, and a
+    model fitted before that change is refused rather than served.
+    """
+    return fingerprint(
+        [
+            MODEL_VERSION,
+            DEFAULT_TRAINING_START.isoformat(),
+            NATURAL_LIGHT_SENSOR,
+            TOTAL_LIGHT_SENSOR,
+            WEATHER_STATION_SENSOR,
+            # What `train_model_from_db` asks OpenMeteo for.
+            ["direct_radiation", "diffuse_radiation"],
+        ]
+    )
 
 
 def _default_model_path() -> Path:
@@ -63,7 +96,7 @@ class ModelStats:
     outdoor_sensor: str = WEATHER_STATION_SENSOR
     indoor_sensor: str = NATURAL_LIGHT_SENSOR
     aggregation: str = "daily"
-    model_version: int = 5
+    model_version: int = MODEL_VERSION
     attenuation_factor: float = 1.0
     attenuation_samples: int = 0
 
@@ -267,7 +300,7 @@ class TwoStageLightModel:
             outdoor_sensor=outdoor_sensor,
             indoor_sensor=indoor_sensor,
             aggregation="daily",
-            model_version=7,
+            model_version=MODEL_VERSION,
             attenuation_factor=round(attenuation_factor, 4),
             attenuation_samples=attenuation_samples,
         )
@@ -439,7 +472,10 @@ class TwoStageLightModel:
             "stage2_features": self.stage2_features,
             "stats": self.stats,
             "attenuation_factor": self.attenuation_factor,
-            "version": 7,
+            "version": MODEL_VERSION,
+            # What produced this fit. Checked on load, because the model now
+            # outlives the pod that trained it — see ADR 0007.
+            "fingerprint": fit_fingerprint(),
         }
 
         with open(path, "wb") as f:
@@ -448,47 +484,56 @@ class TwoStageLightModel:
         return path
 
     def load(self, path: Path | None = None) -> ModelStats | None:
-        """Load model from disk."""
+        """Load the saved model, or return ``None`` when there isn't a usable one.
+
+        **Equality on the version, not a floor.** Earlier revisions accepted v4,
+        v5 and v6 artifacts and filled the gaps with defaults — a guessed feature
+        list of ``["direct_radiation_sum"]``, an attenuation of ``1.0``. That was
+        survivable while models died with the pod that wrote them, because an old
+        artifact could not outlive its deploy. Now that they persist, a migrated
+        model can be served indefinitely, and a *guessed* feature list is
+        indistinguishable downstream from a fitted one. Refusing costs one refit;
+        the alternative costs wrong numbers with no signal.
+
+        Never raises. Anything a pickle from another era can throw — a moved
+        class, a removed attribute, a truncated write — means the same thing to a
+        caller that can simply retrain, and this one is called during startup.
+        """
         path = path or MODEL_PATH
 
         if not path.exists():
             return None
 
-        with open(path, "rb") as f:
-            data = pickle.load(f)
-
-        version = data.get("version", 1)
-        if version < 4:
-            # Old model format - incompatible
+        try:
+            with open(path, "rb") as f:
+                data = pickle.load(f)
+        except Exception:
             return None
 
-        self.stage1_model = data["stage1_model"]
-        self.stage2_model = data["stage2_model"]
-        self.stats = data["stats"]
+        if not isinstance(data, dict) or data.get("version") != MODEL_VERSION:
+            return None
+        if data.get("fingerprint") != fit_fingerprint():
+            # Same layout, different inputs: the training window moved, or a
+            # sensor was swapped. Refit rather than answer an older question.
+            return None
 
-        # Load transformers and features (v5+)
-        if version >= 5:
-            self.stage1_scaler = data.get("stage1_scaler")
-            self.stage2_scaler = data.get("stage2_scaler")
-            self.stage1_features = data.get("stage1_features", ["direct_radiation_sum"])
-            self.stage2_features = data.get("stage2_features", ["lux_sum"])
-        else:
-            # v4 compatibility - single feature, no scaling
-            self.stage1_scaler = None
-            self.stage2_scaler = None
-            self.stage1_features = ["direct_radiation_sum"]
-            self.stage2_features = ["lux_sum"]
+        try:
+            self.stage1_model = data["stage1_model"]
+            self.stage2_model = data["stage2_model"]
+            self.stats = data["stats"]
+            self.stage1_scaler = data["stage1_scaler"]
+            self.stage2_scaler = data["stage2_scaler"]
+            self.stage1_features = data["stage1_features"]
+            self.stage2_features = data["stage2_features"]
+            self.stage1_poly = data["stage1_poly"]
+            self.stage2_poly = data["stage2_poly"]
+            self.attenuation_factor = data["attenuation_factor"]
+        except KeyError:
+            # A key the current version promises is absent: not a model we can
+            # use, and not one to patch up with a default.
+            return None
 
-        # Load polynomial transformers (v6+)
-        if version >= 6:
-            self.stage1_poly = data.get("stage1_poly")
-            self.stage2_poly = data.get("stage2_poly")
-        else:
-            self.stage1_poly = None
-            self.stage2_poly = None
-
-        # Load attenuation factor (v7+), env var override for simulation
-        self.attenuation_factor = data.get("attenuation_factor", 1.0)
+        # Simulation override, deliberately applied after the artifact is read.
         override = os.getenv("WP6_RED_DLI_ATTENUATION_OVERRIDE")
         if override:
             self.attenuation_factor = float(override)

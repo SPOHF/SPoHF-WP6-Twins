@@ -61,9 +61,18 @@ spec:
             - name: WP6_BLUE_EXPORT_DIR
               value: /data/exports
             {{- end }}
+            # Models persist on their own volume, so a deploy reads them back
+            # instead of refitting — see helm/templates/blue-models.yaml.
+            - name: WP6_BLUE_MODEL_DIR
+              value: /data/models
+            # Refit on a clock instead, so persisting them doesn't freeze them.
+            - name: WP6_BLUE_RETRAIN_AT
+              value: {{ .Values.dashboard.retrainAt | quote }}
           volumeMounts:
             - name: blue-manual-uploads
               mountPath: /data/blue-manual-uploads
+            - name: models
+              mountPath: /data/models
             {{- if .Values.dashboard.export.enabled }}
             - name: exports
               mountPath: /data/exports
@@ -96,6 +105,9 @@ spec:
         - name: blue-manual-uploads
           persistentVolumeClaim:
             claimName: {{ .Chart.Name }}-blue-manual-uploads
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ .Chart.Name }}-blue-models
         {{- if .Values.dashboard.export.enabled }}
         - name: exports
           persistentVolumeClaim:

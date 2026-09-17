@@ -129,6 +129,79 @@ def test_read_artifact_rejects_an_older_era(tmp_path):
     assert read_artifact(current) == {"version": MODEL_VERSION, "chain": "x"}
 
 
+def test_read_artifact_rejects_a_model_fitted_under_a_different_config(tmp_path):
+    """The rail that persistence makes necessary.
+
+    A config edit — a widened training window, an added horizon, a new
+    exclusion — does not change the pickle's layout, so the version gate waves
+    it through. While models died with the pod that was harmless: the next boot
+    refitted anyway. Now that they outlive a deploy, a model fitted to answer a
+    different question would keep being served.
+    """
+    import pickle
+
+    from wp6_data.red.climate.model import MODEL_VERSION, read_artifact
+
+    path = tmp_path / "model.pkl"
+    path.write_bytes(
+        pickle.dumps({"version": MODEL_VERSION, "fingerprint": "abc", "chain": "x"})
+    )
+
+    assert read_artifact(path, expect_fingerprint="abc") is not None
+    assert read_artifact(path, expect_fingerprint="def") is None
+    # No expectation stated: the layout check still applies, the config one does not.
+    assert read_artifact(path) is not None
+
+
+def test_an_unstamped_artifact_is_refused_when_a_config_is_expected(tmp_path):
+    """Artifacts written before fingerprinting existed cannot be vouched for."""
+    import pickle
+
+    from wp6_data.red.climate.model import MODEL_VERSION, read_artifact
+
+    path = tmp_path / "model.pkl"
+    path.write_bytes(pickle.dumps({"version": MODEL_VERSION, "chain": "x"}))
+
+    assert read_artifact(path, expect_fingerprint="abc") is None
+
+
+def test_the_config_fingerprint_moves_with_the_config():
+    """Every field shapes the fit, so every field is in the fingerprint."""
+    from wp6_data.red import deps
+    from wp6_data.red.climate.config import load_climate_model
+
+    config = load_climate_model(deps._METADATA_PATH)
+    before = config.fit_fingerprint()
+
+    widened = config.model_copy(
+        update={"horizons_hours": [*config.horizons_hours, 72]}
+    )
+
+    assert widened.fit_fingerprint() != before
+    # ...and is stable when nothing changed.
+    assert load_climate_model(deps._METADATA_PATH).fit_fingerprint() == before
+
+
+def test_every_writer_of_the_artifact_stamps_it():
+    """There are two places that write the pickle, and both must stamp it.
+
+    `IndoorClimateModel.save` is the one you find first; `training._save` is the
+    one training actually calls. Stamping only the first left the fingerprint
+    permanently absent, so every load was refused and the model refitted on
+    every boot — the exact failure persistence was meant to remove, and silent
+    because "refused" looks the same as "no model yet".
+    """
+    import inspect
+
+    from wp6_data.red.climate import model as climate_model
+    from wp6_data.red.climate import training
+
+    for writer in (climate_model.IndoorClimateModel.save, training._save):
+        source = inspect.getsource(writer)
+        assert '"version": MODEL_VERSION' in source, writer.__qualname__
+        assert '"fingerprint"' in source, writer.__qualname__
+
+
 def test_read_artifact_returns_none_for_a_missing_file(tmp_path):
     from wp6_data.red.climate.model import read_artifact
 

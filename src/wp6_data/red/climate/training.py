@@ -26,6 +26,7 @@ with the better end-to-end skill wins, with the comparison kept for the page.
 
 from __future__ import annotations
 
+import asyncio
 import pickle
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -141,6 +142,36 @@ async def _fetch_weather(
     return await client.get_hourly(
         list(WEATHER_VARIABLES), start=config.training_start, end=end
     )
+
+
+# One retrain at a time, wherever it is triggered from: the boot bootstrap, the
+# admin button and the nightly schedule all go through `train_chain_guarded`.
+# The fits are CPU-bound and the artifact is written whole, so two concurrent
+# runs would race on the same file for no benefit.
+_training_lock = asyncio.Lock()
+
+
+def training_in_progress() -> bool:
+    """Whether a retrain is running, for a caller that wants to say so."""
+    return _training_lock.locked()
+
+
+async def train_chain_guarded(
+    config: ClimateModelConfig,
+    weather_client: OpenMeteoClient,
+    *,
+    today: date | None = None,
+) -> TrainedChain | None:
+    """:func:`train_chain` under the lock, or ``None`` if one is already running.
+
+    Declining is the right answer for every caller: boot has nothing to add to a
+    run already in flight, the admin gets told to try again, and the nightly run
+    would rather skip than queue behind a manual refit of the same data.
+    """
+    if _training_lock.locked():
+        return None
+    async with _training_lock:
+        return await train_chain(config, weather_client, today=today)
 
 
 async def train_chain(
@@ -288,15 +319,19 @@ def _save(
 ) -> Path:
     """Persist the chosen chain as one artifact.
 
-    Models live on ephemeral storage, so a restart wipes them and the dashboard
-    retrains on boot — the same arrangement as the DLI and blue soil models.
-    Deliberately not on the export PVC, which is mounted read-only.
+    Models live on their own volume and survive a deploy, so the dashboard reads
+    them back rather than refitting on every cold boot. That makes the stamps
+    below load-bearing: `version` for a deliberate break, and `fingerprint` for
+    the config this was fitted under, which is what stops an artifact outliving
+    the metadata that shaped it. Deliberately not on the export PVC, which is
+    mounted read-only.
     """
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(MODEL_PATH, "wb") as handle:
         pickle.dump(
             {
                 "version": MODEL_VERSION,
+                "fingerprint": model.config.fit_fingerprint(),
                 "chain": chain,
                 "link1_models": model.link1_models,
                 "link2_models": model.link2_models,
@@ -318,10 +353,11 @@ def load_models(
 
     ``load_chain`` returns only the stats a status page needs; this returns the
     objects a prediction needs. Both refuse an artifact from an older era rather
-    than mixing eras, so a stale pickle on ephemeral storage degrades to
-    "retrain", never to wrong numbers.
+    than mixing eras, so a stale pickle degrades to "retrain", never to wrong
+    numbers — and because the models now outlive the pod that fitted them, the
+    config fingerprint is checked here too, not just the layout version.
     """
-    data = read_artifact(MODEL_PATH)
+    data = read_artifact(MODEL_PATH, expect_fingerprint=config.fit_fingerprint())
     if data is None:
         return None
 
@@ -344,7 +380,25 @@ def load_models(
     return chain, model, downscaler
 
 
-def load_chain() -> TrainedChain | None:
-    """The saved chain, or ``None`` when absent or from an older era."""
-    data = read_artifact(MODEL_PATH)
+def load_chain(config: ClimateModelConfig | None = None) -> TrainedChain | None:
+    """The saved chain, or ``None`` when absent or from an older era.
+
+    Pass ``config`` to also refuse a chain fitted under a different one. The
+    status page deliberately does not: it would rather show the model that is
+    actually loaded, stale config and all, than report nothing — and
+    ``stale_config`` is how it labels that.
+    """
+    expect = config.fit_fingerprint() if config is not None else None
+    data = read_artifact(MODEL_PATH, expect_fingerprint=expect)
     return data.get("chain") if data else None
+
+
+def stale_config(config: ClimateModelConfig) -> bool:
+    """Whether a readable artifact was fitted under a *different* config.
+
+    True only when there is something on disk to disagree with: no model at all
+    is "not trained", which the pages already say in their own words.
+    """
+    if read_artifact(MODEL_PATH) is None:
+        return False
+    return read_artifact(MODEL_PATH, expect_fingerprint=config.fit_fingerprint()) is None

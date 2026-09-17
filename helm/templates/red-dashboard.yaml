@@ -72,9 +72,20 @@ spec:
             - name: WP6_RED_EXPORT_DIR
               value: /data/exports
             {{- end }}
+            # Models persist on their own volume, so a deploy reads them back
+            # instead of refitting — see helm/templates/red-models.yaml.
+            - name: WP6_RED_CLIMATE_MODEL_PATH
+              value: /data/models/climate_model.pkl
+            - name: WP6_RED_DLI_MODEL_PATH
+              value: /data/models/light_model.pkl
+            # Refit on a clock instead, so persisting them doesn't freeze them.
+            - name: WP6_RED_RETRAIN_AT
+              value: {{ .Values.red.retrainAt | quote }}
           volumeMounts:
             - name: manual-uploads
               mountPath: /data/manual-uploads
+            - name: models
+              mountPath: /data/models
             {{- if .Values.red.export.enabled }}
             - name: exports
               mountPath: /data/exports
@@ -107,6 +118,9 @@ spec:
         - name: manual-uploads
           persistentVolumeClaim:
             claimName: {{ .Chart.Name }}-red-manual-uploads
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ .Chart.Name }}-red-models
         {{- if .Values.red.export.enabled }}
         - name: exports
           persistentVolumeClaim:

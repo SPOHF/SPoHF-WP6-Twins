@@ -44,6 +44,16 @@ dashboard:
   # 2 per source kept on disk (audit rows in manual_uploads kept forever).
   manualUploads:
     size: "5Gi"
+  # PVC for trained soil-forecast models. Kept across a deploy so the dashboard
+  # reads them back instead of refitting on every cold boot. Pickles, not a
+  # dataset — 1Gi is generous.
+  models:
+    size: "1Gi"
+  # Time of day (UTC, HH:MM) to refit the soil-forecast models. Persisting them
+  # means a cold boot no longer does it, so this is what keeps them current.
+  # Empty disables the schedule. Offset from red's so the two twins don't fit
+  # at the same moment on a shared cluster.
+  retrainAt: "03:30"
   # CSV export job (runs nightly, generates downloadable CSVs per device)
   export:
     enabled: true
@@ -97,7 +107,15 @@ red:
       cpu: 200m
       memory: 768Mi
     limits:
-      cpu: 750m
+      # A ceiling, not a reservation: the pod is guaranteed `requests.cpu` and
+      # may burst to this when the node has CPU spare, so raising it costs
+      # nothing while idle. Raised from 750m because model training is
+      # CPU-bound and single-threaded (BLAS does not parallelise matrices this
+      # small — measured: pinning it to one thread changes nothing), and a
+      # refit that takes ~1 minute on a workstation was taking ~17 in here.
+      # The nightly refit is the only thing that wants this headroom; serving
+      # requests does not come close to it.
+      cpu: 2000m
       memory: 2Gi
   ingress:
     enabled: true
@@ -119,6 +137,16 @@ red:
   # PVC for manually-uploaded measurement files (Sijia, etc.)
   manualUploads:
     size: "5Gi"
+  # PVC for trained models (DLI + climate chain). Kept across a deploy so the
+  # dashboard reads them back instead of refitting on every cold boot. Pickles,
+  # not a dataset — 1Gi is generous.
+  models:
+    size: "1Gi"
+  # Time of day (UTC, HH:MM) to refit both red models. Persisting them means a
+  # cold boot no longer does it, so this is what keeps them current — and for
+  # the climate chain it is also when it re-decides its seasonal term and which
+  # greenhouse reference wins. Empty disables the schedule.
+  retrainAt: "03:00"
   # CSV export job (runs nightly, generates downloadable CSVs)
   export:
     enabled: true

@@ -20,6 +20,7 @@ from wp6_data.blue.routes.monitor import soil_forecast
 from wp6_data.config import Settings
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
+from wp6_data.shared.scheduling import parse_daily_time, run_daily
 from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 
 settings = Settings()
@@ -56,21 +57,36 @@ def _monitor_card() -> str:
     )
 
 # Holds the background boot-training task so it isn't garbage-collected before
-# it runs to completion.
+# it runs to completion, and the nightly schedule for the same reason —
+# `run_daily` never returns, so its task must outlive this module's import.
 _bootstrap_task: asyncio.Task | None = None
+_retrain_task: asyncio.Task | None = None
 
 
 async def _startup() -> None:
     await deps.init_db(settings.tsdb_url)
-    # Soil-forecast models live on ephemeral storage (see soil_forecast
-    # ._MODELS_DIR), so a restart wipes them. Retrain on boot if missing —
-    # mirrors red's DLI model. Backgrounded so a slow first fit can't delay
-    # readiness; the admin Update button shares the same lock, so a manual
-    # retrain won't collide with this one.
-    global _bootstrap_task
+    # Soil-forecast models live on their own volume (see soil_forecast
+    # ._MODELS_DIR), so on an ordinary deploy they are already there and this
+    # is a no-op; it is a first install, or an artifact the current code will
+    # not accept, that triggers a fit. Backgrounded so a slow first fit can't
+    # delay readiness; the admin Update button shares the same lock, so a
+    # manual retrain won't collide with this one.
+    global _bootstrap_task, _retrain_task
     _bootstrap_task = asyncio.create_task(
         soil_forecast.bootstrap_models_if_missing(config.default_provider),
     )
+
+    # Persisting the models means a cold boot no longer refits them, so a
+    # schedule is what keeps them current. Unset means no schedule, which is
+    # what a dev machine wants.
+    at = parse_daily_time(settings.blue_retrain_at)
+    if at is not None:
+        _retrain_task = asyncio.create_task(
+            run_daily(
+                lambda: soil_forecast.retrain_models(config.default_provider),
+                at=at, name="blue_model_retrain",
+            )
+        )
 
 
 async def _shutdown() -> None:

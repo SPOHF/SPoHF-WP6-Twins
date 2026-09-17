@@ -2,6 +2,8 @@
 
 import asyncio
 import html
+import inspect
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,6 +24,7 @@ from wp6_data.blue.treatments import (
 )
 from wp6_data.config import Settings
 from wp6_data.shared import render_card, render_page
+from wp6_data.shared.artifacts import fingerprint
 from wp6_data.shared.auth import is_admin, verify_session_admin
 from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.twin import SensorDataProvider
@@ -46,11 +49,12 @@ _RECENT_DAYS = 30  # days of history needed for lag features
 _DEFAULT_TREATMENT = "Std"
 
 _settings = Settings()
-# Models live on ephemeral container storage (default: home dir), mirroring
-# red's DLI model: a restart wipes them and the dashboard retrains on boot (see
-# bootstrap_models_if_missing) rather than persisting to a PVC. Deliberately
-# NOT under blue_export_dir — that PVC is the nightly CSV export, mounted
-# read-only in the dashboard. Override the location with WP6_BLUE_MODEL_DIR.
+# Models live on their own writable volume (default: home dir off-cluster),
+# mirroring red's: they survive a deploy, so the dashboard reads them back
+# instead of refitting on every cold boot, and `retrain_models` on a nightly
+# schedule is what keeps them current. Deliberately NOT under blue_export_dir —
+# that PVC is the nightly CSV export, mounted read-only in the dashboard.
+# Override the location with WP6_BLUE_MODEL_DIR.
 _MODELS_DIR = (
     Path(_settings.blue_model_dir)
     if _settings.blue_model_dir
@@ -113,10 +117,72 @@ def _status_banner_html(trained: str | None, msg: str | None) -> str:
     return ""
 
 
+# ── artifact staleness ────────────────────────────────────────────────────────
+#
+# The models outlive the pod that fitted them now, so something has to say which
+# code and configuration produced them. A stamp written beside the .pkl files
+# does it: a mismatch means the set is treated as absent, which routes into the
+# refit the bootstrap already performs.
+#
+# Bump when a change makes existing artifacts wrong in a way the fingerprint
+# below cannot see — a change in what the stored numbers *mean* rather than in
+# their shape.
+_ARTIFACT_VERSION = 1
+_STAMP_NAME = "artifact.json"
+
+
+def _expected_stamp() -> dict:
+    """What a stamp written by this code, for this configuration, looks like.
+
+    Covers the version, the sensors the models are fitted for, and
+    ``SoilForecaster``'s constructor signature — which is what a refactor of the
+    model class usually moves. It does *not* see an attribute added inside
+    ``fit``; for that the per-file load below is the net, and it is why a load
+    failure is logged loudly rather than passed over.
+    """
+    parameters = sorted(inspect.signature(SoilForecaster.__init__).parameters)
+    return {
+        "version": _ARTIFACT_VERSION,
+        "fingerprint": fingerprint(
+            [_ARTIFACT_VERSION, sorted(_FORECAST_SENSORS), parameters]
+        ),
+    }
+
+
+def _write_stamp() -> None:
+    """Record what produced the models now on disk. Never fatal to a fit."""
+    try:
+        _MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        (_MODELS_DIR / _STAMP_NAME).write_text(json.dumps(_expected_stamp()))
+    except OSError:
+        logger.exception("Soil forecast: could not write artifact stamp")
+
+
+def _stamp_matches() -> bool:
+    """Whether the models on disk were written by this code and config.
+
+    A missing stamp counts as a mismatch: artifacts from before stamping
+    existed cannot be vouched for, and refitting is the cheap, safe answer.
+    """
+    try:
+        found = json.loads((_MODELS_DIR / _STAMP_NAME).read_text())
+    except (OSError, ValueError):
+        return False
+    return found == _expected_stamp()
+
+
 def _scan_models() -> list[Path]:
+    """The usable models on disk — none, if they were not written by this code."""
     if not _MODELS_DIR.exists():
         return []
-    return sorted(_MODELS_DIR.glob("*.pkl"))
+    found = sorted(_MODELS_DIR.glob("*.pkl"))
+    if found and not _stamp_matches():
+        logger.warning(
+            "Soil forecast: %d model(s) on disk were fitted by different code or "
+            "configuration; treating as absent so they are refitted", len(found),
+        )
+        return []
+    return found
 
 
 def _load_models(pkl_paths: list[Path]) -> dict[tuple[str, str], SoilForecaster]:
@@ -125,8 +191,10 @@ def _load_models(pkl_paths: list[Path]) -> dict[tuple[str, str], SoilForecaster]
         try:
             fc = SoilForecaster.load(path)
             result[(fc.sensor_type, fc.treatment)] = fc
-        except Exception as exc:
-            print(f"[soil_forecast] failed to load model {path}: {exc}")
+        except Exception:
+            # Loud, not silent: the stamp cannot see every kind of drift, so a
+            # model that will not unpickle is the last signal that one happened.
+            logger.exception("Soil forecast: failed to load model %s", path)
     return result
 
 
@@ -418,19 +486,21 @@ async def _train_from_readings(readings: pd.DataFrame) -> dict:
     train_df = df.rename(columns={"time": "timestamp", "sensor": "sensor_type"})
     # train_all_forecasters is CPU-bound (numpy) — run it off the event loop so
     # a retrain doesn't block every other request while it fits.
-    return await run_in_threadpool(
+    forecasters = await run_in_threadpool(
         train_all_forecasters, train_df, output_dir=str(_MODELS_DIR),
     )
+    _write_stamp()
+    return forecasters
 
 
 async def bootstrap_models_if_missing(provider: SensorDataProvider) -> None:
     """Train soil models on startup when none exist on disk.
 
-    Models live on ephemeral container storage (see `_MODELS_DIR`), so a restart
-    wipes them. Mirroring red's DLI model, the dashboard retrains on boot from
-    the DB rather than persisting to a PVC. No-op when models are already present
-    or a manual retrain is already running. Never raises — a failure here must
-    not take down startup; the admin Update button remains a fallback.
+    Models live on their own volume (see `_MODELS_DIR`), so on an ordinary
+    deploy they are already there and this is a no-op — a first install is what
+    it is really for. `retrain_models` keeps them current after that. Also a
+    no-op when a manual retrain is already running. Never raises — a failure
+    here must not take down startup; the admin Update button remains a fallback.
     """
     if _scan_models():
         logger.info("Soil forecast: models already on disk, skipping boot training")
@@ -449,6 +519,34 @@ async def bootstrap_models_if_missing(provider: SensorDataProvider) -> None:
             )
         except Exception:
             logger.exception("Soil forecast boot training failed")
+
+
+async def retrain_models(provider: SensorDataProvider) -> int:
+    """Refit every soil model from the current record. Returns how many.
+
+    Unlike `bootstrap_models_if_missing` this trains whether or not models are
+    already on disk — that is the point of it. Persisting the models across a
+    deploy means a cold boot no longer refits them, so without this they would
+    be frozen at whenever they were first fitted.
+
+    Declines rather than queues when a retrain is already running, and never
+    raises: it is driven by a scheduler that must keep its rhythm.
+    """
+    if _training_lock.locked():
+        logger.info("Soil forecast: retrain skipped, one already running")
+        return 0
+    async with _training_lock:
+        try:
+            df = await provider.fetch_data(sensor_tags=_FORECAST_SENSORS)
+            if df.empty:
+                logger.warning("Soil forecast retrain: no sensor data available")
+                return 0
+            forecasters = await _train_from_readings(df)
+            logger.info("Soil forecast retrain: %d model(s) trained", len(forecasters))
+            return len(forecasters)
+        except Exception:
+            logger.exception("Soil forecast retrain failed")
+            return 0
 
 
 @router.post(

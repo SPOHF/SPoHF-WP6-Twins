@@ -1,0 +1,32 @@
+{{- if .Values.red.enabled }}
+{{- /*
+Trained models, kept across a deploy.
+
+Both twins used to refit on every cold boot, because the models lived on the
+container's own writable layer and died with the pod. That made a deploy cost a
+retrain — roughly a minute during which the model-backed pages had nothing to
+show — and it made a pod restart the only thing that ever refreshed a model.
+
+Small on purpose: these are pickles, not a dataset. Separate from the
+manual-uploads PVC because this is a derived artifact that can be thrown away
+and rebuilt, and it should not end up in backups of real uploaded data.
+
+ReadWriteOnce is safe here for the same reason it is safe for the other volumes
+this pod mounts: the dashboard is single-replica with strategy Recreate, so no
+two pods ever hold it at once. Nothing else mounts it — the nightly refit runs
+inside the dashboard rather than as a CronJob, precisely to keep it that way
+(see shared/scheduling.py).
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Chart.Name }}-red-models
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-red-models
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.red.models.size | default "1Gi" }}
+{{- end }}
