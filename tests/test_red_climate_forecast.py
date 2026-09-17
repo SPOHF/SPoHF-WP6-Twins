@@ -1,8 +1,10 @@
 """Tests for the per-height forecast assembly and its presentation rules."""
 
+import json
+import re
+
 import pytest
 
-from wp6_data.red.climate.charts import MAX_PROFILES, select_profiles
 from wp6_data.red.climate.forecast import (
     ForecastView,
     HeightPoint,
@@ -12,6 +14,19 @@ from wp6_data.red.climate.forecast import (
     envelope,
     series_for_height,
 )
+from wp6_data.red.routes.climate_forecast import MAX_TABLE_PROFILES, select_profiles
+
+
+def _plotly_traces(html: str) -> list[dict]:
+    """The figure's trace list, as Plotly serialised it into the page.
+
+    Asserting on the data Plotly was handed, rather than on substrings of the
+    rendered HTML — a gap between two lines is a property of the numbers, and
+    no substring check would have caught it.
+    """
+    match = re.search(r'Plotly\.newPlot\(\s*"[^"]+",\s*(\[.*?\]),\s*\{', html, re.S)
+    assert match, "no Plotly figure in the rendered chart"
+    return json.loads(match.group(1))
 
 
 class TestPhysicalClamping:
@@ -41,6 +56,8 @@ class TestCombinedUncertainty:
 
 
 class TestSelectProfiles:
+    """The table samples horizons; the chart draws them all."""
+
     def _snapshots(self, horizons):
         return [
             ProfileSnapshot(at=None, horizon_hours=h, points=[]) for h in horizons
@@ -52,7 +69,7 @@ class TestSelectProfiles:
         picked = select_profiles(self._snapshots([1, 3, 6, 12, 24, 48]))
 
         assert picked[-1].horizon_hours == 48
-        assert len(picked) == MAX_PROFILES
+        assert len(picked) == MAX_TABLE_PROFILES
 
     def test_spreads_across_the_range_rather_than_clustering(self):
         horizons = [1, 3, 6, 12, 24, 48]
@@ -257,36 +274,63 @@ class TestOutdoorSeries:
             snapshot = ProfileSnapshot(at=None, horizon_hours=offset, points=[])
             assert _offset_label(offset) == snapshot.label
 
-    def test_forecast_half_is_joined_to_the_last_measured_point(self):
-        """Otherwise the solid and dashed halves leave a visible gap at 'now'."""
-        from wp6_data.red.climate.charts import _outdoor_forecast
+    def _view(self, *, outdoor_trace=None):
+        from datetime import UTC, datetime, timedelta
+
         from wp6_data.red.climate.forecast import OutdoorPoint
 
-        view = ForecastView(
+        def at(hour, minute=0):
+            return datetime(2026, 9, 16, 0, minute, tzinfo=UTC) + timedelta(hours=hour)
+
+        def snapshot(horizon, measured, base):
+            return ProfileSnapshot(
+                at=at(12 + horizon), horizon_hours=horizon, measured=measured,
+                points=[HeightPoint(h, f"S{h}", base - h) for h in range(1, 6)],
+            )
+
+        # The dense measured trace runs past the hinge's own hour, exactly as
+        # the real one does: it is resampled to ten minutes while the snapshots
+        # sit on the fitted horizons.
+        trace = [(at(11), 18.0), (at(11, 40), 18.1), (at(12, 20), 18.2)]
+        return ForecastView(
             wire="WS_01_02", measurement="temp", unit="°C",
-            issued_at=None, reference_key="s2103",
-            outdoor=[
-                OutdoorPoint("−1 h", 18.4, True),
-                OutdoorPoint("now", 18.7, True),
-                OutdoorPoint("+1 h", 17.8, False),
-            ],
+            issued_at=at(12), reference_key="s2103",
+            snapshots=[snapshot(0, True, 26.5), snapshot(6, False, 27.0),
+                       snapshot(24, False, 27.5)],
+            outdoor=[OutdoorPoint("now", 18.2, True),
+                     OutdoorPoint("+6 h", 17.5, False),
+                     OutdoorPoint("+24 h", 17.0, False)],
+            outdoor_trace=trace if outdoor_trace is None else outdoor_trace,
         )
 
-        joined = _outdoor_forecast(view)
+    def _outdoor_traces(self, view):
+        from wp6_data.red.climate.charts import forecast_band_chart
 
-        assert [p.label for p in joined] == ["now", "+1 h"]
+        html = forecast_band_chart(view, "Europe/Amsterdam")
+        return [
+            trace for trace in _plotly_traces(html)
+            if trace.get("legendgroup") == "outdoor"
+        ]
 
-    def test_no_measured_history_still_yields_a_forecast_half(self):
-        from wp6_data.red.climate.charts import _outdoor_forecast
-        from wp6_data.red.climate.forecast import OutdoorPoint
-
-        view = ForecastView(
-            wire="WS_01_02", measurement="temp", unit="°C",
-            issued_at=None, reference_key="s2103",
-            outdoor=[OutdoorPoint("+1 h", 17.8, False)],
+    def test_outdoor_is_continuous_across_now_like_the_sections(self):
+        """Outdoor is the one line whose forecast half is keyed on snapshots
+        that are *not* measured, which excludes the hinge — so without the join
+        it alone breaks at "now" while all five sections run straight through.
+        """
+        solid, dashed = sorted(
+            self._outdoor_traces(self._view()),
+            key=lambda t: (t.get("line") or {}).get("dash") == "dash",
         )
 
-        assert [p.label for p in _outdoor_forecast(view)] == ["+1 h"]
+        assert dashed["x"][0] == solid["x"][-1]
+        assert dashed["y"][0] == solid["y"][-1]
+
+    def test_no_measured_history_still_draws_the_forecast_half(self):
+        """Nothing to join to is not a reason to drop the predicted outdoor."""
+        traces = self._outdoor_traces(self._view(outdoor_trace=[]))
+
+        assert len(traces) == 1
+        assert [round(v, 1) for v in traces[0]["y"]] == [17.5, 17.0]
 
 
 class TestKnownCaveats:

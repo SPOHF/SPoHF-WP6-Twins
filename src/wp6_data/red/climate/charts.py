@@ -1,25 +1,22 @@
-"""The forecast profile chart: the crop as it will stand, section by section.
+"""The forecast chart: every growth section over time, inside the crop's envelope.
 
-Extends the idiom `multi_height/charts.wire_profile_chart` established — value
-against height, H1 at the top and H5 at the root — so a grower reads the
-forecast the same way they already read the measured crop-climate view.
+One real time axis, measured on the left and forecast on the right, parted by a
+marked "now". The measured half is drawn at close to the sensors' own cadence;
+the forecast half only at the horizons the chain was actually fitted and scored
+at, so the dashes between those markers are drawn rather than predicted.
 
-**Why points and not a curve.** The chain is fitted and scored at six discrete
-horizons. A line through time between them would draw forty-two hours nobody
-validated, so each horizon is its own profile and the axis is *height*, not time.
+**Colour encodes an ordered thing, so it is one hue.** The growth sections are
+ordinal (H1 Head → H5 Substrate), which rules out categorical hues: they get a
+single-hue ramp running light at the head to dark at the root. Outdoor is
+context rather than a section, so it takes neutral ink — which keeps the whole
+chart to one hue plus grey.
 
-**Colour encodes an ordered thing, so it is one hue.** The horizons are ordinal
-(+1 h … +48 h), which rules out categorical hues: they get a single-hue ramp
-stepping away from the page surface as the horizon grows. The **measured** profile
-is not a horizon at all, so it is drawn in ink rather than taking a step on that
-ramp — a different kind of thing, shown as a different kind of mark.
-
-Both ramps are validated (one hue, monotone lightness, ≥0.06 lightness gaps,
-worst-pair normal-vision ΔE 19.5 light / 19.2 dark, CVD ΔE 19.0 / 18.9). The
-lightest step sits just under 3:1 on its surface, which obliges the relief the
-page already ships: every series is direct-labelled and the same numbers appear
-in a table beneath the chart. Dark steps are selected for the dark surface, not
-flipped from the light ones.
+Adjacent steps of that five-step ramp sit under the ΔE 15 floor for telling two
+series apart by colour alone, so identity rests on the other channels as well:
+every line is direct-labelled at its end, the lines stack in the same order as
+the ramp, and the same numbers appear in the table beneath. Dark steps are
+selected for the dark surface, not flipped from the light ones. Alternatives
+measured and set aside are in MODEL_PAPER §7.
 """
 
 from __future__ import annotations
@@ -38,29 +35,11 @@ from wp6_data.shared.charts import (
     render_matrix_heatmap_html,
 )
 
-# The band chart's three marks. Ink for what was measured, hue for what was
-# predicted, and a light wash of the same hue for the spread across sections —
-# so the two blues are one hue at two weights, not two categories.
-MEASURED_INK_LIGHT = "#0b0b0b"
-MEASURED_INK_DARK = "#f5f5f0"
-FORECAST_LINE_LIGHT = "#2a78d6"
-FORECAST_LINE_DARK = "#3987e5"
-
-# Growth sections take a single-hue ramp, light at the head to dark at the root:
-# deeper into the canopy, darker. The sections are ordinal and the ramp says so,
-# and with outdoor drawn in neutral ink the whole chart is one hue plus grey.
-#
-# Known tradeoff, chosen deliberately: adjacent steps of a five-step one-hue
-# ramp sit at ~9.7 ΔE, under the 15 floor for telling two series apart by colour
-# alone, and the lightness range is boxed in at both ends so widening does not
-# help. Identity therefore rests on the other channels, which are all present:
-# every line is direct-labelled at its end, the lines are stacked in the same
-# order as the ramp, and the same numbers are in the table beneath. Alternatives
-# measured and set aside are in MODEL_PAPER §7.
-#
-# Both ramps validated as ordinal: one hue, monotone lightness, ΔL gaps ≥ 0.06,
-# light end ≥ 2:1 on its own surface. Dark steps are selected for the dark
-# surface, not flipped.
+# Light at the head to dark at the root: deeper into the canopy, darker. Both
+# ramps validated as ordinal — one hue, monotone lightness, ΔL gaps ≥ 0.06,
+# light end ≥ 2:1 on its own surface. Adjacent steps sit at ~9.7 ΔE and the
+# lightness range is boxed in at both ends, so widening does not help; see the
+# module docstring for what carries identity instead.
 SECTION_RAMP_LIGHT = ("#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281")
 SECTION_RAMP_DARK = ("#184f95", "#256abf", "#3987e5", "#6da7ec", "#9ec5f4")
 
@@ -82,14 +61,6 @@ OUTDOOR_DARK = "#c3c2b7"
 BAND_FILL_LIGHT = "rgba(82, 81, 78, 0.22)"
 BAND_FILL_DARK = "rgba(195, 194, 183, 0.17)"
 
-# Ordinal ramp: further ahead = further from the page surface.
-HORIZON_RAMP_LIGHT = ("#86b6ef", "#2a78d6", "#104281")
-HORIZON_RAMP_DARK = ("#184f95", "#3987e5", "#9ec5f4")
-
-# The measured profile is ink, not a step on the ramp.
-MEASURED_LIGHT = "#0b0b0b"
-MEASURED_DARK = "#f5f5f0"
-
 # Surface colours, used for the ring that keeps overlapping markers legible.
 SURFACE_LIGHT = "#fcfcfb"
 SURFACE_DARK = "#1a1a19"
@@ -97,203 +68,6 @@ SURFACE_DARK = "#1a1a19"
 LINE_WIDTH = 2
 MARKER_SIZE = 9
 MARKER_RING = 2
-
-
-# Beyond this many overlaid profiles the chart stops being readable; the page
-# offers a horizon selector rather than drawing every fitted horizon at once.
-MAX_PROFILES = 4
-
-
-def select_profiles(snapshots: list, limit: int = MAX_PROFILES) -> list:
-    """Up to ``limit`` horizons, spread across the range rather than the first few.
-
-    Taking the head of the list would quietly drop +24 h and +48 h — the
-    horizons a grower actually plans against — in favour of three that differ by
-    a couple of hours. The furthest horizon is always kept.
-    """
-    if len(snapshots) <= limit:
-        return list(snapshots)
-    last = len(snapshots) - 1
-    picked = sorted({round(i * last / (limit - 1)) for i in range(limit)})
-    return [snapshots[i] for i in picked]
-
-
-def _ramp_step(index: int, total: int, ramp: tuple[str, ...]) -> str:
-    """Spread ``total`` profiles across the ramp, keeping the ends in use."""
-    if total <= 1:
-        return ramp[-1]
-    position = round(index * (len(ramp) - 1) / (total - 1))
-    return ramp[position]
-
-
-def forecast_profile_chart(view: ForecastView) -> str | None:
-    """Overlaid vertical profiles, one per horizon, with measured uncertainty.
-
-    Error bars are the quadrature of the two links' held-out RMSE at that
-    horizon and height — a measured spread, not a confidence interval, and the
-    page says so. A horizon the chain does not beat persistence at is drawn
-    dashed and named as such, rather than dropped: "no better than the value
-    now" is worth knowing.
-
-    Returns ``None`` when there is nothing to draw; the caller says so in words.
-    """
-    if not view.has_content:
-        return None
-
-    predicted = select_profiles(view.predicted)
-    measured = [view.now] if view.now and view.now.points else []
-    drawn = measured + predicted
-
-    fig = go.Figure()
-    annotations = []
-
-    for order, snapshot in enumerate(drawn):
-        is_measured = snapshot.measured
-        colour = (
-            MEASURED_LIGHT
-            if is_measured
-            else _ramp_step(order - len(measured), len(predicted), HORIZON_RAMP_LIGHT)
-        )
-        name = "Measured now" if is_measured else f"+{snapshot.horizon_hours} h"
-        if snapshot.beats_persistence is False:
-            name += " (no better than now)"
-
-        heights = [point.height for point in snapshot.points]
-        values = [point.value for point in snapshot.points]
-        spreads = [point.uncertainty or 0.0 for point in snapshot.points]
-        labels = [point.label for point in snapshot.points]
-
-        fig.add_trace(
-            go.Scatter(
-                x=values,
-                y=heights,
-                name=name,
-                mode="lines+markers",
-                line=dict(
-                    color=colour,
-                    width=LINE_WIDTH + (1 if is_measured else 0),
-                    dash="solid" if snapshot.beats_persistence is not False else "dot",
-                ),
-                marker=dict(
-                    color=colour,
-                    size=MARKER_SIZE,
-                    line=dict(color=SURFACE_LIGHT, width=MARKER_RING),
-                ),
-                error_x=dict(
-                    type="data", array=spreads, visible=any(spreads),
-                    color=colour, thickness=1, width=4,
-                ),
-                customdata=list(zip(labels, spreads, strict=True)),
-                hovertemplate=(
-                    "%{customdata[0]}<br>"
-                    f"{name}: %{{x:.1f}} {view.unit}"
-                    " ± %{customdata[1]:.1f}<extra></extra>"
-                ),
-            )
-        )
-        # Direct labels: with four or fewer profiles, identity never rests on
-        # colour alone even before the legend is read.
-        if snapshot.points:
-            top = min(snapshot.points, key=lambda p: p.height)
-            annotations.append(
-                dict(
-                    x=top.value, y=top.height, text=name, showarrow=False,
-                    xanchor="left", yanchor="bottom", xshift=6,
-                    font=dict(size=11, color=colour),
-                )
-            )
-
-    section_labels = {
-        point.height: point.label
-        for snapshot in drawn for point in snapshot.points
-    }
-    ticks = sorted(section_labels)
-
-    fig.update_layout(
-        template="plotly_white",
-        height=420,
-        margin=dict(l=10, r=90, t=30, b=40),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        hovermode="closest",
-        annotations=annotations,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
-        xaxis=dict(title=view.quantity, zeroline=False),
-        yaxis=dict(
-            title="Growth section",
-            autorange="reversed",  # H1 Head at the top, H5 Substrate at the root
-            tickmode="array",
-            tickvals=ticks,
-            ticktext=[f"H{h} {section_labels[h]}" for h in ticks],
-        ),
-    )
-
-    chart = fig.to_html(
-        full_html=False, include_plotlyjs="cdn",
-        config={"responsive": True, "displaylogo": False},
-    )
-    return chart + _theme_script(len(measured), len(predicted))
-
-
-def _theme_script(measured_count: int, predicted_count: int) -> str:
-    """Restyle to the dark steps when the viewer's theme is dark.
-
-    The dark values are a separate selection for the dark surface, not an
-    inversion of the light ones: flipping a ramp produces steps that were never
-    checked against the surface they land on.
-    """
-    light = [MEASURED_LIGHT] * measured_count + [
-        _ramp_step(i, predicted_count, HORIZON_RAMP_LIGHT)
-        for i in range(predicted_count)
-    ]
-    dark = [MEASURED_DARK] * measured_count + [
-        _ramp_step(i, predicted_count, HORIZON_RAMP_DARK)
-        for i in range(predicted_count)
-    ]
-    return f"""
-<script>
-(function () {{
-  var dark = {dark!r}.map(String), light = {light!r}.map(String);
-  var surfaceDark = {SURFACE_DARK!r}, surfaceLight = {SURFACE_LIGHT!r};
-  function apply() {{
-    var isDark = document.documentElement.dataset.theme === 'dark';
-    var colours = isDark ? dark : light;
-    var surface = isDark ? surfaceDark : surfaceLight;
-    document.querySelectorAll('.js-plotly-plot').forEach(function (plot) {{
-      if (!plot.data || plot.data.length !== colours.length) return;
-      // The band chart lives on the same page; skip it.
-      if (plot.data.some(function (tr) {{ return tr.fill === 'tonexty'; }})) return;
-      colours.forEach(function (colour, i) {{
-        window.Plotly.restyle(plot, {{
-          'line.color': colour, 'marker.color': colour,
-          'marker.line.color': surface, 'error_x.color': colour,
-        }}, [i]);
-      }});
-      // Matched by label text, not by index: the forecast divider adds an
-      // annotation of its own, so indices do not line up with the series.
-      var byText = {{}};
-      (plot.data || []).forEach(function (trace) {{
-        var group = trace.legendgroup || '';
-        if (!group || !trace.name) return;
-        byText[trace.name] = group === 'outdoor'
-          ? (isDark ? {OUTDOOR_DARK!r} : {OUTDOOR_LIGHT!r})
-          : colours[(parseInt(group.replace('section-', ''), 10) - 1) % colours.length];
-      }});
-      var notes = (plot.layout.annotations || []).map(function (a) {{
-        var colour = byText[a.text];
-        return colour
-          ? Object.assign({{}}, a, {{font: Object.assign({{}}, a.font, {{color: colour}})}})
-          : a;
-      }});
-      if (notes.length) window.Plotly.relayout(plot, {{annotations: notes}});
-    }});
-  }}
-  if (document.readyState === 'loading') {{
-    document.addEventListener('DOMContentLoaded', apply);
-  }} else {{ apply(); }}
-}})();
-</script>
-"""
 
 
 def section_colour(height: int, ramp: tuple[str, ...] = SECTION_RAMP_LIGHT) -> str:
@@ -451,6 +225,12 @@ def forecast_band_chart(view: ForecastView, timezone: str) -> str | None:
             for snapshot in view.snapshots
             if not snapshot.measured and snapshot.label == point.label
         )
+        # Start the dashed half at the last measured point, so the outdoor line
+        # is continuous across "now". The sections get this for free — their
+        # forecast half includes the hinge snapshot — but outdoor is keyed on
+        # snapshots that are *not* measured, which excludes the hinge.
+        if measured and forecast:
+            forecast.insert(0, measured[-1])
         for part, dash, show in ((measured, "solid", True), (forecast, "dash", False)):
             if len(part) < 2:
                 continue
@@ -510,17 +290,6 @@ def _label_line(fig, x, y, text: str, colour: str) -> None:
         xanchor="left", yanchor="middle", xshift=8,
         font=dict(size=11, color=colour),
     )
-
-
-def _outdoor_forecast(view: ForecastView) -> list:
-    """The predicted outdoor points, joined to the last measured one.
-
-    Sharing the hinge keeps the solid and dashed halves visually continuous
-    rather than leaving a gap where the record ends.
-    """
-    measured = [p for p in view.outdoor if p.measured]
-    predicted = [p for p in view.outdoor if not p.measured]
-    return (measured[-1:] if measured else []) + predicted
 
 
 def _band_theme_script() -> str:

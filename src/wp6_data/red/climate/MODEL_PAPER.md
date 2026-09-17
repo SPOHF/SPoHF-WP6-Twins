@@ -286,13 +286,12 @@ on **link 1's predictions**, and no product appears anywhere.
 
 ## 7. The forecast view
 
-`/climate/forecast` carries two charts, because they answer different
-questions. It is listed in the **Multi Height** hub alongside the other
-per-growth-section views, and the measured Crop Climate page links across to
-it carrying the selected wire — the measured day and the forecast are the
-same subject at different times.
+`/climate/forecast` carries one chart and the table that backs it. It is listed
+in the **Multi Height** hub alongside the other per-growth-section views, and
+the measured Crop Climate page links across to it carrying the selected wire —
+the measured day and the forecast are the same subject at different times.
 
-**The lead: every section against the horizon, over the crop's envelope.**
+**Every section against the horizon, over the crop's envelope.**
 Five lines, one per growth section, drawn over a neutral wash spanning the
 coolest to the warmest — so the width of the shading is the vertical gradient at
 a glance, while each section stays individually readable.
@@ -371,30 +370,35 @@ An earlier version tracked one selectable section with error bars and drew the
 rest only as an envelope. It was rejected as clumsy: with five sections, a
 control to see one at a time costs more than it saves.
 
-**Below it: the profile at each horizon**, extending the `wire_profile_chart`
-idiom (value against height, H1 at the top, H5 at the root) that the
-crop-climate views already use. Five near-parallel lines with overlapping error
-bars is hard to read as a lead view, but it is the right view for reading the
-shape of the crop at one moment.
+**Rejected: a second chart showing the profile at each horizon.** The page
+originally carried one below the band chart, extending the `wire_profile_chart`
+idiom (value against height, H1 at the top, H5 at the root) with error bars from
+`√(link2_rmse² + link3_rmse²)`. It was removed once the band chart was working.
 
-**Profiles, not a curve.** The chain is fitted and scored at six horizons; a line
-through time between them would draw forty-two hours nobody validated. Each
-horizon is its own profile, and the axis is height.
+Five near-parallel lines with overlapping error bars is hard to read in any
+position on the page, and by then the band chart showed the same two things
+better: the vertical gradient is the *width of the envelope* at every instant
+rather than the spacing of five lines at one of them, and the spread is stated
+once per horizon in text because link 2 dominates it and all five sections carry
+almost the same figure anyway. What the profile chart uniquely offered — the
+shape of the crop at a single chosen moment — nobody asked to read that way.
 
-**Error bars are the measured spread**, `√(link2_rmse² + link3_rmse²)` — an
-approximation that assumes the two links' errors are independent. Link 3 was
-scored against a *measured* reference so its error genuinely excludes link 2's,
-but nothing guarantees they are uncorrelated. The page says "measured spread",
-not "confidence interval".
+Two things it carried had to be re-homed rather than dropped:
 
-**Horizons are ordinal, so colour is one hue.** A single-hue ramp steps away from
-the page surface as the horizon grows; the measured profile is drawn in ink
-because it is not a horizon. Both ramps are validated (one hue, monotone
-lightness, worst-pair normal-vision ΔE 19.5 light / 19.2 dark). Dark steps are
-selected for the dark surface, not flipped.
+- **"No better than now."** A horizon where link 2 loses to persistence was
+  drawn dotted there. The band chart has no free channel for it — dashes already
+  mean "forecast" — so those horizons are now named in text under the chart.
+  This is the honest version: it was never really legible as a dash pattern.
+- **The numbers table.** It backed the profile chart as the colour-free relief,
+  and now backs the band chart. It still samples four horizons across the range
+  rather than listing all seventeen, and the card says so rather than claiming
+  to be "the same numbers".
 
-A horizon where link 2 does not beat persistence is drawn dotted and labelled
-"no better than now" rather than dropped.
+**Error bars were a measured spread, not a confidence interval**, and the page
+said so — `√(link2² + link3²)` assumes the two links' errors are independent.
+Link 3 is scored against a *measured* reference so its error genuinely excludes
+link 2's, but nothing guarantees they are uncorrelated. That caveat still
+applies to the ± figures now stated in text.
 
 ### 7.1 What the forecast reveals that the score table did not
 
@@ -421,9 +425,9 @@ A horizon where link 2 does not beat persistence is drawn dotted and labelled
   was **5.8 °C at Tuesday midday and 0.9 °C at Wednesday 05:00** — measured, not
   predicted — with the forecast band narrowing the same way overnight. With no
   solar gradient to stratify it the greenhouse evens out, which also means a
-  per-height model earns most of its keep during the day. Neither the profile
-  chart nor the score table could show this: one plots a single moment, the
-  other averages over all of them.
+  per-height model earns most of its keep during the day. The score table cannot
+  show this — it averages over every hour — and nor could the profile chart,
+  which plotted a single moment. It is the clearest thing the band chart bought.
 
 ### 7.2 The model page
 

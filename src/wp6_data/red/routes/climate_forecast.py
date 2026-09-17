@@ -1,13 +1,13 @@
 """GET /climate/forecast — the crop as it will stand, section by section.
 
 The grower-facing counterpart to the admin ``/climate/model`` diagnostics. It
-shows the vertical profile at each fitted horizon rather than a curve through
-time, because those horizons are what the chain was actually fitted and scored
-at (see ``climate/charts.py``).
+shows every growth section over time inside the crop's envelope, with the
+forecast half marked only at the horizons the chain was actually fitted and
+scored at (see ``climate/charts.py``).
 
-Every number on the chart also appears in the table beneath it: that is the
-accessible view, and it is the relief the lightest ramp step's contrast
-obliges.
+A table beneath carries the same numbers at a few horizons across the range:
+that is the accessible view, and it is the relief the ramp's adjacent-step
+separation obliges.
 """
 
 from __future__ import annotations
@@ -19,12 +19,7 @@ from fastapi.responses import HTMLResponse
 
 from wp6_data.red import deps
 from wp6_data.red.climate import data as climate_data
-from wp6_data.red.climate.charts import (
-    forecast_band_chart,
-    forecast_profile_chart,
-    select_profiles,
-    typical_uncertainty,
-)
+from wp6_data.red.climate.charts import forecast_band_chart, typical_uncertainty
 from wp6_data.red.climate.config import load_climate_model
 from wp6_data.red.climate.forecast import (
     MEASUREMENT_LABELS,
@@ -87,11 +82,31 @@ def _uncertainty_note(spreads: list[tuple[str, float]], unit: str) -> str:
     )
 
 
+# The chart draws every fitted horizon, but a column per horizon would be a
+# table too wide to read on any screen. The table therefore samples the range.
+MAX_TABLE_PROFILES = 4
+
+
+def select_profiles(snapshots: list, limit: int = MAX_TABLE_PROFILES) -> list:
+    """Up to ``limit`` horizons, spread across the range rather than the first few.
+
+    Taking the head of the list would quietly drop +24 h and +48 h — the
+    horizons a grower actually plans against — in favour of three that differ by
+    a couple of hours. The furthest horizon is always kept.
+    """
+    if len(snapshots) <= limit:
+        return list(snapshots)
+    last = len(snapshots) - 1
+    picked = sorted({round(i * last / (limit - 1)) for i in range(limit)})
+    return [snapshots[i] for i in picked]
+
+
 def _profile_table(view: ForecastView, timezone: str) -> str:
-    """The same numbers as the chart, as text.
+    """The chart's numbers as text, at a few horizons across the range.
 
     Not a fallback — the table is how the forecast is read precisely, and how it
-    is read at all without colour.
+    is read at all without colour. It samples horizons rather than listing them
+    all; the exact figure for any point stays on its hover in the chart.
     """
     tz = ZoneInfo(timezone)
     now = [view.now] if view.now and view.now.points else []
@@ -166,9 +181,8 @@ async def climate_forecast(
     timezone = deps.base_settings.display_timezone
     band = forecast_band_chart(view, timezone)
     spreads = typical_uncertainty(view)
-    chart = forecast_profile_chart(view)
     notes = "".join(f"<p class='muted'>{note}</p>" for note in view.notes)
-    if chart is None:
+    if band is None:
         return render_page(
             PAGE_TITLE,
             BACK_LINK + f"<h1>Climate forecast</h1>{controls}"
@@ -178,13 +192,15 @@ async def climate_forecast(
             ),
         )
 
+    # Named rather than hidden: "no better than the value now" is worth knowing,
+    # and it is not something the chart itself can show.
     weak = [s for s in view.predicted if s.beats_persistence is False]
     caveat = ""
     if weak:
         horizons = ", ".join(f"+{s.horizon_hours} h" for s in weak)
         caveat = (
             f"<p class='muted'>At {horizons} the model does not beat simply "
-            f"using the current reading, and is drawn dotted.</p>"
+            f"carrying the current reading forward.</p>"
         )
 
     content = f"""
@@ -201,30 +217,21 @@ async def climate_forecast(
                 "own cadence; the forecast shows only the horizons the model "
                 "was fitted at, so the dashes between those markers are drawn, "
                 "not predicted.</p>"
-            ),
+            ) + caveat + notes,
             description=(
                 "Every growth section over time, inside the shaded envelope "
                 "of the crop — so the width of the shading is the vertical "
                 "gradient. Solid is measured, dashed is forecast, and the grey "
                 "line is outdoors."
             ),
-        ) if band else ""}
-        {render_card(
-            "Profile down the crop",
-            chart + caveat + notes,
-            description=(
-                "Each profile is a horizon the chain was actually fitted and "
-                "scored at — not a curve through time. Bars show the two links' "
-                "combined held-out error at that horizon and height: a measured "
-                "spread, not a confidence interval."
-            ),
         )}
         {render_card(
-            "The same numbers",
+            "The forecast as numbers",
             _profile_table(view, timezone),
-            description="Value ± combined held-out RMSE, in {unit}.".format(
-                unit=view.unit or "the measurement's units"
-            ),
+            description=(
+                "Value ± combined held-out RMSE, in {unit} — at four horizons "
+                "spread across the range, not all of them."
+            ).format(unit=view.unit or "the measurement's units"),
         )}
         <p class="muted">How well this model does, horizon by horizon, is on
         <a href="/climate/model/">the model page</a>.</p>

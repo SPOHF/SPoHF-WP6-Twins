@@ -121,7 +121,7 @@ The fraction of a baseline's error a model removes. Zero means no better than th
 A dated span no model may train on, declared in `climate_model.exclusions`. Not low-quality data to be down-weighted: a period the sensors were not measuring what their names say. The current one (2026-05-28 → 2026-07-12) has measured boundaries and an unconfirmed cause — see `docs/red/wire-data-coverage.md`.
 
 **Forecast profile**:
-The predicted value at every **Growth section** of one wire at a single **Horizon** — read as a shape down the crop, the same way the measured crop-climate profile is read. Drawn as discrete profiles rather than a curve through time, because the chain is fitted and scored only at its horizons; the hours between them are not predicted and are not drawn. Each point carries the two links' combined held-out error as a *measured spread*, which is not a confidence interval.
+The predicted value at every **Growth section** of one wire at a single **Horizon** — the crop as a shape, the same way the measured crop-climate profile is read. The chain is fitted and scored only at its horizons, so the hours between them are not predicted: on the forecast chart the forecast half is marked at those horizons and the dashes between the markers are drawn, not predicted. Each horizon carries the two links' combined held-out error as a *measured spread*, which is not a confidence interval.
 
 ## Relationships
 
