@@ -14,8 +14,8 @@ Uses Ridge regression to handle correlated features.
 import contextlib
 import os
 import pickle
-from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -35,12 +35,23 @@ from wp6_data.red.dli.constants import (
     TOTAL_LIGHT_SENSOR,
     WEATHER_STATION_SENSOR,
 )
+from wp6_data.red.fitting import (
+    DEFAULT_CV_FOLDS,
+    StageStats,
+    climatology_baseline,
+    climatology_table,
+    fit_ridge,
+    out_of_fold_predictions,
+    persistence_baseline,
+    score_holdout,
+    time_blocked_splits,
+)
 from wp6_data.shared.artifacts import fingerprint
 
 # Bumped for a deliberate break: a change in the pickle layout, or in what the
 # stored numbers mean when their shape is unchanged. Unlike earlier revisions
 # this is an *equality* check, not a floor — see `load`.
-MODEL_VERSION = 7
+MODEL_VERSION = 8
 
 
 def fit_fingerprint() -> str:
@@ -74,17 +85,65 @@ _env_path = os.getenv("WP6_RED_DLI_MODEL_PATH", "")
 MODEL_PATH = Path(_env_path) if _env_path else _default_model_path()
 
 
-@dataclass
-class StageStats:
-    """Statistics for a single model stage."""
+def _previous_day(days: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """Each row's value from the calendar day before, NaN where there isn't one.
 
-    r2_score: float
-    rmse: float
-    mae: float
-    n_samples: int
-    coefficients: dict[str, float]
-    intercept: float
-    feature_names: list[str] = field(default_factory=list)
+    Built from a date lookup rather than ``shift(1)``: the daily frames drop
+    days that failed a quality gate, so the previous *row* is often not the
+    previous *day*, and persistence has to mean yesterday.
+    """
+    lookup = dict(zip(days, values, strict=True))
+    return np.array(
+        [lookup.get(day - timedelta(days=1), np.nan) for day in days], dtype=float
+    )
+
+
+def _score_stage(
+    stats: StageStats,
+    days: np.ndarray,
+    actual: np.ndarray,
+    predicted: np.ndarray,
+    mask: np.ndarray,
+) -> None:
+    """Attach out-of-fold quality, plus skill against the baselines that matter.
+
+    A daily light model posts a high R² for knowing the time of year, so the
+    number worth reading is what it removes from a baseline that already knows
+    that: ``climatology`` (this month's mean) and ``persistence`` (yesterday).
+
+    Everything is scored on one row set — those with an out-of-fold prediction
+    *and* a previous day to carry forward. A skill score computed over
+    different rows than the model's own error is not a comparison.
+
+    ``climatology_table`` keys on (month, hour); these rows are daily, so the
+    hour is constant and the table is a month-of-year mean, which is what a
+    daily climatology should be. When every row has been held out at some point
+    the table is necessarily built over all of them, so the baseline is mildly
+    optimistic — which makes the reported skill against it conservative.
+    """
+    previous = _previous_day(days, actual)
+    scored = mask & np.isfinite(previous)
+    if not scored.any():
+        return
+
+    times = pd.Series(pd.to_datetime(list(days[scored]), utc=True))
+    rest = ~scored
+    table = (
+        climatology_table(pd.Series(pd.to_datetime(list(days[rest]), utc=True)), actual[rest])
+        if rest.any()
+        else climatology_table(times, actual[scored])
+    )
+    score_holdout(
+        stats,
+        actual[scored],
+        predicted[scored],
+        {
+            "persistence": persistence_baseline(previous[scored]),
+            "climatology": climatology_baseline(
+                table, times, float(np.mean(actual[scored]))
+            ),
+        },
+    )
 
 
 @dataclass
@@ -101,10 +160,22 @@ class ModelStats:
     model_version: int = MODEL_VERSION
     attenuation_factor: float = 1.0
     attenuation_samples: int = 0
+    # Weather in, indoor PAR out, measured rather than inferred. ``None`` when
+    # the two stages share too few days to score end to end.
+    chain: StageStats | None = None
 
     @property
     def r2_score(self) -> float:
-        """Combined R² (product of both stages)."""
+        """Out-of-fold R² of the whole chain.
+
+        Previously the *product* of the two stages' in-sample R², which assumed
+        an error propagation nobody had measured and reported a number neither
+        stage could produce. Stage 2 is fitted on measured lux but served the
+        lux stage 1 predicts, so the only honest combined figure is the one
+        obtained by running it that way — see :meth:`_score_chain`.
+        """
+        if self.chain is not None and self.chain.holdout_r2 is not None:
+            return self.chain.holdout_r2
         return round(self.stage1.r2_score * self.stage2.r2_score, 4)
 
     @property
@@ -182,10 +253,6 @@ class TwoStageLightModel:
         Returns:
             ModelStats with both stage statistics
         """
-        from sklearn.linear_model import RidgeCV
-        from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-        from sklearn.preprocessing import StandardScaler
-
         # Reset feature lists to full extended set (may have been overwritten by load())
         candidate_s1_features = [
             "direct_radiation_sum",
@@ -221,59 +288,38 @@ class TwoStageLightModel:
         if not available_s1_features:
             raise ValueError("No valid Stage 1 features found in data")
 
-        # Train Stage 1: daily OpenMeteo → daily lux with RidgeCV
-        X1 = stage1_data[available_s1_features].values
-        y1 = stage1_data["lux_sum"].values
+        # Train Stage 1: daily OpenMeteo → daily lux.
+        #
+        # Day-blocked folds, not sklearn's random K-fold: consecutive days share
+        # a weather system, so a random split trains on the test set's
+        # neighbours and every score comes back flattering.
+        X1 = stage1_data[available_s1_features].to_numpy(dtype=float)
+        y1 = stage1_data["lux_sum"].to_numpy(dtype=float)
+        days1 = stage1_data["date"].to_numpy()
 
-        # Scale features, then RidgeCV with cross-validation for alpha
-        alphas = [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
         self.stage1_poly = None  # No polynomial features (simpler model)
-        self.stage1_scaler = StandardScaler()
-
-        X1_scaled = self.stage1_scaler.fit_transform(X1)
-
-        self.stage1_model = RidgeCV(alphas=alphas, cv=5)
-        self.stage1_model.fit(X1_scaled, y1)
-
-        y1_pred = self.stage1_model.predict(X1_scaled)
-
-        coef_dict = dict(zip(available_s1_features, self.stage1_model.coef_, strict=True))
-
-        stage1_stats = StageStats(
-            r2_score=round(r2_score(y1, y1_pred), 4),
-            rmse=round(np.sqrt(mean_squared_error(y1, y1_pred)), 2),
-            mae=round(mean_absolute_error(y1, y1_pred), 2),
-            n_samples=len(stage1_data),
-            coefficients=coef_dict,
-            intercept=round(float(self.stage1_model.intercept_), 4),
-            feature_names=available_s1_features,
+        self.stage1_model, self.stage1_scaler, stage1_stats = fit_ridge(
+            X1, y1, available_s1_features, days=days1
         )
+        oof1, mask1 = out_of_fold_predictions(X1, y1, available_s1_features, days1)
+        _score_stage(stage1_stats, days1, y1, oof1, mask1)
 
         # Train Stage 2: daily lux → daily indoor PAR
         available_s2_features = [f for f in candidate_s2_features if f in stage2_data.columns]
-        X2 = stage2_data[available_s2_features].values
-        y2 = stage2_data["par_sum"].values
+        X2 = stage2_data[available_s2_features].to_numpy(dtype=float)
+        y2 = stage2_data["par_sum"].to_numpy(dtype=float)
+        days2 = stage2_data["date"].to_numpy()
 
         self.stage2_poly = None  # No polynomial features
-        self.stage2_scaler = StandardScaler()
+        self.stage2_model, self.stage2_scaler, stage2_stats = fit_ridge(
+            X2, y2, available_s2_features, days=days2
+        )
+        oof2, mask2 = out_of_fold_predictions(X2, y2, available_s2_features, days2)
+        _score_stage(stage2_stats, days2, y2, oof2, mask2)
 
-        X2_scaled = self.stage2_scaler.fit_transform(X2)
-
-        self.stage2_model = RidgeCV(alphas=alphas, cv=5)
-        self.stage2_model.fit(X2_scaled, y2)
-
-        y2_pred = self.stage2_model.predict(X2_scaled)
-
-        coef_dict2 = dict(zip(available_s2_features, self.stage2_model.coef_, strict=True))
-
-        stage2_stats = StageStats(
-            r2_score=round(r2_score(y2, y2_pred), 4),
-            rmse=round(np.sqrt(mean_squared_error(y2, y2_pred)), 2),
-            mae=round(mean_absolute_error(y2, y2_pred), 2),
-            n_samples=len(stage2_data),
-            coefficients=coef_dict2,
-            intercept=round(float(self.stage2_model.intercept_), 4),
-            feature_names=available_s2_features,
+        chain_stats = self._score_chain(
+            stage2_stats, available_s2_features, X2, y2, days2,
+            days1, oof1, mask1,
         )
 
         # Store the actual features used
@@ -297,6 +343,7 @@ class TwoStageLightModel:
         self.stats = ModelStats(
             stage1=stage1_stats,
             stage2=stage2_stats,
+            chain=chain_stats,
             training_date=datetime.now(UTC),
             date_range=date_range,
             outdoor_sensor=outdoor_sensor,
@@ -324,6 +371,70 @@ class TwoStageLightModel:
     ) -> pd.DataFrame:
         """Align and aggregate s1000 + indoor PAR data to daily totals."""
         return align_outdoor_to_indoor_daily(outdoor_df, indoor_df)
+
+    def _score_chain(
+        self,
+        stage2_stats: StageStats,
+        s2_features: list[str],
+        X2: np.ndarray,
+        y2: np.ndarray,
+        days2: np.ndarray,
+        days1: np.ndarray,
+        oof1: np.ndarray,
+        mask1: np.ndarray,
+    ) -> StageStats | None:
+        """Score the chain the way it is served: on predicted lux, not measured.
+
+        Stage 2 is *fitted* on the lux the station recorded, because that is the
+        cleanest signal to learn the greenhouse's transmission from. But no
+        future day has a recorded lux — serving has only stage 1's estimate — so
+        that is what stage 2 is evaluated on here. Each fold fits on measured
+        lux and predicts its held-out days from predicted lux, which is exactly
+        what a forecast does.
+
+        This is the number that replaces ``stage1_R² × stage2_R²``. The product
+        was never a bound on anything: it assumed the stages' errors compound in
+        a way nobody had measured, and it flattered stage 2 by crediting it with
+        an input it never receives.
+
+        Returns ``None`` when the two stages share too few days to fold.
+        """
+        if "lux_sum" not in s2_features:
+            return None
+
+        predicted_lux = {
+            day: value
+            for day, value, ok in zip(days1, oof1, mask1, strict=True)
+            if ok
+        }
+        has_lux = np.array([day in predicted_lux for day in days2])
+        if has_lux.sum() < DEFAULT_CV_FOLDS:
+            return None
+
+        lux_column = s2_features.index("lux_sum")
+        X2_chain = X2.copy()
+        X2_chain[has_lux, lux_column] = [predicted_lux[day] for day in days2[has_lux]]
+
+        predictions = np.full(len(y2), np.nan, dtype=float)
+        for train_idx, test_idx in time_blocked_splits(days2, DEFAULT_CV_FOLDS):
+            model, scaler, _ = fit_ridge(
+                X2[train_idx], y2[train_idx], s2_features, days=days2[train_idx],
+            )
+            predictions[test_idx] = model.predict(scaler.transform(X2_chain[test_idx]))
+
+        mask = has_lux & ~np.isnan(predictions)
+        if not mask.any():
+            return None
+
+        # The same fitted shape with its own out-of-sample verdict. `skill` has
+        # to be a new dict: `replace` would otherwise share stage 2's.
+        stats = replace(
+            stage2_stats,
+            holdout_r2=None, holdout_rmse=None, holdout_mae=None,
+            n_holdout=0, skill={},
+        )
+        _score_stage(stats, days2, y2, predictions, mask)
+        return stats
 
     def _compute_attenuation(
         self, above_lamp_df: pd.DataFrame, plant_level_df: pd.DataFrame
