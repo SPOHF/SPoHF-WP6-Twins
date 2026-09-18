@@ -38,24 +38,6 @@ def calculate_dli_trendline(
     return trendline_y, slope_per_day
 
 
-def calculate_lamp_contribution(
-    total_dli: float | None,
-    natural_dli: float | None,
-) -> float | None:
-    """Calculate lamp DLI contribution (total - natural).
-
-    Args:
-        total_dli: Total DLI including lamps
-        natural_dli: Natural light DLI only
-
-    Returns:
-        Lamp contribution in DLI, or None if either input is None
-    """
-    if total_dli is None or natural_dli is None:
-        return None
-    return total_dli - natural_dli
-
-
 def estimate_hourly_natural_par(
     daily_dli: float,
     hour_radiation: float,

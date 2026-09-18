@@ -9,7 +9,6 @@ from wp6_data.red.dli.calculator import (
     calculate_daily_dli,
     calculate_dli_trendline,
     calculate_hourly_par,
-    calculate_lamp_contribution,
     estimate_hourly_natural_par,
     par_sum_to_dli,
 )
@@ -40,32 +39,6 @@ class TestCalculateDliTrendline:
         _, slope = calculate_dli_trendline(dates, values)
         assert slope == pytest.approx(-10.0, rel=0.01)
 
-
-class TestCalculateLampContribution:
-    def test_positive_contribution(self):
-        result = calculate_lamp_contribution(15.0, 10.0)
-        assert result == 5.0
-
-    def test_zero_contribution(self):
-        result = calculate_lamp_contribution(10.0, 10.0)
-        assert result == 0.0
-
-    def test_negative_contribution(self):
-        # Total < natural (unusual but possible due to sensor differences)
-        result = calculate_lamp_contribution(8.0, 10.0)
-        assert result == -2.0
-
-    def test_none_total(self):
-        result = calculate_lamp_contribution(None, 10.0)
-        assert result is None
-
-    def test_none_natural(self):
-        result = calculate_lamp_contribution(15.0, None)
-        assert result is None
-
-    def test_both_none(self):
-        result = calculate_lamp_contribution(None, None)
-        assert result is None
 
 
 class TestEstimateHourlyNaturalPar:
