@@ -11,15 +11,14 @@ from wp6_data.red import deps
 from wp6_data.red.dli import (
     DEFAULT_FORECAST_CENTER_DAYS,
     NATURAL_LIGHT_SENSOR,
-    SECONDS_PER_HOUR,
     TOTAL_LIGHT_SENSOR,
-    UMOL_TO_MOL,
     calculate_daily_dli,
     compute_daily_predicted_dli,
     estimate_hourly_natural_par,
     estimate_remaining_dli,
     fetch_weather_for_range,
     get_model,
+    hourly_par_sum_to_dli,
     lamp_hourly_par,
     predict_natural_dli_from_weather,
 )
@@ -190,13 +189,13 @@ async def dli_forecast(
     if predicted_df is not None and not predicted_df.empty:
         predicted_df["date"] = predicted_df["datetime"].dt.date
         for d, grp in predicted_df.groupby("date"):
-            dli = grp["par"].sum() * SECONDS_PER_HOUR / UMOL_TO_MOL
+            dli = hourly_par_sum_to_dli(grp["par"].sum())
             daily_dli.setdefault(d, {})["predicted"] = dli
 
     if natural_df is not None and not natural_df.empty:
         natural_df["date"] = natural_df["datetime"].dt.date
         for d, grp in natural_df.groupby("date"):
-            dli = grp["par"].sum() * SECONDS_PER_HOUR / UMOL_TO_MOL
+            dli = hourly_par_sum_to_dli(grp["par"].sum())
             daily_dli.setdefault(d, {})["natural"] = dli
 
     # Ensure today and tomorrow have predictions for cards (if not already in range)

@@ -14,6 +14,7 @@ from wp6_data.red.dli.calculator import (
     calculate_hourly_par,
     calculate_lamp_contribution,
     estimate_hourly_natural_par,
+    hourly_par_sum_to_dli,
     par_sum_to_dli,
 )
 from wp6_data.red.dli.constants import (
@@ -27,6 +28,7 @@ from wp6_data.red.dli.constants import (
     PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT,
     PERFORMANCE_ERROR_WARN_THRESHOLD_PCT,
     READING_INTERVAL_SECONDS,
+    SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     TOTAL_LIGHT_SENSOR,
     UMOL_TO_MOL,
@@ -64,6 +66,7 @@ __all__ = [
     "READING_INTERVAL_SECONDS",
     "SECONDS_PER_HOUR",
     "TOTAL_LIGHT_SENSOR",
+    "SECONDS_PER_DAY",
     "UMOL_TO_MOL",
     "WEATHER_STATION_SENSOR",
     # Calculator functions
@@ -72,6 +75,7 @@ __all__ = [
     "calculate_hourly_par",
     "calculate_lamp_contribution",
     "estimate_hourly_natural_par",
+    "hourly_par_sum_to_dli",
     "par_sum_to_dli",
     # Aggregation functions
     "add_day_of_year_features",

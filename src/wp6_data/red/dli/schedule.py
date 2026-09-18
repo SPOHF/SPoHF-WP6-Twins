@@ -6,8 +6,11 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from wp6_data.red.dli.calculator import estimate_hourly_natural_par
-from wp6_data.red.dli.constants import READING_INTERVAL_SECONDS, SECONDS_PER_HOUR, UMOL_TO_MOL
+from wp6_data.red.dli.calculator import (
+    estimate_hourly_natural_par,
+    hourly_par_sum_to_dli,
+    par_sum_to_dli,
+)
 from wp6_data.red.lamp import LampModel
 
 if False:  # TYPE_CHECKING
@@ -54,12 +57,22 @@ async def fetch_weather_for_range(
 def predict_natural_dli_from_weather(
     model: TwoStageLightModel,
     forecasts: list[DailyForecast],
+    *,
+    at_plant_level: bool = True,
 ) -> dict[date, float]:
     """Predict natural DLI for each day from weather forecasts.
+
+    ``at_plant_level`` selects which sensor position the prediction is for; see
+    :meth:`TwoStageLightModel.predict_daily`. The default carries it down to
+    plant level, which is what the forecast pages show and what the lamp
+    contribution is added to. A caller scoring against ``NATURAL_LIGHT_SENSOR``
+    — above the lamps, so never attenuated — must pass ``False``, or it measures
+    the attenuation factor and calls it model error.
 
     Args:
         model: Trained two-stage light model
         forecasts: List of daily weather forecasts
+        at_plant_level: Predict at the plant-level (under-lamp) position
 
     Passes the features stage 1 was *fitted* on. Earlier this handed
     ``total_radiation`` — summed **shortwave**, i.e. direct + diffuse — to the
@@ -80,6 +93,7 @@ def predict_natural_dli_from_weather(
             diffuse_radiation_sum=f.diffuse_radiation_sum,
             cloud_cover_avg=f.avg_cloud_cover,
             day_of_year=f.date.timetuple().tm_yday,
+            at_plant_level=at_plant_level,
         )
         for f in forecasts
     }
@@ -133,10 +147,7 @@ def prepare_daily_dli_summary(
         actual_df = actual_df.copy()
         actual_df["date"] = pd.to_datetime(actual_df["datetime"]).dt.date
         for d, grp in actual_df.groupby("date"):
-            # Sum PAR readings and convert to DLI
-            # Assuming ~10min intervals
-            par_sum = grp["par"].sum()
-            dli = par_sum * READING_INTERVAL_SECONDS / UMOL_TO_MOL
+            dli = par_sum_to_dli(grp["par"].sum())
             daily_dli.setdefault(d, {})["actual"] = dli
 
     # Process predicted data
@@ -144,7 +155,7 @@ def prepare_daily_dli_summary(
         predicted_df = predicted_df.copy()
         predicted_df["date"] = pd.to_datetime(predicted_df["datetime"]).dt.date
         for d, grp in predicted_df.groupby("date"):
-            dli = grp["par"].sum() * SECONDS_PER_HOUR / UMOL_TO_MOL
+            dli = hourly_par_sum_to_dli(grp["par"].sum())
             daily_dli.setdefault(d, {})["predicted"] = dli
 
     # Process natural data
@@ -152,7 +163,7 @@ def prepare_daily_dli_summary(
         natural_df = natural_df.copy()
         natural_df["date"] = pd.to_datetime(natural_df["datetime"]).dt.date
         for d, grp in natural_df.groupby("date"):
-            dli = grp["par"].sum() * SECONDS_PER_HOUR / UMOL_TO_MOL
+            dli = hourly_par_sum_to_dli(grp["par"].sum())
             daily_dli.setdefault(d, {})["natural"] = dli
 
     return daily_dli
@@ -186,7 +197,7 @@ def estimate_remaining_dli(
     remaining = today_predicted[
         pd.to_datetime(today_predicted["datetime"]).dt.hour > current_hour
     ]
-    remainder_dli = remaining["par"].sum() * SECONDS_PER_HOUR / UMOL_TO_MOL
+    remainder_dli = hourly_par_sum_to_dli(remaining["par"].sum())
 
     return remainder_dli
 
@@ -216,8 +227,8 @@ def compute_daily_predicted_dli(
     schedule = lamp_hourly_par(lamp)
     return {
         f.date: natural_dli.get(f.date, 0.0)
-        + sum(schedule.get(h.datetime.hour, 0.0) for h in f.hourly)
-        * SECONDS_PER_HOUR
-        / UMOL_TO_MOL
+        + hourly_par_sum_to_dli(
+            sum(schedule.get(h.datetime.hour, 0.0) for h in f.hourly)
+        )
         for f in forecasts
     }

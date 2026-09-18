@@ -27,9 +27,11 @@ from wp6_data.red.dli.aggregation import (
     align_weather_to_outdoor_daily,
     encode_day_of_year,
 )
+from wp6_data.red.dli.calculator import par_sum_to_dli
 from wp6_data.red.dli.constants import (
     DEFAULT_TRAINING_START,
     NATURAL_LIGHT_SENSOR,
+    SECONDS_PER_DAY,
     TOTAL_LIGHT_SENSOR,
     WEATHER_STATION_SENSOR,
 )
@@ -342,14 +344,32 @@ class TwoStageLightModel:
         diffuse_radiation_sum: float | None = None,
         cloud_cover_avg: float | None = None,
         day_of_year: int | None = None,
+        *,
+        at_plant_level: bool = True,
     ) -> float:
         """Predict daily indoor PAR sum from OpenMeteo daily forecast.
+
+        Stage 2 is fitted on ``NATURAL_LIGHT_SENSOR``, which hangs *above* the
+        lamps, so the above-lamp PAR sum is what it natively predicts.
+        ``at_plant_level`` multiplies by the attenuation factor to reach the
+        under-lamp position instead.
+
+        The two are different physical quantities — they differ by the whole
+        attenuation factor, around a third — so the caller says which it wants
+        rather than inferring it from the magnitudes. Scoring a plant-level
+        prediction against the above-lamp sensor reads as a model that
+        underpredicts by 38%, when nothing is wrong with the model at all.
 
         Args:
             direct_radiation_sum: Daily sum of direct_radiation (W/m² summed over hours)
             diffuse_radiation_sum: Daily sum of diffuse_radiation (optional)
             cloud_cover_avg: Daily average cloud cover % (optional)
             day_of_year: Day of year 1-365 (optional, defaults to today)
+            at_plant_level: Convert the above-lamp prediction to the plant-level
+                position. Default, because that is the light a grower asks about
+                and what the lamp contribution is added to. Pass ``False`` to
+                compare against ``NATURAL_LIGHT_SENSOR`` itself, which sits
+                above the lamps and is therefore not attenuated.
 
         Returns:
             Predicted daily indoor PAR sum (μmol/m²/day sum over readings)
@@ -411,8 +431,12 @@ class TwoStageLightModel:
 
         predicted_par_sum = self.stage2_model.predict(X2)[0]
 
-        # Apply attenuation to convert above-lamp prediction to plant-level estimate
-        predicted_par_sum *= self.attenuation_factor
+        # Attenuation is the above-lamp -> plant-level conversion, so it applies
+        # only when the caller asked for plant level. Applying it unconditionally
+        # is what made /dli/performance score an attenuated prediction against
+        # the un-attenuated above-lamp sensor.
+        if at_plant_level:
+            predicted_par_sum *= self.attenuation_factor
 
         return max(0.0, round(predicted_par_sum, 1))
 
@@ -423,6 +447,8 @@ class TwoStageLightModel:
         cloud_cover_avg: float | None = None,
         day_of_year: int | None = None,
         readings_per_day: int = 144,  # Assuming 10-min intervals
+        *,
+        at_plant_level: bool = True,
     ) -> float:
         """Predict DLI (mol/m²/day) from OpenMeteo daily forecast.
 
@@ -432,6 +458,8 @@ class TwoStageLightModel:
             cloud_cover_avg: Daily average cloud cover % (optional)
             day_of_year: Day of year 1-365 (optional, defaults to today)
             readings_per_day: Expected number of PAR readings per day
+            at_plant_level: Which sensor position to predict for; see
+                :meth:`predict_daily`.
 
         Returns:
             Predicted DLI in mol/m²/day
@@ -441,17 +469,13 @@ class TwoStageLightModel:
             diffuse_radiation_sum=diffuse_radiation_sum,
             cloud_cover_avg=cloud_cover_avg,
             day_of_year=day_of_year,
+            at_plant_level=at_plant_level,
         )
 
-        # Convert PAR sum to DLI
-        # PAR sum is sum of readings, each reading represents ~10 min = 600 seconds
-        # DLI = PAR_avg * seconds_per_day / 1,000,000
-        # PAR_avg = par_sum / readings_per_day
-        # seconds_per_day ≈ readings_per_day * interval_seconds
-        interval_seconds = 86400 / readings_per_day  # seconds per reading interval
-        dli = (par_sum * interval_seconds) / 1_000_000
-
-        return round(dli, 2)
+        # A day's worth of readings at this cadence; the conversion itself lives
+        # in `calculator.par_sum_to_dli` rather than being spelled out again here.
+        interval_seconds = SECONDS_PER_DAY / readings_per_day
+        return round(par_sum_to_dli(par_sum, interval_seconds), 2)
 
     def save(self, path: Path | None = None) -> Path:
         """Save model to disk."""

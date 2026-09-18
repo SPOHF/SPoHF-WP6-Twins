@@ -1,4 +1,10 @@
-"""GET /dli/performance — Compare predicted DLI with actual sensor readings."""
+"""GET /dli/performance — Compare predicted DLI with actual sensor readings.
+
+Which comparison is shown is a query parameter, not a client-side toggle, so a
+particular view is a URL somebody can link to. It also means each request builds
+one comparison rather than both: the two modes need different predictions and
+different sensor data, and only the total mode needs the lamp schedule at all.
+"""
 
 from datetime import date, timedelta
 from typing import Annotated
@@ -11,6 +17,7 @@ from fastapi.responses import HTMLResponse
 from wp6_data.red import deps
 from wp6_data.red.dli import (
     DEFAULT_PERFORMANCE_LOOKBACK_DAYS,
+    MIN_INDOOR_PAR,
     NATURAL_LIGHT_SENSOR,
     PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT,
     PERFORMANCE_ERROR_WARN_THRESHOLD_PCT,
@@ -19,32 +26,81 @@ from wp6_data.red.dli import (
     compute_daily_predicted_dli,
     fetch_weather_for_range,
     get_model,
+    par_sum_to_dli,
     predict_natural_dli_from_weather,
 )
 from wp6_data.red.dli import data as dli_data
 from wp6_data.red.lamp import RECENT_DAYS, derive_lamp_model
-from wp6_data.shared import render_date_filter, render_page, render_stat_grid, utc_day_bounds
+from wp6_data.shared import (
+    pill_row,
+    render_date_filter,
+    render_page,
+    render_stat_grid,
+    utc_day_bounds,
+)
 
 router = APIRouter()
 
 PAGE_TITLE = "SPoHF Red - DLI Performance"
 
+# The two comparisons this page offers. They are not two views of one number:
+# total light is measured *under* the lamps and natural light *above* them, so
+# each mode has its own actual sensor and its own prediction. Naming the sensor
+# position in the label is deliberate — `NATURAL_LIGHT_SENSOR` is called
+# "Natural Light" but hangs above the lamps, and conflating that with
+# natural light at plant level is exactly how this page came to score an
+# attenuated prediction against an un-attenuated sensor.
+TOTAL_MODE = "total"
+NATURAL_MODE = "natural"
+MODE_LABELS = {
+    TOTAL_MODE: "Total (under lamps)",
+    NATURAL_MODE: "Natural (above lamps)",
+}
+DEFAULT_MODE = TOTAL_MODE
+
+BASE_PATH = "/dli/performance"
+
+# Below this the sensor did not really report, and the day is not scored.
+#
+# `calculate_daily_dli` still returns a row for a day of flat zeros — red's PAR
+# sensors read zero for six weeks in 2026 — and a zero actual is not a dark day,
+# it is an absent one. Scoring against it measures the outage twice over: the
+# percentage error is undefined, and the absolute error is the whole prediction.
+#
+# The bar is the gate training already uses, expressed as a DLI. A day the model
+# would not have learned from does not get to judge it either, and reusing the
+# threshold means the two cannot drift apart.
+NO_DATA_DLI = par_sum_to_dli(MIN_INDOOR_PAR)
+
+
+def _page(body: str) -> str:
+    """This page's shell. Every exit renders the same frame, error or not."""
+    return render_page(
+        PAGE_TITLE, body, extra_css=EXTRA_CSS,
+        show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",
+    )
+
+
 @router.get("/performance", response_class=HTMLResponse)
 async def dli_performance(
     start: Annotated[date | None, Query(description="Start date")] = None,
     end: Annotated[date | None, Query(description="End date")] = None,
+    mode: Annotated[
+        str,
+        Query(description="Which comparison to show (total/natural); defaults to total"),
+    ] = DEFAULT_MODE,
 ) -> str:
     """Compare predicted DLI (model hindcast) with actual sensor readings."""
+    if mode not in MODE_LABELS:
+        mode = DEFAULT_MODE
+
     if not dli_data.is_connected():
-        return render_page(PAGE_TITLE, "<h1>Database not connected</h1>",
-                          show_back_link=True, back_url="/dli")
+        return _page("<h1>Database not connected</h1>")
 
     model = get_model()
     if not model.is_trained():
-        return render_page(
-            PAGE_TITLE,
-            "<h1>Model not trained</h1><p>Train the prediction model first.</p>",
-            show_back_link=True, back_url="/dli",
+        return _page(
+            "<h1>Model not trained</h1><p>Train the prediction model first.</p>"
         )
 
     # Default to last N days, always exclude today (incomplete)
@@ -56,256 +112,235 @@ async def dli_performance(
         end = yesterday
     end = min(end, yesterday)
 
-    # The lamp schedule is read from the fortnight *before* the scored window,
-    # so this page hindcasts with only what was knowable on day one — the same
-    # "recent schedule continues" assumption the forecast page makes. Attenuation
-    # is not read from that fortnight; see derive_lamp_model on why a short
-    # winter window cannot identify it.
-    lamp_window_start, _ = utc_day_bounds(start - timedelta(days=RECENT_DAYS))
-    _, lamp_window_end = utc_day_bounds(start - timedelta(days=1))
     start_dt, _ = utc_day_bounds(start)
     _, end_dt = utc_day_bounds(end)
 
-    filter_html = render_date_filter(start, end)
+    filter_html = render_date_filter(start, end, {"mode": mode})
+    toggle_html = pill_row(
+        BASE_PATH, "mode", list(MODE_LABELS.items()), mode,
+        {"start": start.isoformat(), "end": end.isoformat()}, "View",
+    )
+    header = f"<h1>DLI Performance</h1>{filter_html}{toggle_html}"
 
-    # Fetch actual PAR data for both sensors
+    is_total = mode == TOTAL_MODE
+    sensor = TOTAL_LIGHT_SENSOR if is_total else NATURAL_LIGHT_SENSOR
+
     try:
         par_df = await dli_data.get_par_readings(
-            device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR], start=start_dt, end=end_dt
-        )
-        lamp_par_df = await dli_data.get_par_readings(
-            device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR],
-            start=lamp_window_start, end=lamp_window_end,
+            device_ids=[sensor], start=start_dt, end=end_dt
         )
     except Exception as e:
-        return render_page(PAGE_TITLE, f"<h1>Error: {e}</h1>",
-                          show_back_link=True, back_url="/dli")
+        return _page(header + f"<h1>Error: {e}</h1>")
 
+    # Only the total comparison adds the lamps. The schedule is read from the
+    # fortnight *before* the scored window, so this hindcasts with only what was
+    # knowable on day one — the same "recent schedule continues" assumption the
+    # forecast page makes. Attenuation is not read from that fortnight; see
+    # derive_lamp_model on why a short winter window cannot identify it.
     lamp = None
-    if not lamp_par_df.empty:
-        lamp = derive_lamp_model(
-            lamp_par_df[lamp_par_df["device"] == NATURAL_LIGHT_SENSOR],
-            lamp_par_df[lamp_par_df["device"] == TOTAL_LIGHT_SENSOR],
-            attenuation=model.attenuation_factor if model.is_trained() else None,
-        )
+    if is_total:
+        lamp_window_start, _ = utc_day_bounds(start - timedelta(days=RECENT_DAYS))
+        _, lamp_window_end = utc_day_bounds(start - timedelta(days=1))
+        try:
+            lamp_par_df = await dli_data.get_par_readings(
+                device_ids=[NATURAL_LIGHT_SENSOR, TOTAL_LIGHT_SENSOR],
+                start=lamp_window_start, end=lamp_window_end,
+            )
+        except Exception as e:
+            return _page(header + f"<h1>Error: {e}</h1>")
+        if not lamp_par_df.empty:
+            lamp = derive_lamp_model(
+                lamp_par_df[lamp_par_df["device"] == NATURAL_LIGHT_SENSOR],
+                lamp_par_df[lamp_par_df["device"] == TOTAL_LIGHT_SENSOR],
+                attenuation=model.attenuation_factor,
+            )
 
     client = deps.get_weather_client()
     try:
         forecasts = await fetch_weather_for_range(client, start, end)
-        predicted_natural = predict_natural_dli_from_weather(model, forecasts)
+        # Total is scored against the under-lamp sensor, so its natural half must
+        # be carried down to plant level before the lamps are added. Natural is
+        # scored against the above-lamp sensor, which attenuation has not touched
+        # — asking for the matching position is what keeps the comparison
+        # like-for-like.
+        predicted_natural = predict_natural_dli_from_weather(
+            model, forecasts, at_plant_level=is_total
+        )
     except Exception as e:
-        return render_page(PAGE_TITLE,
-                          filter_html + f"<h1>Weather data error: {e}</h1>",
-                          show_back_link=True, back_url="/dli")
+        return _page(header + f"<h1>Weather data error: {e}</h1>")
 
-    # Calculate actual DLI per device per day (filter to requested range only)
-    actual_total_dli: dict[date, float] = {}
-    actual_natural_dli: dict[date, float] = {}
+    # Calculate actual DLI per day (filter to requested range only)
+    actual_dli: dict[date, float] = {}
     if not par_df.empty:
         daily_df = calculate_daily_dli(par_df)
         for _, row in daily_df.iterrows():
             d = row["date"].date() if hasattr(row["date"], "date") else row["date"]
-            if d < start or d > end:
+            if d < start or d > end or row["device"] != sensor:
                 continue
-            if row["device"] == TOTAL_LIGHT_SENSOR:
-                actual_total_dli[d] = row["dli"]
-            elif row["device"] == NATURAL_LIGHT_SENSOR:
-                actual_natural_dli[d] = row["dli"]
+            actual_dli[d] = row["dli"]
 
     range_forecasts = [f for f in forecasts if start <= f.date <= end]
     predicted_natural_range = {d: v for d, v in predicted_natural.items() if start <= d <= end}
-    predicted_total_dli = compute_daily_predicted_dli(
-        range_forecasts, predicted_natural_range, lamp
+    predicted_dli = (
+        compute_daily_predicted_dli(range_forecasts, predicted_natural_range, lamp)
+        if is_total
+        else predicted_natural_range
     )
 
-    # Two modes: total (actual total vs predicted total) and natural (actual natural vs predicted)
-    modes = {
-        "total": {
-            "actual": actual_total_dli,
-            "predicted": predicted_total_dli,
-            "label": "Total DLI",
-            "actual_name": "Actual Total",
-            "predicted_name": "Predicted Total",
-        },
-        "natural": {
-            "actual": actual_natural_dli,
-            "predicted": predicted_natural_range,
-            "label": "Natural DLI",
-            "actual_name": "Actual Natural",
-            "predicted_name": "Predicted Natural",
-        },
-    }
+    label = MODE_LABELS[mode]
+    actual_name = f"Actual {label}"
+    predicted_name = f"Predicted {label}"
 
-    mode_html = {}
-    for mode_key, m in modes.items():
-        shared = sorted(set(m["actual"]) & set(m["predicted"]))
-        if not shared:
-            mode_html[mode_key] = "<p>No overlapping data for this view.</p>"
-            continue
+    shared = sorted(set(actual_dli) & set(predicted_dli))
+    if not shared:
+        return _page(header + "<p>No overlapping data for this view.</p>")
 
-        act = [m["actual"][d] for d in shared]
-        pred = [m["predicted"][d] for d in shared]
-        errs = [p - a for a, p in zip(act, pred, strict=True)]
-        pct_errs = [
-            ((p - a) / a * 100) if a > 0 else 0.0
-            for a, p in zip(act, pred, strict=True)
-        ]
-        abs_pct = [abs(e) for e in pct_errs]
-
-        mape = float(np.mean(abs_pct))
-        mae = float(np.mean([abs(e) for e in errs]))
-        bias = float(np.mean(errs))
-
-        # Line chart
-        fig_cmp = go.Figure()
-        fig_cmp.add_trace(go.Scatter(
-            x=shared, y=act,
-            name=m["actual_name"], mode="lines+markers",
-            line={"color": "#3498db", "width": 2}, marker={"size": 6},
-            hovertemplate="%{y:.1f}<extra></extra>",
-        ))
-        fig_cmp.add_trace(go.Scatter(
-            x=shared, y=pred,
-            name=m["predicted_name"], mode="lines+markers",
-            line={"color": "#e74c3c", "width": 2, "dash": "dash"}, marker={"size": 6},
-            hovertemplate="%{y:.1f}<extra></extra>",
-        ))
-        fig_cmp.add_trace(go.Scatter(
-            x=list(shared) + list(reversed(shared)),
-            y=pred + list(reversed(act)),
-            fill="toself", fillcolor="rgba(231, 76, 60, 0.1)",
-            line={"width": 0}, showlegend=False, hoverinfo="skip",
-        ))
-        fig_cmp.update_layout(
-            title=f"Actual vs Predicted {m['label']}",
-            yaxis_title="DLI (mol/m²/day)", height=400, hovermode="x unified",
-            legend={"orientation": "h", "yanchor": "bottom", "y": 1.02,
-                    "xanchor": "right", "x": 1},
-            margin={"t": 60, "b": 40},
+    # Charts show every overlapping day, so an outage stays visible; only the
+    # days the sensor actually reported are scored. See NO_DATA_DLI.
+    scored = [d for d in shared if actual_dli[d] > NO_DATA_DLI]
+    no_data = [d for d in shared if actual_dli[d] <= NO_DATA_DLI]
+    if not scored:
+        return _page(
+            header + f"<p>None of these {len(shared)} days carry usable readings "
+            f"from <code>{sensor}</code> — every actual DLI is at or below "
+            f"{NO_DATA_DLI:.2f} mol/m²/day, which means the sensor was off "
+            f"rather than the sky dark.</p>"
         )
-        # First mode gets plotly CDN, second reuses it
-        include_js = "cdn" if mode_key == "total" else False
-        chart_cmp = fig_cmp.to_html(full_html=False, include_plotlyjs=include_js)
 
-        # Error bar chart
-        bar_colors = []
-        for pct in pct_errs:
-            ap = abs(pct)
-            if ap < PERFORMANCE_ERROR_WARN_THRESHOLD_PCT:
-                bar_colors.append("#22c55e")
-            elif ap < PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT:
-                bar_colors.append("#f59e0b")
-            else:
-                bar_colors.append("#ef4444")
+    act = [actual_dli[d] for d in shared]
+    pred = [predicted_dli[d] for d in shared]
 
-        fig_err = go.Figure()
-        fig_err.add_trace(go.Bar(
-            x=shared, y=errs, marker_color=bar_colors,
-            hovertemplate="%{x}<br>Error: %{y:.1f} mol/m²/day<extra></extra>",
+    scored_act = [actual_dli[d] for d in scored]
+    scored_pred = [predicted_dli[d] for d in scored]
+    scored_errs = [p - a for a, p in zip(scored_act, scored_pred, strict=True)]
+    scored_pct = [
+        (p - a) / a * 100 for a, p in zip(scored_act, scored_pred, strict=True)
+    ]
+    pct_by_day = dict(zip(scored, scored_pct, strict=True))
+
+    mape = float(np.mean([abs(e) for e in scored_pct]))
+    mae = float(np.mean([abs(e) for e in scored_errs]))
+    bias = float(np.mean(scored_errs))
+
+    # Line chart
+    fig_cmp = go.Figure()
+    fig_cmp.add_trace(go.Scatter(
+        x=shared, y=act,
+        name=actual_name, mode="lines+markers",
+        line={"color": "#3498db", "width": 2}, marker={"size": 6},
+        hovertemplate="%{y:.1f}<extra></extra>",
+    ))
+    fig_cmp.add_trace(go.Scatter(
+        x=shared, y=pred,
+        name=predicted_name, mode="lines+markers",
+        line={"color": "#e74c3c", "width": 2, "dash": "dash"}, marker={"size": 6},
+        hovertemplate="%{y:.1f}<extra></extra>",
+    ))
+    fig_cmp.add_trace(go.Scatter(
+        x=list(shared) + list(reversed(shared)),
+        y=pred + list(reversed(act)),
+        fill="toself", fillcolor="rgba(231, 76, 60, 0.1)",
+        line={"width": 0}, showlegend=False, hoverinfo="skip",
+    ))
+    if no_data:
+        fig_cmp.add_trace(go.Scatter(
+            x=no_data, y=[0.0] * len(no_data),
+            name="No sensor data", mode="markers",
+            marker={"size": 9, "color": "#94a3b8", "symbol": "x"},
+            hovertemplate="%{x}<br>No sensor data — not scored<extra></extra>",
         ))
-        fig_err.update_layout(
-            title="Daily Prediction Error", yaxis_title="Error (mol/m²/day)",
-            height=300, hovermode="x unified", margin={"t": 60, "b": 40},
+    fig_cmp.update_layout(
+        title=f"Actual vs Predicted — {label}",
+        yaxis_title="DLI (mol/m²/day)", height=400, hovermode="x unified",
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02,
+                "xanchor": "right", "x": 1},
+        margin={"t": 60, "b": 40},
+    )
+    chart_cmp = fig_cmp.to_html(full_html=False, include_plotlyjs="cdn")
+
+    # Error bar chart
+    bar_colors = []
+    for pct in scored_pct:
+        ap = abs(pct)
+        if ap < PERFORMANCE_ERROR_WARN_THRESHOLD_PCT:
+            bar_colors.append("#22c55e")
+        elif ap < PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT:
+            bar_colors.append("#f59e0b")
+        else:
+            bar_colors.append("#ef4444")
+
+    fig_err = go.Figure()
+    fig_err.add_trace(go.Bar(
+        x=scored, y=scored_errs, marker_color=bar_colors,
+        hovertemplate="%{x}<br>Error: %{y:.1f} mol/m²/day<extra></extra>",
+    ))
+    fig_err.update_layout(
+        title="Daily Prediction Error", yaxis_title="Error (mol/m²/day)",
+        height=300, hovermode="x unified", margin={"t": 60, "b": 40},
+    )
+    fig_err.add_hline(y=0, line_color="black", line_width=1)
+    chart_err = fig_err.to_html(full_html=False, include_plotlyjs=False)
+
+    # Stats
+    bias_lbl = "overprediction" if bias > 0 else "underprediction"
+    tiles = [
+        (f"{mape:.1f}%", "Avg. Error", f"Mean absolute % error over {len(scored)} days"),
+        (f"{mae:.2f}", "Avg. Absolute Error", "mol/m²/day off per day"),
+        (f"{bias:+.2f}", f"Bias ({bias_lbl})", "Systematic over/under trend"),
+    ]
+    if no_data:
+        tiles.append(
+            (str(len(no_data)), "Days Not Scored", f"No reading from {sensor}")
         )
-        fig_err.add_hline(y=0, line_color="black", line_width=1)
-        chart_err = fig_err.to_html(full_html=False, include_plotlyjs=False)
+    stats = render_stat_grid(tiles)
 
-        # Stats
-        bias_lbl = "overprediction" if bias > 0 else "underprediction"
-        stats = render_stat_grid([
-            (f"{mape:.1f}%", "Avg. Error", "Mean absolute % error"),
-            (f"{mae:.2f}", "Avg. Absolute Error", "mol/m²/day off per day"),
-            (f"{bias:+.2f}", f"Bias ({bias_lbl})", "Systematic over/under trend"),
-        ])
-
-        # Table
-        rows = []
-        for i, d in enumerate(reversed(shared)):
-            idx = len(shared) - 1 - i
-            a, p, err, pct = act[idx], pred[idx], errs[idx], pct_errs[idx]
+    # Table
+    rows = []
+    for d in reversed(shared):
+        a, p = actual_dli[d], predicted_dli[d]
+        pct = pct_by_day.get(d)
+        if pct is None:
+            # Not an error of 0% — an absent measurement. Saying so is the whole
+            # point; the old page showed these as a perfect day.
+            cell = '<td class="no-data">no data</td>'
+        else:
             ap = abs(pct)
             cls = "success" if ap < PERFORMANCE_ERROR_WARN_THRESHOLD_PCT else (
                 "warning" if ap < PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT else "error-high"
             )
-            rows.append(f"""<tr>
-                <td>{d}</td><td>{a:.2f}</td><td>{p:.2f}</td>
-                <td>{err:+.2f}</td><td class="{cls}">{pct:+.1f}%</td>
-            </tr>""")
+            cell = f'<td class="{cls}">{pct:+.1f}%</td>'
+        rows.append(f"""<tr>
+            <td>{d}</td><td>{a:.2f}</td><td>{p:.2f}</td>
+            <td>{p - a:+.2f}</td>{cell}
+        </tr>""")
 
-        table = f"""
-            <details>
-                <summary>View Data Table ({len(shared)} days)</summary>
-                <table><thead><tr>
-                    <th>Date</th><th>{m['actual_name']}</th><th>{m['predicted_name']}</th>
-                    <th>Error</th><th>Error %</th>
-                </tr></thead><tbody>{''.join(rows)}</tbody></table>
-            </details>
-        """
-
-        mode_html[mode_key] = f"""
-            {stats}
-            <div class="chart-section">{chart_cmp}</div>
-            <div class="chart-section">{chart_err}</div>
-            {table}
-        """
-
-    extra_css = """
-        .chart-section { margin-bottom: 30px; }
-        td, th { text-align: center; }
-        .error-high { color: #ef4444 !important; font-weight: bold; }
-        .mode-toggle { display: inline-flex; border-radius: 8px; overflow: hidden;
-                       border: 2px solid var(--dashboard-primary); margin-bottom: 1rem; }
-        .mode-toggle button { padding: 0.4rem 1.2rem; border: none; cursor: pointer;
-                              background: transparent; color: var(--dashboard-primary);
-                              font-weight: 600; transition: all 0.15s; }
-        .mode-toggle button.active { background: var(--dashboard-primary); color: #fff; }
-        .mode-toggle button:hover:not(.active) { background: var(--dashboard-surface); }
-        .mode-view { display: none; }
-        .mode-view.active { display: block; }
-    """
-
-    toggle_js = """
-    <script>
-    function switchMode(mode) {
-        document.querySelectorAll('.mode-view').forEach(function(el) {
-            el.classList.toggle('active', el.dataset.mode === mode);
-        });
-        document.querySelectorAll('.mode-toggle button').forEach(function(btn) {
-            btn.classList.toggle('active', btn.dataset.mode === mode);
-        });
-        // Plotly charts rendered in hidden divs need a resize to fill correctly
-        var active = document.querySelector('.mode-view.active');
-        if (active) {
-            active.querySelectorAll('.js-plotly-plot').forEach(function(plot) {
-                Plotly.Plots.resize(plot);
-            });
-        }
-    }
-    </script>
+    table = f"""
+        <details>
+            <summary>View Data Table ({len(shared)} days, {len(scored)} scored)</summary>
+            <table><thead><tr>
+                <th>Date</th><th>{actual_name}</th><th>{predicted_name}</th>
+                <th>Error</th><th>Error %</th>
+            </tr></thead><tbody>{''.join(rows)}</tbody></table>
+        </details>
     """
 
     content = f"""
-        <h1>DLI Performance</h1>
-        <p>Comparing model predictions with actual sensor readings.</p>
-        {filter_html}
-        <div class="mode-toggle">
-            <button data-mode="total" class="active" onclick="switchMode('total')">
-                Total DLI</button>
-            <button data-mode="natural" onclick="switchMode('natural')">
-                Natural Light Only</button>
-        </div>
-        <div class="mode-view active" data-mode="total">
-            {mode_html.get("total", "<p>No data.</p>")}
-        </div>
-        <div class="mode-view" data-mode="natural">
-            {mode_html.get("natural", "<p>No data.</p>")}
-        </div>
-        {toggle_js}
+        {header}
+        <p>Comparing model predictions with <code>{sensor}</code>.</p>
+        {stats}
+        <div class="chart-section">{chart_cmp}</div>
+        <div class="chart-section">{chart_err}</div>
+        {table}
     """
 
-    return render_page(
-        PAGE_TITLE,
-        content,
-        extra_css=extra_css,
-        show_logo=False, show_footer=False, show_back_link=True, back_url="/dli",
-    )
+    return _page(content)
+
+
+# The toggle needs no styling of its own: `pill_row` reuses the shared
+# .group-toggle / .group-btn rules the chart pages already ship.
+EXTRA_CSS = """
+    .chart-section { margin-bottom: 30px; }
+    td, th { text-align: center; }
+    .error-high { color: #ef4444 !important; font-weight: bold; }
+    .no-data { color: #94a3b8 !important; font-style: italic; }
+"""

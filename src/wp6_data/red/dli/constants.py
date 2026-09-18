@@ -34,6 +34,7 @@ PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT = 30.0
 # These are effectively immutable physical/time conversions and should not be changed.
 UMOL_TO_MOL = 1_000_000  # μmol → mol
 SECONDS_PER_HOUR = 3600  # hour → seconds
+SECONDS_PER_DAY = 86_400  # day → seconds
 
 # Expected sensor cadence used when converting PAR sums to DLI from raw readings.
 # Change only if sensor sampling interval truly changes in production.

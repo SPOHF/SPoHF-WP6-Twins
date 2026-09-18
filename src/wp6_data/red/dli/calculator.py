@@ -8,6 +8,7 @@ import pandas as pd
 
 from wp6_data.red.dli.constants import (
     DEFAULT_PHOTOPERIOD_THRESHOLD,
+    READING_INTERVAL_SECONDS,
     SECONDS_PER_HOUR,
     UMOL_TO_MOL,
 )
@@ -79,18 +80,36 @@ def estimate_hourly_natural_par(
     return natural_par
 
 
-def par_sum_to_dli(par_sum: float, seconds_per_reading: float = 600.0) -> float:
+def par_sum_to_dli(
+    par_sum: float, seconds_per_reading: float = READING_INTERVAL_SECONDS
+) -> float:
     """Convert PAR sum to DLI.
+
+    The one place this arithmetic lives. Each summed reading stands for
+    ``seconds_per_reading`` of exposure, so the sum is an integral once scaled,
+    and μmol become mol. Callers that sum *hourly* values want
+    :func:`hourly_par_sum_to_dli`.
 
     Args:
         par_sum: Sum of PAR readings (μmol/m²/s summed)
-        seconds_per_reading: Seconds per reading interval (default 600 = 10 min)
+        seconds_per_reading: Seconds each reading represents; defaults to the
+            sensors' declared cadence (``READING_INTERVAL_SECONDS``)
 
     Returns:
         DLI in mol/m²/day
     """
-    # DLI = par_sum * interval_seconds / 1,000,000
     return (par_sum * seconds_per_reading) / UMOL_TO_MOL
+
+
+def hourly_par_sum_to_dli(par_sum: float) -> float:
+    """DLI from PAR values summed one per hour.
+
+    The same conversion as :func:`par_sum_to_dli` at an hourly cadence. It has
+    its own name because "which cadence does this sum use" is the question the
+    open-coded ``* SECONDS_PER_HOUR / UMOL_TO_MOL`` left every reader to answer
+    from surrounding context.
+    """
+    return par_sum_to_dli(par_sum, SECONDS_PER_HOUR)
 
 
 def _photoperiod_seconds(
