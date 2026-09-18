@@ -73,6 +73,22 @@ BASE_PATH = "/dli/performance"
 NO_DATA_DLI = par_sum_to_dli(MIN_INDOOR_PAR)
 
 
+def _runs(days: list[date]) -> list[tuple[date, date]]:
+    """Consecutive dates collapsed into (first, last) spans.
+
+    An outage is one period, not forty-six separate marks; shading it as a span
+    is what distinguishes "the sensor was off for six weeks" from "these days
+    happen to be missing".
+    """
+    spans: list[tuple[date, date]] = []
+    for day in sorted(days):
+        if spans and day - spans[-1][1] == timedelta(days=1):
+            spans[-1] = (spans[-1][0], day)
+        else:
+            spans.append((day, day))
+    return spans
+
+
 def _page(body: str) -> str:
     """This page's shell. Every exit renders the same frame, error or not."""
     return render_page(
@@ -207,7 +223,6 @@ async def dli_performance(
             f"rather than the sky dark.</p>"
         )
 
-    act = [actual_dli[d] for d in shared]
     pred = [predicted_dli[d] for d in shared]
 
     scored_act = [actual_dli[d] for d in scored]
@@ -222,33 +237,42 @@ async def dli_performance(
     mae = float(np.mean([abs(e) for e in scored_errs]))
     bias = float(np.mean(scored_errs))
 
-    # Line chart
+    # Line chart.
+    #
+    # An unscored day is drawn as a BREAK in the actual line, never as a zero.
+    # Plotting 0.0 asserts that the sensor measured no light, which is a claim
+    # about the greenhouse; a gap says only that nothing was measured. Over
+    # red's six-week 2026 outage the difference is the whole chart — 46 days of
+    # flat zero against a ~30 mol prediction reads as a broken model rather
+    # than an absent sensor.
+    was_scored = set(scored)
+    actual_line = [actual_dli[d] if d in was_scored else None for d in shared]
+
     fig_cmp = go.Figure()
-    fig_cmp.add_trace(go.Scatter(
-        x=shared, y=act,
-        name=actual_name, mode="lines+markers",
-        line={"color": "#3498db", "width": 2}, marker={"size": 6},
-        hovertemplate="%{y:.1f}<extra></extra>",
-    ))
     fig_cmp.add_trace(go.Scatter(
         x=shared, y=pred,
         name=predicted_name, mode="lines+markers",
         line={"color": "#e74c3c", "width": 2, "dash": "dash"}, marker={"size": 6},
         hovertemplate="%{y:.1f}<extra></extra>",
     ))
+    # `tonexty` fills to the trace above, and breaks wherever either side is
+    # None — so the band disappears across a gap instead of spanning it.
     fig_cmp.add_trace(go.Scatter(
-        x=list(shared) + list(reversed(shared)),
-        y=pred + list(reversed(act)),
-        fill="toself", fillcolor="rgba(231, 76, 60, 0.1)",
-        line={"width": 0}, showlegend=False, hoverinfo="skip",
+        x=shared, y=actual_line,
+        name=actual_name, mode="lines+markers",
+        line={"color": "#3498db", "width": 2}, marker={"size": 6},
+        fill="tonexty", fillcolor="rgba(231, 76, 60, 0.1)",
+        hovertemplate="%{y:.1f}<extra></extra>",
     ))
-    if no_data:
-        fig_cmp.add_trace(go.Scatter(
-            x=no_data, y=[0.0] * len(no_data),
-            name="No sensor data", mode="markers",
-            marker={"size": 9, "color": "#94a3b8", "symbol": "x"},
-            hovertemplate="%{x}<br>No sensor data — not scored<extra></extra>",
-        ))
+    for first, last in _runs(no_data):
+        # Half-day padding so a single excluded day is still a visible band.
+        fig_cmp.add_vrect(
+            x0=first - timedelta(hours=12), x1=last + timedelta(hours=12),
+            fillcolor="#94a3b8", opacity=0.18, line_width=0, layer="below",
+            annotation_text="no sensor data" if (last - first).days >= 2 else None,
+            annotation_position="top left",
+            annotation_font={"size": 10, "color": "#64748b"},
+        )
     fig_cmp.update_layout(
         title=f"Actual vs Predicted — {label}",
         yaxis_title="DLI (mol/m²/day)", height=400, hovermode="x unified",

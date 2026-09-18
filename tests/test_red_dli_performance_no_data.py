@@ -8,6 +8,7 @@ day and pulled the reported error down, while the absolute error and bias took
 the whole prediction as a miss. Both directions were wrong at once.
 """
 
+import json
 import re
 from datetime import UTC, date, datetime, timedelta
 
@@ -17,6 +18,7 @@ import pytest
 from wp6_data.red.dli.constants import MIN_INDOOR_PAR
 from wp6_data.red.dli.model import TwoStageLightModel
 from wp6_data.red.routes.dli import performance as perf
+from wp6_data.red.routes.dli.performance import _runs
 from wp6_data.shared.templates.config import configure_dashboard
 from wp6_data.shared.weather import DailyForecast, HourlyWeather
 
@@ -146,3 +148,56 @@ class TestNoDataDaysAreNotScored:
         # scale it by scored/total.
         diluted = mape * (len(DAYS) - len(DEAD_DAYS)) / len(DAYS)
         assert mape > diluted
+
+
+def _chart(html: str) -> tuple[list[dict], dict]:
+    """The comparison chart's traces and layout, as Plotly received them."""
+    blob = re.search(
+        r'Plotly\.newPlot\(\s*"[^"]+",\s*(\[.*?\]),\s*(\{.*?\}),\s*\{"responsive"',
+        html, re.S,
+    )
+    return json.loads(blob.group(1)), json.loads(blob.group(2))
+
+
+class TestOutagesAreDrawnAsAGapNotAZero:
+    """Plotting 0.0 claims the sensor measured no light. It measured nothing."""
+
+    async def test_the_actual_line_breaks_over_an_outage(self, page):
+        traces, _ = _chart(await page())
+        actual = next(t for t in traces if t["name"].startswith("Actual"))
+
+        assert sum(1 for v in actual["y"] if v is None) == len(DEAD_DAYS)
+
+    async def test_no_day_is_drawn_as_zero(self, page):
+        traces, _ = _chart(await page())
+        actual = next(t for t in traces if t["name"].startswith("Actual"))
+
+        assert not [v for v in actual["y"] if v == 0]
+
+    async def test_the_band_breaks_with_the_line(self, page):
+        """`toself` over a gap would span it; `tonexty` stops at the None."""
+        traces, _ = _chart(await page())
+        actual = next(t for t in traces if t["name"].startswith("Actual"))
+
+        assert actual["fill"] == "tonexty"
+
+    async def test_the_outage_is_shaded_as_one_span(self, page):
+        _, layout = _chart(await page())
+
+        assert len(layout.get("shapes", [])) == 1
+
+
+class TestRuns:
+    def test_consecutive_days_collapse_into_one_span(self):
+        """An outage is one period, not N separate marks."""
+        days = [date(2026, 5, 28) + timedelta(days=i) for i in range(5)]
+
+        assert _runs(days) == [(days[0], days[-1])]
+
+    def test_a_break_starts_a_new_span(self):
+        a, b = date(2026, 5, 28), date(2026, 6, 10)
+
+        assert _runs([a, a + timedelta(days=1), b]) == [(a, a + timedelta(days=1)), (b, b)]
+
+    def test_no_days_means_no_spans(self):
+        assert _runs([]) == []
