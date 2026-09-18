@@ -5,7 +5,7 @@ Stage 2: s1000 daily lux → daily indoor PAR sum (greenhouse transmission)
 
 Features:
 - Stage 1: direct_radiation_sum, diffuse_radiation_sum, cloud_cover_avg, day_of_year
-- Stage 2: lux_sum, day_of_year
+- Stage 2: lux_hours, day_of_year
 
 Trained on daily aggregates for better correlation (0.9+) vs hourly (0.7).
 Uses Ridge regression to handle correlated features.
@@ -27,12 +27,11 @@ from wp6_data.red.dli.aggregation import (
     align_weather_to_outdoor_daily,
     encode_day_of_year,
 )
-from wp6_data.red.dli.calculator import par_sum_to_dli
 from wp6_data.red.dli.constants import (
     DEFAULT_TRAINING_START,
     NATURAL_LIGHT_SENSOR,
-    SECONDS_PER_DAY,
     TOTAL_LIGHT_SENSOR,
+    UMOL_TO_MOL,
     WEATHER_STATION_SENSOR,
 )
 from wp6_data.red.fitting import (
@@ -51,7 +50,28 @@ from wp6_data.shared.artifacts import fingerprint
 # Bumped for a deliberate break: a change in the pickle layout, or in what the
 # stored numbers mean when their shape is unchanged. Unlike earlier revisions
 # this is an *equality* check, not a floor — see `load`.
-MODEL_VERSION = 8
+MODEL_VERSION = 10
+
+
+# What each stage is fitted on. Chosen by measurement, not argument: every
+# candidate was scored end to end, out of fold, across 4-10 fold counts
+# (MODEL_PAPER §5.6).
+#
+# Stage 1 gets global horizontal irradiance and nothing else. The radiation *is*
+# the season, so any calendar feature alongside it lets ridge spread weight
+# across the two, leaving the radiation coefficient too small to separate a
+# bright day from a dull one within a month — which is what clipped the summer
+# peaks. The effect is not about the term being crude: an exact top-of-atmosphere
+# envelope scored worse than no seasonal feature at all. Beam and diffuse are
+# split in stage 2's world because they transmit through glass differently;
+# stage 1 never sees glass, and splitting them there only costs it.
+STAGE1_FEATURES: tuple[str, ...] = ("shortwave_sum",)
+
+# Stage 2 keeps its day-of-year term — the one place a seasonal feature earns
+# its place, standing in for the angle sunlight strikes the glass at. Dropping
+# it, and swapping it for a clear-sky index, each made the *chain* worse even
+# where they improved the stage in isolation.
+STAGE2_FEATURES: tuple[str, ...] = ("lux_hours", "day_of_year_sin", "day_of_year_cos")
 
 
 def fit_fingerprint() -> str:
@@ -71,7 +91,9 @@ def fit_fingerprint() -> str:
             TOTAL_LIGHT_SENSOR,
             WEATHER_STATION_SENSOR,
             # What `train_model_from_db` asks OpenMeteo for.
-            ["direct_radiation", "diffuse_radiation"],
+            ["shortwave_radiation", "cloud_cover"],
+            list(STAGE1_FEATURES),
+            list(STAGE2_FEATURES),
         ]
     )
 
@@ -193,7 +215,7 @@ class TwoStageLightModel:
         Output: daily sum of lux (calibrated to local weather station)
 
     Stage 2: Daily s1000 lux → daily indoor PAR
-        Input: lux_sum, day_of_year_sin, day_of_year_cos
+        Input: lux_hours, day_of_year_sin, day_of_year_cos
         Output: daily sum of indoor PAR (μmol/m²/day, convert to DLI by /1e6*3600)
 
     Uses Ridge regression to handle correlated features.
@@ -204,15 +226,10 @@ class TwoStageLightModel:
         self.stage1_model = None  # OpenMeteo → daily lux
         self.stage2_model = None  # daily lux → daily indoor PAR
         self.stats: ModelStats | None = None
-        # Extended feature set for better predictions
-        self.stage1_features = [
-            "direct_radiation_sum",
-            "diffuse_radiation_sum",
-            "cloud_cover_avg",
-            "day_of_year_sin",
-            "day_of_year_cos",
-        ]
-        self.stage2_features = ["lux_sum", "day_of_year_sin", "day_of_year_cos"]
+        # Overwritten by `train` or `load`; the declared sets are the default so
+        # an untrained instance cannot describe a shape nothing was fitted to.
+        self.stage1_features = list(STAGE1_FEATURES)
+        self.stage2_features = list(STAGE2_FEATURES)
         # Feature transformers
         self.stage1_poly = None
         self.stage2_poly = None
@@ -254,14 +271,8 @@ class TwoStageLightModel:
             ModelStats with both stage statistics
         """
         # Reset feature lists to full extended set (may have been overwritten by load())
-        candidate_s1_features = [
-            "direct_radiation_sum",
-            "diffuse_radiation_sum",
-            "cloud_cover_avg",
-            "day_of_year_sin",
-            "day_of_year_cos",
-        ]
-        candidate_s2_features = ["lux_sum", "day_of_year_sin", "day_of_year_cos"]
+        candidate_s1_features = list(STAGE1_FEATURES)
+        candidate_s2_features = list(STAGE2_FEATURES)
 
         # Aggregate to daily and align (Stage 1)
         stage1_data = self._align_weather_to_outdoor_daily(weather_df, outdoor_df)
@@ -294,7 +305,7 @@ class TwoStageLightModel:
         # a weather system, so a random split trains on the test set's
         # neighbours and every score comes back flattering.
         X1 = stage1_data[available_s1_features].to_numpy(dtype=float)
-        y1 = stage1_data["lux_sum"].to_numpy(dtype=float)
+        y1 = stage1_data["lux_hours"].to_numpy(dtype=float)
         days1 = stage1_data["date"].to_numpy()
 
         self.stage1_poly = None  # No polynomial features (simpler model)
@@ -307,7 +318,7 @@ class TwoStageLightModel:
         # Train Stage 2: daily lux → daily indoor PAR
         available_s2_features = [f for f in candidate_s2_features if f in stage2_data.columns]
         X2 = stage2_data[available_s2_features].to_numpy(dtype=float)
-        y2 = stage2_data["par_sum"].to_numpy(dtype=float)
+        y2 = stage2_data["par_integral"].to_numpy(dtype=float)
         days2 = stage2_data["date"].to_numpy()
 
         self.stage2_poly = None  # No polynomial features
@@ -399,7 +410,7 @@ class TwoStageLightModel:
 
         Returns ``None`` when the two stages share too few days to fold.
         """
-        if "lux_sum" not in s2_features:
+        if "lux_hours" not in s2_features:
             return None
 
         predicted_lux = {
@@ -411,7 +422,7 @@ class TwoStageLightModel:
         if has_lux.sum() < DEFAULT_CV_FOLDS:
             return None
 
-        lux_column = s2_features.index("lux_sum")
+        lux_column = s2_features.index("lux_hours")
         X2_chain = X2.copy()
         X2_chain[has_lux, lux_column] = [predicted_lux[day] for day in days2[has_lux]]
 
@@ -451,11 +462,12 @@ class TwoStageLightModel:
 
     def predict_daily(
         self,
-        direct_radiation_sum: float,
+        direct_radiation_sum: float | None = None,
         diffuse_radiation_sum: float | None = None,
         cloud_cover_avg: float | None = None,
         day_of_year: int | None = None,
         *,
+        shortwave_sum: float | None = None,
         at_plant_level: bool = True,
     ) -> float:
         """Predict daily indoor PAR sum from OpenMeteo daily forecast.
@@ -472,10 +484,13 @@ class TwoStageLightModel:
         underpredicts by 38%, when nothing is wrong with the model at all.
 
         Args:
-            direct_radiation_sum: Daily sum of direct_radiation (W/m² summed over hours)
+            direct_radiation_sum: Daily sum of direct_radiation (only needed by
+                models fitted before v9)
             diffuse_radiation_sum: Daily sum of diffuse_radiation (optional)
             cloud_cover_avg: Daily average cloud cover % (optional)
             day_of_year: Day of year 1-365 (optional, defaults to today)
+            shortwave_sum: Daily sum of global horizontal irradiance, which is
+                what stage 1 is fitted on from v9 onward
             at_plant_level: Convert the above-lamp prediction to the plant-level
                 position. Default, because that is the light a grower asks about
                 and what the lamp contribution is added to. Pass ``False`` to
@@ -503,6 +518,7 @@ class TwoStageLightModel:
         # never produced, and the result reads like a working prediction. Refuse
         # instead, so a caller that forgets one finds out.
         feature_values = {
+            "shortwave_sum": shortwave_sum,
             "direct_radiation_sum": direct_radiation_sum,
             "diffuse_radiation_sum": diffuse_radiation_sum,
             "cloud_cover_avg": cloud_cover_avg,
@@ -529,7 +545,7 @@ class TwoStageLightModel:
 
         # Build Stage 2 feature vector
         s2_feature_values = {
-            "lux_sum": predicted_lux_sum,
+            "lux_hours": predicted_lux_sum,
             "day_of_year_sin": day_sin,
             "day_of_year_cos": day_cos,
         }
@@ -553,12 +569,13 @@ class TwoStageLightModel:
 
     def predict_dli(
         self,
-        direct_radiation_sum: float,
+        direct_radiation_sum: float | None = None,
         diffuse_radiation_sum: float | None = None,
         cloud_cover_avg: float | None = None,
         day_of_year: int | None = None,
-        readings_per_day: int = 144,  # Assuming 10-min intervals
+        readings_per_day: int = 144,  # unused from v10; kept for callers
         *,
+        shortwave_sum: float | None = None,
         at_plant_level: bool = True,
     ) -> float:
         """Predict DLI (mol/m²/day) from OpenMeteo daily forecast.
@@ -568,25 +585,27 @@ class TwoStageLightModel:
             diffuse_radiation_sum: Daily sum of diffuse_radiation (optional)
             cloud_cover_avg: Daily average cloud cover % (optional)
             day_of_year: Day of year 1-365 (optional, defaults to today)
-            readings_per_day: Expected number of PAR readings per day
+            readings_per_day: Ignored from v10 — stage 2 predicts a time
+                integral, so no cadence is assumed
             at_plant_level: Which sensor position to predict for; see
                 :meth:`predict_daily`.
 
         Returns:
             Predicted DLI in mol/m²/day
         """
-        par_sum = self.predict_daily(
+        par_integral = self.predict_daily(
             direct_radiation_sum,
             diffuse_radiation_sum=diffuse_radiation_sum,
             cloud_cover_avg=cloud_cover_avg,
             day_of_year=day_of_year,
+            shortwave_sum=shortwave_sum,
             at_plant_level=at_plant_level,
         )
 
-        # A day's worth of readings at this cadence; the conversion itself lives
-        # in `calculator.par_sum_to_dli` rather than being spelled out again here.
-        interval_seconds = SECONDS_PER_DAY / readings_per_day
-        return round(par_sum_to_dli(par_sum, interval_seconds), 2)
+        # Stage 2 predicts an integral in μmol/m², so DLI is a plain unit
+        # conversion. From v10 there is no reading-cadence assumption left in
+        # this path: `readings_per_day` only ever stood in for one.
+        return round(par_integral / UMOL_TO_MOL, 2)
 
     def save(self, path: Path | None = None) -> Path:
         """Save model to disk."""

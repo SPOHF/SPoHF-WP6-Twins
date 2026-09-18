@@ -14,6 +14,7 @@ from wp6_data.red.dli.calculator import (
     calculate_hourly_par,
     estimate_hourly_natural_par,
     hourly_par_sum_to_dli,
+    integrate_over_time,
     par_sum_to_dli,
 )
 from wp6_data.red.dli.constants import (
@@ -22,7 +23,9 @@ from wp6_data.red.dli.constants import (
     DEFAULT_PHOTOPERIOD_THRESHOLD,
     DEFAULT_TRAINING_START,
     MIN_INDOOR_PAR,
+    MIN_INDOOR_PAR_INTEGRAL,
     MIN_OUTDOOR_LUX,
+    MIN_OUTDOOR_LUX_HOURS,
     NATURAL_LIGHT_SENSOR,
     PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT,
     PERFORMANCE_ERROR_WARN_THRESHOLD_PCT,
@@ -58,7 +61,9 @@ __all__ = [
     "DEFAULT_PERFORMANCE_LOOKBACK_DAYS",
     "DEFAULT_TRAINING_START",
     "MIN_INDOOR_PAR",
+    "MIN_INDOOR_PAR_INTEGRAL",
     "MIN_OUTDOOR_LUX",
+    "MIN_OUTDOOR_LUX_HOURS",
     "NATURAL_LIGHT_SENSOR",
     "PERFORMANCE_ERROR_HIGH_THRESHOLD_PCT",
     "PERFORMANCE_ERROR_WARN_THRESHOLD_PCT",
@@ -74,6 +79,7 @@ __all__ = [
     "calculate_hourly_par",
     "estimate_hourly_natural_par",
     "hourly_par_sum_to_dli",
+    "integrate_over_time",
     "par_sum_to_dli",
     # Aggregation functions
     "add_day_of_year_features",

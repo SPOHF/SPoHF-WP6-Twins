@@ -52,11 +52,14 @@ async def train_model_from_db(db: MySQLConnection, weather_client: OpenMeteoClie
     if outdoor_df.empty:
         raise ValueError(f"No weather station data ({WEATHER_STATION_SENSOR}) found for training")
 
-    weather_df = await weather_client.get_historical_dataframe_multi(
-        start_dt.date(),
-        end_dt.date(),
-        radiation_var="direct_radiation",
-        include_diffuse=True,
+    # Stage 1 is fitted on global horizontal irradiance alone. Asking for the
+    # column by name — rather than through the generic radiation slot, which
+    # renames whatever it is given to `solar_radiation` — is what stops a beam
+    # series being fitted as though it were shortwave.
+    weather_df = await weather_client.get_hourly(
+        ["shortwave_radiation", "cloud_cover"],
+        start=start_dt.date(),
+        end=end_dt.date(),
     )
     if weather_df.empty:
         raise ValueError("No OpenMeteo weather data found for training")

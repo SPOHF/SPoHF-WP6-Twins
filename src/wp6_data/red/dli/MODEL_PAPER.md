@@ -258,21 +258,119 @@ All features are standardized (zero mean, unit variance) before Ridge regression
 
 **Result:** This is the current production model with the best real-world prediction accuracy.
 
+### 5.5 Summing readings instead of integrating time (bug, fixed — v10)
+
+**Approach (v4-v9):** a daily total was `groupby("date").sum()` over the raw
+sensor rows — `lux_sum` for stage 1's target, `par_sum` for stage 2's.
+
+**Result:** the target measured how often the sensor reported, not how much light
+there was. Red's s1000 fell from ~270 readings a day to **97 in June 2026** while
+its mean lux was the highest of the year; its summed daily lux collapsed to a
+third on the brightest days of the year. Stage 1 was being asked to predict a
+sampling schedule from the weather, which is why it had no out-of-fold skill at
+all (R² −0.04, worse than its own mean).
+
+It also flattered stage 2. Both its input and its target were reading-sums from
+sensors behind the same gateway, so the cadence artefact partly cancelled
+between them: stage 2's honest out-of-fold R² is 0.978, but it reached that only
+once *both* sides were integrals. Fixing one side alone dropped it to 0.852.
+
+**Fix:** `calculator.integrate_over_time` — a trapezoidal integral over the
+timestamps, in one place, used by `calculate_daily_dli` and by both daily
+aggregates. Stage 1's target is now lux-hours and stage 2's is a PAR integral in
+μmol/m², which also removes the last reading-cadence assumption from
+`predict_dli`: a DLI is that integral divided by 10⁶, with no `readings_per_day`
+in it.
+
+**Lesson:** a daily total of a sampled quantity is an integral. A sum of rows is
+a measurement of the sampler.
+
+### 5.6 Seasonal features in stage 1 (rejected — measured, not argued)
+
+Stage 1 carried `day_of_year_sin/cos` from v5. Holding the weather constant and
+moving only the date, the fitted chain predicted **×2.15** more light in June
+than December — while a **16×** change in actual beam radiation moved it only
+×1.74. The calendar outweighed the weather, so within any month the model could
+barely tell a brilliant day from a dull one, and it regressed to the seasonal
+mean. That is what clipped the summer peaks.
+
+The cause is collinearity, not a bad approximation: radiation and day-of-year say
+the same thing over a year, ridge spreads weight across both, and the radiation
+coefficient is left too small. Every candidate was scored end to end, out of
+fold, across 4-10 fold counts (chain skill against persistence, mean):
+
+| stage 1 features | mean | min |
+|---|---|---|
+| shortwave alone | **+0.239** | +0.213 |
+| direct + diffuse + cloud | +0.232 | +0.198 |
+| shortwave + cloud | +0.227 | +0.209 |
+| clear-sky index + TOA envelope + beam + cloud | +0.185 | +0.152 |
+| clear-sky index + TOA envelope + cloud | +0.124 | +0.106 |
+| direct + diffuse + cloud + day-of-year (v5-v9) | +0.069 | −0.018 |
+
+An **exact** top-of-atmosphere envelope from OpenMeteo's `terrestrial_radiation`
+scored *worse* than no seasonal feature at all, so this is not about the harmonic
+being crude — it is that stage 1 must carry no calendar term of any kind. The
+radiation already is the season.
+
+Beam and diffuse were split in §4.3 because they transmit through glass
+differently. That is stage 2's concern: stage 1 maps a modelled sky onto a lux
+sensor standing in the open, where no glass is involved, and splitting them there
+only costs it. Stage 1 is now **global horizontal irradiance alone**.
+
+Stage 2 keeps its day-of-year term — the one place a seasonal feature earns its
+place, standing in for the angle sunlight strikes the glass at. Dropping it, and
+swapping it for a clear-sky index, each made the *chain* worse even where they
+improved the stage in isolation.
+
 ## 6. Performance
 
 ### 6.1 Version Evolution
 
-| Version | Stage 1 R² | Stage 2 R² | Combined R² | Target | Changes |
-|---------|------------|------------|-------------|--------|---------|
-| v4 | 0.757 | 0.834 | 0.631 | s2100-01-par | Single feature (direct_radiation_sum) |
-| v5 | 0.786 | 0.914 | 0.719 | s2100-01-par | +diffuse, +cloud_cover, +day_of_year, Ridge |
-| v6 (rejected) | 0.800 | 0.978 | 0.783 | s2100-01-par | +polynomial features (overfit) |
-| v6 (final) | 0.786 | 0.914 | 0.719 | s2100-01-par | Reverted to linear, kept RidgeCV |
-| v7 | 0.786 | 0.914 | 0.719 | s2100-01-par | +attenuation factor (×factor) for plant-level |
+Everything from v8 is **out-of-fold** on day-blocked folds, scored through
+`red/fitting.py`. Earlier figures are in-sample and not comparable; they are kept
+to show what the gap was.
 
-**Note:** Combined R² = Stage1_R² × Stage2_R² (error compounds through stages). The attenuation factor does not affect R² since it's a constant multiplier applied post-prediction.
+| Version | Stage 1 | Stage 2 | Chain | Changes |
+|---------|---------|---------|-------|---------|
+| v5-v7 | 0.786* | 0.914* | 0.719* | *in-sample; chain was the product of the two |
+| v8 | −0.036 | 0.977 | 0.655 | first out-of-fold scores; chain measured, not derived |
+| v9 | 0.213 | 0.977 | 0.805 | stage 1 loses its day-of-year term (§5.6) |
+| **v10** | **0.917** | **0.978** | **0.926** | daily totals are time integrals (§5.5) |
 
-### 6.2 Correlation Analysis
+Skill against the baselines, v10, out-of-fold:
+
+| Stage | vs persistence | vs climatology |
+|---|---|---|
+| 1 — weather → s1000 lux | +0.532 | +0.684 |
+| 2 — lux → indoor PAR | +0.735 | +0.829 |
+| **chain — weather → indoor PAR** | **+0.517** | **+0.688** |
+
+At v7 the chain was level with "same as yesterday" (−0.018 against persistence)
+while reporting a combined R² of 0.719. The product was never a bound on
+anything: it assumed an error propagation nobody had measured, and credited
+stage 2 with an input it never receives. The chain figure above is obtained by
+fitting stage 2 on measured lux and predicting held-out days from stage 1's
+*predicted* lux, which is what serving does.
+
+### 6.2 Summer peaks
+
+The symptom that started the v9/v10 work: on the brightest days the measured DLI
+ran far above the prediction. Over 2026-07-13 → 09-10, above-lamp, the eight
+brightest days:
+
+| | mean bias on the 8 brightest | MAPE, all 60 days |
+|---|---|---|
+| v8 | −30.6% | 23.4% |
+| v9 (no seasonal term in stage 1) | −19.9% | 19.0% |
+| **v10 (+ time integrals)** | **−12.3%** | **18.9%** |
+
+A residual compression remains — the model still underpredicts the top of the
+range and overpredicts the bottom. Stage 2 is now the place to look: it is linear
+in lux, and the brightest days are where a linear transmission model has least
+room.
+
+### 6.3 Correlation Analysis
 
 | Level | Pearson r | Notes |
 |-------|-----------|-------|
@@ -282,9 +380,11 @@ All features are standardized (zero mean, unit variance) before Ridge regression
 ## 7. Limitations
 
 ### 7.1 Sample Size
-- ~88 days of training data limits model complexity
-- Cannot reliably fit interaction terms or non-linear models
-- Seasonal coverage may be incomplete (training started November 2025)
+- ~317 days for stage 1 and ~271 for stage 2 (training starts 2025-11-01)
+- Still thin for anything richer than a regularised linear fit; §5.3's
+  polynomial failure was at 88 days, and the margin has not grown much
+- One full year of seasonal coverage, no more: nothing here has been validated
+  against a second spring
 
 ### 7.2 Sensor Specificity
 - Model is trained for specific sensor positions
@@ -316,6 +416,6 @@ By aggregating to daily resolution and using regularized linear regression, we a
 
 ---
 
-*Model Version: 7 (RidgeCV + attenuation factor)*
-*Training Date: February 2026*
+*Model Version: 10 (time-integrated daily totals, no seasonal term in stage 1)*
+*Results above measured 2026-09-18*
 *Data Range: November 2025 – February 2026*

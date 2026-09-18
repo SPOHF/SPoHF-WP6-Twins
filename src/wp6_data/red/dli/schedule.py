@@ -93,6 +93,7 @@ def predict_natural_dli_from_weather(
             diffuse_radiation_sum=f.diffuse_radiation_sum,
             cloud_cover_avg=f.avg_cloud_cover,
             day_of_year=f.date.timetuple().tm_yday,
+            shortwave_sum=f.total_radiation,
             at_plant_level=at_plant_level,
         )
         for f in forecasts

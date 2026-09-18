@@ -43,8 +43,8 @@ class _Stage:
 
 def _model() -> TwoStageLightModel:
     model = TwoStageLightModel()
-    model.stage1_features = ["direct_radiation_sum"]
-    model.stage2_features = ["lux_sum"]
+    model.stage1_features = ["shortwave_sum"]
+    model.stage2_features = ["lux_hours"]
     model.stage1_model = _Stage(5000.0)
     model.stage2_model = _Stage(100_000.0)
     model.stage1_scaler = model.stage2_scaler = None

@@ -85,7 +85,7 @@ class TestMissingFeaturesAreRefused:
         model.stage1_features = [
             "direct_radiation_sum", "diffuse_radiation_sum", "cloud_cover_avg",
         ]
-        model.stage2_features = ["lux_sum"]
+        model.stage2_features = ["lux_hours"]
         model.stage1_model = object()
         model.stage2_model = object()
         return model
@@ -120,6 +120,6 @@ class TestMissingFeaturesAreRefused:
 
         model.stage1_model = _Stage()
         model.stage2_model = _Stage()
-        model.stage2_features = ["lux_sum"]
+        model.stage2_features = ["lux_hours"]
 
         assert model.predict_daily(100.0) >= 0.0

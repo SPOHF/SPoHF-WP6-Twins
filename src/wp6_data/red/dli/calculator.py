@@ -62,6 +62,30 @@ def estimate_hourly_natural_par(
     return natural_par
 
 
+def integrate_over_time(times, values) -> float:
+    """Trapezoidal integral of a sampled series, in value-seconds.
+
+    The one place a daily total is turned into a quantity of *light* rather than
+    a quantity of *readings*. Summing raw samples silently measures the sampling
+    rate: red's s1000 dropped from ~270 readings a day to 97 in June 2026 while
+    its mean lux was the year's highest, so its summed daily lux collapsed to a
+    third on the brightest days of the year. Integrating over the timestamps is
+    indifferent to that.
+
+    ``times`` may be datetimes or numpy datetime64; ``values`` the samples.
+    Returns 0.0 for fewer than two samples, which cannot bound an interval.
+    """
+    values = np.asarray(values, dtype=float)
+    if len(values) < 2:
+        return 0.0
+    # Elapsed seconds via pandas rather than numpy dtype arithmetic: a tz-aware
+    # column becomes an object array of Timestamps under `.to_numpy()`, which
+    # will not subtract, and the naive/aware mix differs by caller.
+    stamps = pd.to_datetime(pd.Series(times), utc=True)
+    seconds = (stamps - stamps.iloc[0]).dt.total_seconds().to_numpy()
+    return float(np.trapezoid(values, seconds))
+
+
 def par_sum_to_dli(
     par_sum: float, seconds_per_reading: float = READING_INTERVAL_SECONDS
 ) -> float:
@@ -186,10 +210,8 @@ def calculate_daily_dli(df: pd.DataFrame) -> pd.DataFrame:
         # Convert times to seconds from start of day
         time_seconds = (times - times[0]).astype("timedelta64[s]").astype(float)
 
-        # Trapezoidal integration: ∫PAR dt in μmol/m²
-        # Then convert to mol/m²/day by dividing by 1,000,000
-        integrated = np.trapezoid(par_values, time_seconds)
-        dli = integrated / UMOL_TO_MOL
+        # ∫PAR dt in μmol/m², then mol/m²/day.
+        dli = integrate_over_time(times, par_values) / UMOL_TO_MOL
 
         # Calculate average PAR (only during non-zero periods)
         non_zero = par_values[par_values > 0]

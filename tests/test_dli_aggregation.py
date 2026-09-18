@@ -161,7 +161,7 @@ class TestAlignWeatherToOutdoorDaily:
         weather = self._weather_df()
         outdoor = self._outdoor_df()
         result = align_weather_to_outdoor_daily(weather, outdoor)
-        assert "lux_sum" in result.columns
+        assert "lux_hours" in result.columns
         assert "direct_radiation_sum" in result.columns
 
     def test_renames_solar_to_direct(self):
@@ -205,13 +205,13 @@ class TestAlignOutdoorToIndoorDaily:
 
     def test_returns_merged_data(self):
         result = align_outdoor_to_indoor_daily(self._outdoor_df(), self._indoor_df())
-        assert "lux_sum" in result.columns
-        assert "par_sum" in result.columns
+        assert "lux_hours" in result.columns
+        assert "par_integral" in result.columns
 
     def test_handles_value_column(self):
         # Indoor df uses 'value' column
         result = align_outdoor_to_indoor_daily(self._outdoor_df(), self._indoor_df())
-        assert "par_sum" in result.columns
+        assert "par_integral" in result.columns
 
     def test_filters_low_lux(self):
         outdoor = pd.DataFrame({
@@ -224,7 +224,7 @@ class TestAlignOutdoorToIndoorDaily:
     def test_filters_low_par(self):
         indoor = pd.DataFrame({
             "time": pd.date_range("2026-01-01", periods=24, freq="h", tz="UTC"),
-            "value": [1] * 24,  # Sum = 24, below threshold of 100
+            "value": [0.1] * 24,  # integral ~8,280 umol/m2, below the gate
         })
         result = align_outdoor_to_indoor_daily(self._outdoor_df(), indoor)
         assert len(result) == 0
