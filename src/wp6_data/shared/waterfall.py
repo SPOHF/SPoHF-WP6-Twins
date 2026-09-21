@@ -11,11 +11,12 @@ of weather reads as a band of colour cutting across precisely the cohorts it
 touched — and it makes data coverage self-evident, because a day with no reading
 leaves the pale bar showing through rather than being silently averaged over.
 
-Each lane's outcome values are written on small chips at the *end* of its bar —
-where the outcome was observed, when the cohort completed. A chip's fill says
-where its value sits against every other value on show, so the highest and
-lowest readings of a season are findable without reading a single number; its
-outline says which series it belongs to.
+Each lane's outcome values are written on small chips just past the *end* of its
+bar — where the outcome was observed, when the cohort completed — and outside it,
+so the number never hides the climate that produced it. A chip's fill says where
+its value sits against every other value on show, so the highest and lowest
+readings of a season are findable without reading a single number; its outline
+says which series it belongs to.
 
 Two consequences of projecting rather than drawing a separate strip:
 
@@ -56,9 +57,25 @@ VALUE_FONT_SIZE = 10
 # Purple appears nowhere in COLOR_SCALE, so the two readings never blur into
 # one another — a chip is never mistaken for the bar behind it.
 VALUE_SCALE = ("#f3e8ff", "#d8b4fe", "#a855f7", "#7e22ce", "#581c87")
-# Chips sharing one bar's harvest end are stacked leftwards by this many pixels,
-# so their spacing does not change with the zoom level or the season's length.
-CHIP_PITCH = 34
+# Chips sit *past* the harvest end rather than on the bar: their width is fixed
+# in pixels while a bar's is fixed in days, so on a multi-season axis a stack of
+# chips would blot out the last weeks of the very climate the lane exists to
+# show. Successive chips step rightwards in pixels, so their spacing does not
+# change with the zoom level or the season's length.
+CHIP_BORDER_WIDTH = 1.5
+CHIP_BORDER_PAD = 2
+# Clear space between two chips sharing one harvest end.
+CHIP_GAP = 7
+# Plotly exposes no text metrics, so a chip's width is estimated from its text.
+# The estimate is deliberately the *widest* of Plotly's default font stack
+# (Open Sans, Verdana, Arial) rather than an average: which face a browser
+# actually resolves is not ours to know, and a pitch a pixel too wide is
+# invisible where one a pixel too narrow overprints. Verdana has the widest
+# digits of the three at 0.636 em; separators are roughly half that.
+DIGIT_EM = 0.64
+SEPARATOR_EM = 0.34
+# Room for the colorbar. Chips overhang into it, so it grows with the stack.
+MARGIN_RIGHT = 90
 
 
 @dataclass(frozen=True)
@@ -142,6 +159,39 @@ def value_color(value: float, span: tuple[float, float]) -> str:
     step = t * (len(VALUE_SCALE) - 1)
     i = min(int(step), len(VALUE_SCALE) - 2)
     return _mix(VALUE_SCALE[i], VALUE_SCALE[i + 1], step - i)
+
+
+def _chip_text(marker: Marker) -> str:
+    """What a chip reads — the single place the value is formatted.
+
+    Both the drawing and the width estimate go through here, so a change to the
+    format can never leave the spacing measuring a different string.
+    """
+    return f"{marker.value:g}"
+
+
+def chip_pitch(lanes: list[Lane]) -> int:
+    """Pixels between two chips sharing one harvest end.
+
+    Derived from the widest value actually on show, not fixed: a chip is sized
+    by its own text, so a constant step tuned to ``8.4`` leaves ``135.7`` and
+    its neighbour overprinting. Taking the widest rather than each chip's own
+    width keeps the stack on a regular grid, which reads as a column of values
+    instead of a ragged run.
+    """
+    widest = max(
+        (
+            sum(
+                DIGIT_EM if ch.isdigit() else SEPARATOR_EM
+                for ch in _chip_text(marker)
+            )
+            for lane in lanes
+            for marker in lane.markers
+        ),
+        default=0.0,
+    )
+    box = widest * VALUE_FONT_SIZE + 2 * (CHIP_BORDER_PAD + CHIP_BORDER_WIDTH)
+    return round(box + CHIP_GAP)
 
 
 def series_colors(lanes: list[Lane]) -> dict[str, str]:
@@ -255,18 +305,24 @@ def _projection(lanes, pos, rows, by_day):
     return days, z
 
 
-def _value_chips(lanes, pos, colors, span, marker_label):
-    """One annotation per outcome value, at the end of its lane's bar.
+def _value_chips(lanes, pos, colors, span, marker_label, pitch):
+    """One annotation per outcome value, just past the end of its lane's bar.
 
     The end is where the value came from: an outcome is observed when the cohort
     *completes* (see ``cycles.cohort_for_date``, which attaches an observation to
     the cohort whose completion window contains it), so a chip drawn part-way
     along the bar would claim it was measured mid-development.
 
-    Several series share one harvest end, so they stack leftwards from it in
-    pixels — a date offset would open and close as the axis rescaled. The chip's
-    fill is where its value sits in ``span``; its outline is which series it
-    belongs to.
+    They sit *outside* the bar rather than on it. A chip is a fixed number of
+    pixels wide and a bar is a fixed number of days, so once several cycles share
+    one axis the stack covers the bar's final weeks — hiding the ripening climate
+    behind the very number it produced, and putting the mark back in the
+    mid-development position the paragraph above rules out.
+
+    Several series share one harvest end, so they step rightwards from it in
+    pixels — a date offset would open and close as the axis rescaled — reading
+    left to right in the same order a caller legends them. The chip's fill is
+    where its value sits in ``span``; its outline is which series it belongs to.
     """
     order = list(colors)
     chips = []
@@ -277,16 +333,17 @@ def _value_chips(lanes, pos, colors, span, marker_label):
             chips.append(
                 dict(
                     x=lane.cohort.end, y=row, xref="x", yref="y",
-                    xanchor="right",
-                    # Rightmost series sits flush with the harvest date; earlier
-                    # ones step back one pitch each. The extra 2px keeps the
-                    # chip's edge off the bar's.
-                    xshift=-((len(order) - 1 - idx) * CHIP_PITCH) - 2,
-                    text=f"{marker.value:g}", showarrow=False,
+                    xanchor="left",
+                    # First series sits just clear of the harvest date; later
+                    # ones step forward one pitch each. The gap keeps the chip's
+                    # edge off the bar's instead of fusing with it.
+                    xshift=idx * pitch + CHIP_GAP,
+                    text=_chip_text(marker), showarrow=False,
                     font=dict(size=VALUE_FONT_SIZE, color=_ink(fill)),
                     bgcolor=fill,
-                    bordercolor=colors[marker.series], borderwidth=1.5,
-                    borderpad=2,
+                    bordercolor=colors[marker.series],
+                    borderwidth=CHIP_BORDER_WIDTH,
+                    borderpad=CHIP_BORDER_PAD,
                     hovertext=(
                         f"{lane.cohort.label} · "
                         f"{marker.label or marker.series or marker_label}: "
@@ -361,8 +418,17 @@ def render_waterfall(
 
     shapes, annotations = _group_decorations(lanes, pos)
     span = value_range(lanes)
+    # The chips overhang the last lane's bar, so the right margin has to hold
+    # the whole stack. The colorbar shares that margin without contention: lanes
+    # run oldest-first from the top, so a bar reaching the right edge is always
+    # near the bottom, while the colorbar sits in the top fifth.
+    gutter = 0
     if span is not None:
-        annotations += _value_chips(lanes, pos, colors, span, marker_label)
+        pitch = chip_pitch(lanes)
+        annotations += _value_chips(
+            lanes, pos, colors, span, marker_label, pitch
+        )
+        gutter = len(colors) * pitch + CHIP_GAP
 
     first = min(lane.cohort.start for lane in lanes)
     last = max(lane.cohort.end for lane in lanes)
@@ -373,7 +439,7 @@ def render_waterfall(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         height=ROW_HEIGHT * rows + 140,
-        margin=dict(l=190, r=90, t=30, b=40),
+        margin=dict(l=190, r=MARGIN_RIGHT + gutter, t=30, b=40),
         shapes=bars + shapes, annotations=annotations,
         hovermode="closest",
         showlegend=False,

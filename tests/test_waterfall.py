@@ -13,11 +13,17 @@ import pandas as pd
 
 from wp6_data.shared.cycles import CohortSpec, CycleSpec, generate_cohorts
 from wp6_data.shared.waterfall import (
+    CHIP_BORDER_PAD,
+    CHIP_BORDER_WIDTH,
+    CHIP_GAP,
     LANE_COLOR,
+    MARGIN_RIGHT,
     VALUE_COLORS,
+    VALUE_FONT_SIZE,
     VALUE_SCALE,
     Lane,
     Marker,
+    chip_pitch,
     render_waterfall,
     series_colors,
     value_color,
@@ -35,8 +41,8 @@ def _lanes(n: int = 4) -> list[Lane]:
     return [Lane(cohort=c) for c in generate_cohorts(CYCLE, SPEC)[:n]]
 
 
-def _annotations(html: str) -> list[dict]:
-    """The figure's layout annotations — the value chips live here, not in a trace.
+def _layout(html: str) -> dict:
+    """The figure's layout object, parsed out of the rendered Plotly call.
 
     Asserting on the rendered JSON rather than on substrings matters for
     placement: every date in the span appears in the projection's x array, so
@@ -63,7 +69,24 @@ def _annotations(html: str) -> list[dict]:
         if depth == 0:
             break
         k += 1
-    return json.loads(html[layout_start:k + 1]).get("annotations", [])
+    return json.loads(html[layout_start:k + 1])
+
+
+def _annotations(html: str) -> list[dict]:
+    """The figure's value chips — they live in the layout, not in a trace."""
+    return _layout(html).get("annotations", [])
+
+
+# Verdana has the widest digits in Plotly's default font stack. Measuring the
+# guard against that, rather than against the module's own DIGIT_EM, is what
+# keeps these tests from simply restating the estimate they exist to check.
+VERDANA_DIGIT_EM = 0.636
+
+
+def _widest_box(texts) -> float:
+    """Pixels the widest of ``texts`` occupies, border box included."""
+    widest = max(len(text) for text in texts) * VERDANA_DIGIT_EM
+    return widest * VALUE_FONT_SIZE + 2 * (CHIP_BORDER_PAD + CHIP_BORDER_WIDTH)
 
 
 def _daily() -> pd.DataFrame:
@@ -122,7 +145,29 @@ class TestRenderWaterfall:
                  if a.get("text") == "3.9"]
         assert len(chips) == 1
         assert chips[0]["x"] == cohort.end.isoformat()
-        assert chips[0]["xanchor"] == "right"
+
+    def test_a_chip_sits_clear_of_the_bar_it_belongs_to(self):
+        """A chip on the bar would hide the climate that produced its value."""
+        lanes = _lanes(1)
+        lanes[0] = Lane(cohort=lanes[0].cohort, markers=[Marker(3.9, "Brix-ish")])
+        chips = [a for a in _annotations(render_waterfall(lanes, _daily()))
+                 if a.get("text") == "3.9"]
+        # Anchored left of the harvest date and pushed further right: every
+        # pixel of the chip lands beyond the bar's end, none of it over the bar.
+        assert chips[0]["xanchor"] == "left"
+        assert chips[0]["xshift"] > 0
+
+    def test_the_margin_makes_room_for_the_whole_chip_stack(self):
+        """Chips overhang the last bar, so they need reserved margin, not luck."""
+        lanes = _lanes(1)
+        lanes[0] = Lane(
+            cohort=lanes[0].cohort,
+            markers=[Marker(3.9, series="Alpha"), Marker(4.1, series="Beta")],
+        )
+        two = _layout(render_waterfall(lanes, _daily()))["margin"]["r"]
+        none_ = _layout(render_waterfall(_lanes(1), _daily()))["margin"]["r"]
+        assert none_ == MARGIN_RIGHT
+        assert two == MARGIN_RIGHT + 2 * chip_pitch(lanes) + CHIP_GAP
 
     def test_chips_sharing_a_harvest_end_step_apart(self):
         lanes = _lanes(1)
@@ -136,6 +181,59 @@ class TestRenderWaterfall:
         assert {c["x"] for c in chips} == {lanes[0].cohort.end.isoformat()}
         # Same date, different pixel offsets, so they cannot overprint.
         assert len({c["xshift"] for c in chips}) == 2
+
+    def test_the_step_grows_with_the_widest_value_on_show(self):
+        """A chip is as wide as its text, so a fixed step overprints long ones.
+
+        Two three-digit yields must not sit as close together as two one-digit
+        ones; the step has to be measured from what is actually drawn.
+        """
+        def _pair(a, b):
+            lanes = _lanes(1)
+            lanes[0] = Lane(
+                cohort=lanes[0].cohort,
+                markers=[Marker(a, series="Alpha"), Marker(b, series="Beta")],
+            )
+            return lanes
+
+        assert chip_pitch(_pair(1.0, 2.0)) < chip_pitch(_pair(135.75, 98.2))
+
+    def test_the_step_clears_the_chip_in_the_widest_default_font(self):
+        """The guard against the overprinting this pitch exists to prevent.
+
+        Measured against a font fact rather than the module's own estimate, so
+        the test still bites if that estimate is tuned too tight: Verdana has
+        the widest digits in Plotly's default stack, at 0.636 em.
+        """
+        lanes = _lanes(1)
+        lanes[0] = Lane(
+            cohort=lanes[0].cohort,
+            markers=[Marker(135.75, series="Alpha"), Marker(98.2, series="Beta")],
+        )
+        pitch = chip_pitch(lanes)
+        chips = sorted(
+            (a for a in _annotations(render_waterfall(lanes, _daily()))
+             if a.get("text") in {"135.75", "98.2"}),
+            key=lambda a: a["xshift"],
+        )
+        assert chips[1]["xshift"] - chips[0]["xshift"] == pitch
+        assert pitch >= _widest_box(c["text"] for c in chips)
+
+    def test_two_decimal_values_do_not_overprint(self):
+        """The regression: a summarised Brix reads 5.67, not 5.7, and the old
+        fixed step was a hair too narrow for four characters."""
+        lanes = _lanes(1)
+        lanes[0] = Lane(
+            cohort=lanes[0].cohort,
+            markers=[Marker(5.67, series="Alpha"), Marker(6.24, series="Beta")],
+        )
+        chips = sorted(
+            (a for a in _annotations(render_waterfall(lanes, _daily()))
+             if a.get("text") in {"5.67", "6.24"}),
+            key=lambda a: a["xshift"],
+        )
+        step = chips[1]["xshift"] - chips[0]["xshift"]
+        assert step >= _widest_box(c["text"] for c in chips)
 
     def test_chip_fill_tracks_the_value_relative_to_the_others(self):
         lanes = _lanes(3)
