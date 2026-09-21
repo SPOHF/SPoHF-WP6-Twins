@@ -145,6 +145,28 @@ class TestCropCyclesPage:
         )
         assert "Climate:" in html
 
+    def test_the_climate_sensor_and_its_location_are_named(self):
+        """A bar claims what its cohort lived through; say where that was read.
+
+        Both halves come from metadata, so this also pins that a metric with an
+        un-enriched device still renders rather than printing a bare dash.
+        """
+        html = _page(provider=StubProvider())
+        metric = CONFIG.climate.metrics[0]
+        assert metric.device in html
+        where = deps.metadata.device(metric.device).description
+        assert where, f"{metric.device} has no location in metadata.yaml"
+        assert where in html
+
+    def test_every_declared_climate_device_has_a_location(self):
+        """The caption is only worth having if no metric can arrive bare."""
+        missing = [
+            m.device
+            for m in CONFIG.climate.metrics
+            if not deps.metadata.device(m.device).description
+        ]
+        assert not missing, f"no location declared for {missing}"
+
     def test_single_cultivar_can_be_selected(self):
         html = _page(
             provider=StubProvider(measured_cohorts=COHORTS[:2]),

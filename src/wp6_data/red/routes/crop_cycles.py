@@ -65,6 +65,22 @@ def _measure_devices() -> dict[str, str]:
     return devices
 
 
+def _metric_source(metric) -> str:
+    """Which device a climate metric came from, and where it hangs.
+
+    The page's whole claim is that a bar shows the conditions its cohort lived
+    through, and that holds only as far as the sensor's placement does — red's
+    declared metrics are not all at the same height, so leaving the reader to
+    assume "in the greenhouse somewhere" overstates the picture.
+
+    Read from the device metadata rather than written here, so pointing a
+    metric at another device (a wire height, say) re-captions the page with no
+    code change — the same property the metric itself has.
+    """
+    where = deps.metadata.device(metric.device).description
+    return f"{metric.device} — {where}" if where else metric.device
+
+
 def _note(text: str, color: str = "#6b7280") -> str:
     return f'<p style="color:{color};margin:0.35rem 0 0;font-size:0.85rem;">{text}</p>'
 
@@ -210,8 +226,9 @@ async def crop_cycles_page(
         body + _value_key(view.lanes, measure_label)
              + "".join(_note(n) for n in notes),
         description=f"Bar colour is {html.escape(metric.label.lower())} on the "
-                    f"day; a gap is a day that reported nothing. The chip at "
-                    f"a bar's end is its {html.escape(measure_label)} at harvest, "
+                    f"day, read from {html.escape(_metric_source(metric))}; a "
+                    f"gap is a day that reported nothing. The chip at a bar's "
+                    f"end is its {html.escape(measure_label)} at harvest, "
                     "filled by how it compares with the rest; a bar with no chip "
                     "was never sampled.",
         card_class="card",

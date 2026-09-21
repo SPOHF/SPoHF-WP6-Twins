@@ -377,9 +377,13 @@ sensor_defaults:
     alias: "Antioxidants (Dry)"
     source: "sijia"
 
+# Device descriptions say *where* the thing hangs, because that is what a
+# reading's meaning turns on and what a page can usefully caption. The location
+# letters are those of `static/red/sensor_locations.docx`, which the home page
+# offers for download, so a caption can be traced back to the floor plan.
 devices:
   "s2100-01-par":
-    description: "PAR above lamp level"
+    description: "Above the lamps, at the top of the greenhouse above the screens (location D)"
     position: "B"
     type: "s2100"
     sensors:
@@ -387,7 +391,7 @@ devices:
         intention: "Measures PAR above grow lamp"
 
   "s2100-02-par":
-    description: "PAR at canopy level"
+    description: "At canopy level under the lamps, on the sensor rig mid-greenhouse (location B)"
     position: "B"
     type: "s2100"
     sensors:
@@ -573,10 +577,12 @@ devices:
       co2: {}
 
   "s2101-01-temp-hum":
+    description: "Top of the greenhouse, above the screens (location D)"
     position: "B"
     type: "s2101"
 
   "s2103-01-temp-hum-co2":
+    description: "On the greenhouse structure at plant top level (location A)"
     position: "B"
     type: "s2103"
 
