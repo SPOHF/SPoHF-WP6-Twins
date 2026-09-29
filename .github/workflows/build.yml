@@ -31,7 +31,7 @@ jobs:
       - name: Set up Python
         run: uv python install
 
-      - name: Start backing services (TimescaleDB + MinIO)
+      - name: Start backing services (TimescaleDB + object store)
         run: docker compose -f docker-compose.tsdb.yml up -d
 
       - name: Install dependencies
@@ -57,19 +57,19 @@ jobs:
           docker compose -f docker-compose.tsdb.yml logs
           exit 1
 
-      - name: Wait for MinIO ready
+      - name: Wait for object store ready
         run: |
           for i in {1..30}; do
             if [ "$(docker inspect --format '{{.State.Health.Status}}' \
-                 "$(docker compose -f docker-compose.tsdb.yml ps -q minio)" \
+                 "$(docker compose -f docker-compose.tsdb.yml ps -q s3mock)" \
                  2>/dev/null)" = "healthy" ]; then
-              echo "MinIO ready after ${i}s"
+              echo "Object store ready after ${i}s"
               exit 0
             fi
             sleep 1
           done
-          echo "MinIO did not become ready in time"
-          docker compose -f docker-compose.tsdb.yml logs minio
+          echo "Object store did not become ready in time"
+          docker compose -f docker-compose.tsdb.yml logs s3mock
           exit 1
 
       - name: Run e2e tests

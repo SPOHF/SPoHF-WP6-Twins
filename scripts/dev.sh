@@ -5,14 +5,14 @@
 # Red:  http://localhost:8002
 #
 # Backing services are NOT started here -- this script assumes TimescaleDB is
-# already up (see README), and treats the MinIO object store the same way:
+# already up (see README), and treats the object store the same way:
 # detect it, wire the dashboards to it, and carry on without it if absent.
 # Starting containers would change what this script is responsible for, and
 # would fight a setup that points .env at a remote database instead.
 #
 #   docker compose -f docker-compose.tsdb.yml up -d
 #
-# Set WP6_DEV_NO_S3=1 to leave object storage off even when MinIO is running.
+# Set WP6_DEV_NO_S3=1 to leave object storage off even when the store is up.
 
 set -e
 
@@ -80,10 +80,10 @@ try:
     except ClientError:
         client.create_bucket(Bucket=s.bucket)
         print(f"  created bucket {s.bucket}")
-    print("  reachable (console http://localhost:9101)")
+    print("  reachable")
 except Exception as exc:
     print(f"  NOT reachable: {type(exc).__name__}")
-    print("  start it with: docker compose -f docker-compose.tsdb.yml up -d minio")
+    print("  start it with: docker compose -f docker-compose.tsdb.yml up -d s3mock")
 PYEOF
 then
     echo ""

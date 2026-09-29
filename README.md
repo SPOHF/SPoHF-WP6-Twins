@@ -29,7 +29,7 @@ table and are distinguished by the `source` column, matching the Red twin.
 ## Quick Start
 
 ```bash
-# 1. Start backing services (TimescaleDB + MinIO object store)
+# 1. Start backing services (TimescaleDB + object store)
 docker compose -f docker-compose.tsdb.yml up -d
 
 # 2. Install dependencies
@@ -85,19 +85,22 @@ Non-numeric sensor values (e.g. `"high"`, `"low"`) are stored as `NULL` in the `
 ### Local Backing Services
 
 ```bash
-docker compose -f docker-compose.tsdb.yml up -d     # TimescaleDB :5433 + MinIO :9100
+docker compose -f docker-compose.tsdb.yml up -d     # TimescaleDB :5433 + object store :9100
 docker compose -f docker-compose.tsdb.yml down -v   # Fresh start (destroys data)
 ```
 
 | service | host port | notes |
 |---|---|---|
 | TimescaleDB | 5433 | `wp6` / `wp6dev` |
-| MinIO (S3 API) | 9100 | `wp6` / `wp6devsecret` |
-| MinIO console | 9101 | browse objects at <http://localhost:9101> |
+| Object store (S3 API) | 9100 | any credentials accepted |
 
-MinIO backs the object-store code path (`wp6_data.shared.blob`). Production
-storage is CloudStack's MinIO, so the local container is the same
-implementation rather than a stand-in.
+`adobe/s3mock` backs the object-store code path (`wp6_data.shared.blob`). It is
+a **mock**, not a real store: MinIO would have matched production (CloudStack's
+object storage *is* MinIO), but MinIO's images are no longer anonymously
+pullable. So this validates our client — path-style addressing, botocore error
+shapes, pagination, byte fidelity — not the store's own behaviour. The real
+bucket is covered by the probe harness in
+`issues/061-object-storage-to-end-deploy-downtime.md`.
 
 **Object storage is required** — CSV exports live there and the dashboards and
 export job refuse to start without it. There is no on-disk fallback: a silent
@@ -116,7 +119,7 @@ uv run python -m wp6_data.red.export    # writes CSVs to that same store
 `scripts/dev.sh` prints the resolved endpoint and bucket, creates the bucket if
 missing, and exits non-zero when the store is unconfigured or unreachable.
 
-The e2e suite exercises it against MinIO automatically:
+The e2e suite exercises it against that container automatically:
 
 ```bash
 uv run pytest tests/e2e/test_blob_store_s3.py

@@ -1,8 +1,8 @@
 # Local backing services for development and e2e tests.
 #
-# Named `.tsdb.yml` for historical reasons -- it now also runs the MinIO object
-# store, so that the S3 code path is exercised locally and in CI rather than
-# only against the real bucket. Kept as one file on purpose: the README, the
+# Named `.tsdb.yml` for historical reasons -- it now also runs an S3-compatible
+# object store, so that the S3 code path is exercised locally and in CI rather
+# than only against the real bucket. Kept as one file on purpose: the README, the
 # e2e conftest hint and .github/workflows/build.yml all reference this filename,
 # and CI therefore picks up new services with no workflow change.
 services:
@@ -22,33 +22,42 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
-  # Production object storage is CloudStack's MinIO (EHV-Object-Storage), so a
-  # local MinIO is a faithful double rather than an approximation -- same
-  # implementation, same S3 quirks (path-style addressing, its own error
-  # shapes). See issues/061-object-storage-to-end-deploy-downtime.md.
+  # An S3-compatible store for the object-storage code path, so it is exercised
+  # locally and in CI rather than only against the real bucket.
   #
-  # Pulled from quay.io, MinIO's other official registry: Docker Hub refuses
-  # the pull without authentication.
+  # This is `adobe/s3mock` — a MOCK, not a real store. It was MinIO, which would
+  # have been the same implementation as production (CloudStack's
+  # EHV-Object-Storage is MinIO), but MinIO's images are no longer anonymously
+  # pullable: both docker.io/minio/minio and quay.io/minio/minio now answer
+  # `unauthorized` (CI failure, run 36549563488). Of the freely pullable
+  # alternatives this is the smallest and starts in ~1.5s.
   #
-  # Host port 9100, not the default 9000: 9000 is commonly taken by other local
-  # tooling, the same reason TimescaleDB is published on 5433.
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: server /data --console-address ":9001"
+  # What that costs: this validates OUR CLIENT — path-style addressing,
+  # botocore's error shapes, pagination past the 1000-key page, byte fidelity —
+  # but not MinIO's own behaviour. The prod-specific risks (the HARICA TLS chain,
+  # CloudStack's per-account credentials) were never covered by a local container
+  # anyway; those belong to the probe harness in
+  # issues/061-object-storage-to-end-deploy-downtime.md, run against the real
+  # bucket. Do not "restore" MinIO here without checking the pull works from CI.
+  #
+  # Host port 9100, not 9090: keeps the port stable across this swap, and 9000
+  # (MinIO's default) is commonly taken by other local tooling.
+  s3mock:
+    image: adobe/s3mock:3.12.0
     ports:
-      - "9100:9000"   # S3 API
-      - "9101:9001"   # web console, handy for eyeballing objects
+      - "9100:9090"
     environment:
-      MINIO_ROOT_USER: wp6
-      MINIO_ROOT_PASSWORD: wp6devsecret   # MinIO requires >= 8 characters
-    volumes:
-      - minio_data:/data
+      # Created on boot: wp6-e2e for the e2e suite, wp6-dev for scripts/dev.sh.
+      # Separate on purpose — the e2e fixtures empty their bucket before and
+      # after every test, so a shared one would delete what you were looking at.
+      initialBuckets: wp6-e2e,wp6-dev
+      retainFilesOnExit: "false"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      # wget, not curl: this image has no curl.
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9090/"]
       interval: 2s
       timeout: 3s
       retries: 30
 
 volumes:
   tsdb_data:
-  minio_data:
