@@ -9,11 +9,24 @@ import os
 # real OIDC env still wins. Must be set before the blue app is imported.
 os.environ.setdefault("WP6_OIDC_DEV_AUTH", "true")
 
+# Object storage is mandatory, and importing a twin's deps builds its export
+# store. Point at the local MinIO so an imported twin is usable; individual
+# fixtures still build their own settings explicitly rather than reading these.
+os.environ.setdefault("WP6_S3_BUCKET", "wp6-e2e")
+os.environ.setdefault("WP6_S3_ENDPOINT_URL", "http://localhost:9100")
+os.environ.setdefault("WP6_S3_ACCESS_KEY_ID", "wp6")
+os.environ.setdefault("WP6_S3_SECRET_ACCESS_KEY", "wp6devsecret")
+
+import asyncio  # noqa: E402
+
 import psycopg  # noqa: E402
 import pytest_asyncio  # noqa: E402
+from botocore.exceptions import ClientError  # noqa: E402
 from psycopg_pool import AsyncConnectionPool  # noqa: E402
 
 from wp6_data.blue.tsdb import ensure_schema_blue  # noqa: E402
+from wp6_data.config import ObjectStoreSettings  # noqa: E402
+from wp6_data.shared.blob import S3BlobStore  # noqa: E402
 
 TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
 RED_TSDB_DSN = "postgresql://wp6_red:wp6dev@localhost:5433/wp6_red"
@@ -146,3 +159,69 @@ async def disarm_cagg_refresh_policy(tsdb_conn):
     yield
     await remove_cagg_refresh_policy(tsdb_conn)
     await tsdb_conn.commit()
+
+
+# --- Object store (MinIO) ----------------------------------------------------
+# Production object storage is CloudStack's MinIO, so the local container is the
+# same implementation rather than a stand-in. These fixtures exercise the real
+# S3 code path -- botocore, path-style addressing, S3 error shapes -- which the
+# LocalBlobStore unit tests cannot reach.
+
+MINIO_ENDPOINT = "http://localhost:9100"
+MINIO_ACCESS_KEY = "wp6"
+MINIO_SECRET_KEY = "wp6devsecret"
+MINIO_BUCKET = "wp6-e2e"
+_MINIO_HINT = (
+    "Start it with: docker compose -f docker-compose.tsdb.yml up -d minio"
+)
+
+
+def object_store_settings(bucket: str = MINIO_BUCKET) -> ObjectStoreSettings:
+    """Settings pointed at the local MinIO.
+
+    Built explicitly rather than read from the environment so an e2e run never
+    picks up a developer's real bucket credentials from .env and writes test
+    objects into production storage.
+    """
+    return ObjectStoreSettings(
+        bucket=bucket,
+        endpoint_url=MINIO_ENDPOINT,
+        access_key_id=MINIO_ACCESS_KEY,
+        secret_access_key=MINIO_SECRET_KEY,
+    )
+
+
+@pytest_asyncio.fixture()
+async def s3_store():
+    """An :class:`S3BlobStore` on a freshly-emptied local MinIO bucket.
+
+    Fails hard rather than skipping, matching the TimescaleDB fixtures: CI
+    gates the image build on e2e, so a silently-skipped object-store test
+    would let a broken S3 path ship.
+    """
+    settings = object_store_settings()
+    try:
+        store = S3BlobStore(settings)
+        await asyncio.to_thread(_ensure_bucket, store)
+    except Exception as exc:
+        raise RuntimeError(
+            f"MinIO is not reachable at {MINIO_ENDPOINT}. {_MINIO_HINT}"
+        ) from exc
+
+    await _empty(store)
+    yield store
+    await _empty(store)
+
+
+def _ensure_bucket(store) -> None:
+    client = store._client  # noqa: SLF001 - test setup reaches past the interface
+    try:
+        client.head_bucket(Bucket=store.bucket)
+    except ClientError:
+        client.create_bucket(Bucket=store.bucket)
+
+
+async def _empty(store) -> None:
+    keys = await store.list("")
+    if keys:
+        await store.delete(*keys)

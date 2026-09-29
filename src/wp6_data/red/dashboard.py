@@ -2,7 +2,6 @@
 
 import asyncio
 import time
-from pathlib import Path
 
 import structlog
 
@@ -224,7 +223,7 @@ config = TwinConfig(
         ),
     ],
     metadata=deps.metadata,
-    export_dir=Path(deps.settings.export_dir),
+    export_store=deps.EXPORT_STORE,
     theme=ThemeColors(
         primary="#dc2626", primary_light="#ef4444", primary_dark="#b91c1c",
         accent="#f97316", surface_rgb="220, 38, 38",

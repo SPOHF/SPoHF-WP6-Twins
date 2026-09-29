@@ -29,7 +29,7 @@ table and are distinguished by the `source` column, matching the Red twin.
 ## Quick Start
 
 ```bash
-# 1. Start TimescaleDB
+# 1. Start backing services (TimescaleDB + MinIO object store)
 docker compose -f docker-compose.tsdb.yml up -d
 
 # 2. Install dependencies
@@ -82,11 +82,44 @@ Non-numeric sensor values (e.g. `"high"`, `"low"`) are stored as `NULL` in the `
 
 ## Docker
 
-### Local Development Database
+### Local Backing Services
 
 ```bash
-docker compose -f docker-compose.tsdb.yml up -d    # Start TimescaleDB on port 5433
+docker compose -f docker-compose.tsdb.yml up -d     # TimescaleDB :5433 + MinIO :9100
 docker compose -f docker-compose.tsdb.yml down -v   # Fresh start (destroys data)
+```
+
+| service | host port | notes |
+|---|---|---|
+| TimescaleDB | 5433 | `wp6` / `wp6dev` |
+| MinIO (S3 API) | 9100 | `wp6` / `wp6devsecret` |
+| MinIO console | 9101 | browse objects at <http://localhost:9101> |
+
+MinIO backs the object-store code path (`wp6_data.shared.blob`). Production
+storage is CloudStack's MinIO, so the local container is the same
+implementation rather than a stand-in.
+
+**Object storage is required** — CSV exports live there and the dashboards and
+export job refuse to start without it. There is no on-disk fallback: a silent
+one meant the export job wrote to a directory while the dashboard read an empty
+bucket, and nothing said why.
+
+Copy the `WP6_S3_*` block from `.env.example` into your `.env`. Set it **in
+`.env`, not as a shell export**: the dashboards, the nightly export job and the
+CLI are separate processes and all read `.env`.
+
+```bash
+./scripts/dev.sh                        # refuses to start if the store is missing
+uv run python -m wp6_data.red.export    # writes CSVs to that same store
+```
+
+`scripts/dev.sh` prints the resolved endpoint and bucket, creates the bucket if
+missing, and exits non-zero when the store is unconfigured or unreachable.
+
+The e2e suite exercises it against MinIO automatically:
+
+```bash
+uv run pytest tests/e2e/test_blob_store_s3.py
 ```
 
 ### Application Images

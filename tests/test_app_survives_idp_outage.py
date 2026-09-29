@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 import wp6_data.blue
 from wp6_data.shared import auth
 from wp6_data.shared.app_factory import create_app
+from wp6_data.shared.blob import LocalBlobStore
 from wp6_data.shared.metadata import MetadataRegistry
 from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 
@@ -80,7 +81,7 @@ def app(monkeypatch, tmp_path):
             title="Test Twin",
             data_sources=[DataSource(key="k", label="L", provider=AsyncMock())],
             metadata=MetadataRegistry(_METADATA),
-            export_dir=Path(tmp_path),
+            export_store=LocalBlobStore(tmp_path),
             theme=ThemeColors(
                 primary="#000", primary_light="#111", primary_dark="#222",
                 accent="#333", surface_rgb="0, 0, 0",

@@ -1,27 +1,32 @@
 """CSV export job for WP6 Blue - generates nightly sensor data exports."""
 
 import asyncio
-import json
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pandas as pd
 import structlog
 from dotenv import load_dotenv
 
+from wp6_data.blue import deps
 from wp6_data.blue.tsdb import ensure_schema_blue
 from wp6_data.config import Settings
 from wp6_data.db import close_pool, get_pool, init_pool
-from wp6_data.shared.export import clear_export_dir
+from wp6_data.shared.blob import BlobStore
+from wp6_data.shared.export import (
+    clear_exports,
+    csv_key,
+    sanitise_name,
+    write_export_metadata,
+)
 
 log = structlog.get_logger()
 
 
-async def export_device(device_name: str, output_dir: Path) -> Path | None:
+async def export_device(device_name: str, store: BlobStore) -> str | None:
     """Export all readings for a device to a wide-format CSV.
 
     Pivots sensor_tags into columns so each row is a timestamp.
-    Returns the path to the exported file, or None if no data.
+    Returns the key the CSV was written to, or None if no data.
     """
     pool = get_pool()
 
@@ -49,13 +54,13 @@ async def export_device(device_name: str, output_dir: Path) -> Path | None:
     wide = wide.sort_index()
     wide.columns.name = None  # Remove "sensor_tag" header label
 
-    # Sanitise device name for filename
-    safe_name = device_name.replace("/", "_").replace(" ", "_")
-    output_path = output_dir / f"{safe_name}.csv"
-    wide.to_csv(output_path)
+    # Blue device names carry "/" and spaces, which would become accidental
+    # key hierarchy in the bucket.
+    key = csv_key(sanitise_name(device_name))
+    await store.put(key, wide.to_csv().encode("utf-8"), content_type="text/csv")
 
-    log.info("exported", device=device_name, rows=len(wide), path=str(output_path))
-    return output_path
+    log.info("exported", device=device_name, rows=len(wide), key=key)
+    return key
 
 
 async def get_device_names() -> list[str]:
@@ -78,11 +83,10 @@ async def get_device_names() -> list[str]:
 async def run_export() -> None:
     """Run the full CSV export job."""
     settings = Settings()
-    export_dir = Path(settings.blue_export_dir)
-    log.info("export_started", export_dir=str(export_dir))
+    store = deps.EXPORT_STORE
+    log.info("export_started", store=type(store).__name__)
 
-    export_dir.mkdir(parents=True, exist_ok=True)
-    removed = clear_export_dir(export_dir)
+    removed = await clear_exports(store)
     if removed:
         log.info("cleared_stale_exports", files_removed=removed)
 
@@ -98,19 +102,20 @@ async def run_export() -> None:
         exported = {}
         for device in devices:
             try:
-                path = await export_device(device, export_dir)
-                if path:
+                key = await export_device(device, store)
+                if key:
                     exported[device] = datetime.now(UTC).isoformat()
             except Exception as e:
                 log.error("export_failed", device=device, error=str(e))
 
-        # Write metadata file with export timestamps per device
-        metadata = {
-            "exported_at": datetime.now(UTC).isoformat(),
-            "devices": exported,
-        }
-        metadata_path = export_dir / "metadata.json"
-        metadata_path.write_text(json.dumps(metadata, indent=2))
+        # Record export timestamps per device, beside the CSVs
+        await write_export_metadata(
+            store,
+            {
+                "exported_at": datetime.now(UTC).isoformat(),
+                "devices": exported,
+            },
+        )
 
         log.info("export_completed", devices=list(exported.keys()))
 

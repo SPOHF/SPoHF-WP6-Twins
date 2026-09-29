@@ -30,7 +30,7 @@ async def home(
     device_data = await provider.fetch_device_data()
     manual_metadata = await provider.fetch_manual_metadata()
 
-    export_meta = get_export_metadata(config.export_dir)
+    export_meta = await get_export_metadata(config.export_store)
     available_exports = export_meta.get("devices", {}) if export_meta else {}
 
     explore_tabs = build_explore_tabs(

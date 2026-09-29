@@ -117,7 +117,7 @@ def create_app(config: TwinConfig) -> FastAPI:
     app.include_router(status.router)
     app.include_router(
         make_download_router(
-            config.export_dir, sanitise=config.export_sanitise_names,
+            config.export_store, sanitise=config.export_sanitise_names,
         ),
     )
 

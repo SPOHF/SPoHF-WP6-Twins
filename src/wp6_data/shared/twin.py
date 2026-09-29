@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import pandas as pd
@@ -19,7 +18,8 @@ if TYPE_CHECKING:
 
     from fastapi import APIRouter
 
-    from wp6_data.shared.metadata import MetadataRegistry
+    from wp6_data.shared.blob import BlobStore
+from wp6_data.shared.metadata import MetadataRegistry
 
 
 @runtime_checkable
@@ -136,7 +136,9 @@ class TwinConfig:
     title: str
     data_sources: list[DataSource]
     metadata: MetadataRegistry
-    export_dir: Path
+    #: Blob store holding this twin's pre-generated CSV exports, already
+    #: scoped to the twin (see wp6_data.shared.blob.make_store).
+    export_store: BlobStore
     theme: ThemeColors
     extra_routers: list[APIRouter] = field(default_factory=list)
     hero_cards: list[Callable[..., Awaitable[str] | str]] = field(

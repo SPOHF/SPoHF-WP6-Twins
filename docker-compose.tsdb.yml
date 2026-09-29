@@ -1,3 +1,10 @@
+# Local backing services for development and e2e tests.
+#
+# Named `.tsdb.yml` for historical reasons -- it now also runs the MinIO object
+# store, so that the S3 code path is exercised locally and in CI rather than
+# only against the real bucket. Kept as one file on purpose: the README, the
+# e2e conftest hint and .github/workflows/build.yml all reference this filename,
+# and CI therefore picks up new services with no workflow change.
 services:
   timescaledb:
     image: timescale/timescaledb:2.26.4-pg17
@@ -15,5 +22,33 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+  # Production object storage is CloudStack's MinIO (EHV-Object-Storage), so a
+  # local MinIO is a faithful double rather than an approximation -- same
+  # implementation, same S3 quirks (path-style addressing, its own error
+  # shapes). See issues/061-object-storage-to-end-deploy-downtime.md.
+  #
+  # Pulled from quay.io, MinIO's other official registry: Docker Hub refuses
+  # the pull without authentication.
+  #
+  # Host port 9100, not the default 9000: 9000 is commonly taken by other local
+  # tooling, the same reason TimescaleDB is published on 5433.
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    ports:
+      - "9100:9000"   # S3 API
+      - "9101:9001"   # web console, handy for eyeballing objects
+    environment:
+      MINIO_ROOT_USER: wp6
+      MINIO_ROOT_PASSWORD: wp6devsecret   # MinIO requires >= 8 characters
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
 volumes:
   tsdb_data:
+  minio_data:

@@ -8,6 +8,21 @@ os.environ.setdefault(
     "WP6_RED_TSDB_URL", "postgresql://wp6_red:wp6dev@localhost:5433/wp6_red",
 )
 
+# Object storage is mandatory (wp6_data.shared.blob.make_store refuses to build
+# without it), and red/blue deps construct their export store at import. A
+# boto3 client does not connect when it is created, so these values only have
+# to exist -- nothing here reaches the network. Unit tests that actually
+# exercise a store inject LocalBlobStore explicitly; the ones that talk to a
+# real MinIO live in tests/e2e.
+#
+# Deliberately an endpoint nothing listens on: if a unit test ever does try to
+# reach the store, it should fail loudly rather than quietly hit whatever the
+# developer happens to be running.
+os.environ.setdefault("WP6_S3_BUCKET", "unit-tests-should-not-reach-this")
+os.environ.setdefault("WP6_S3_ENDPOINT_URL", "http://127.0.0.1:9")
+os.environ.setdefault("WP6_S3_ACCESS_KEY_ID", "unit")
+os.environ.setdefault("WP6_S3_SECRET_ACCESS_KEY", "unit-secret")
+
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 

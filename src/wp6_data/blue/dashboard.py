@@ -1,7 +1,6 @@
 """WP6 Blue Dashboard - TimescaleDB-backed sensor visualization."""
 
 import asyncio
-from pathlib import Path
 
 from wp6_data.blue import deps
 from wp6_data.blue import manual as blue_manual
@@ -106,7 +105,7 @@ config = TwinConfig(
         ),
     ],
     metadata=deps.metadata,
-    export_dir=Path(settings.blue_export_dir),
+    export_store=deps.EXPORT_STORE,
     theme=ThemeColors(
         primary="#2563eb", primary_light="#3b82f6", primary_dark="#1d4ed8",
         accent="#0ea5e9", surface_rgb="37, 99, 235",

@@ -9,6 +9,7 @@ from pathlib import Path
 from wp6_data.grey.provider import GreySensorProvider
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
+from wp6_data.shared.blob import LocalBlobStore
 from wp6_data.shared.metadata import MetadataRegistry
 from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 
@@ -36,7 +37,9 @@ config = TwinConfig(
         ),
     ],
     metadata=MetadataRegistry(Path(__file__).parent / "metadata.yaml"),
-    export_dir=Path("/tmp/wp6-grey-exports"),
+    # Grey is the synthetic test twin and exports nothing; an empty local
+    # store keeps the download route wired without inventing storage.
+    export_store=LocalBlobStore(Path("/tmp/wp6-grey-exports")),
     theme=ThemeColors(
         primary="#6b7280", primary_light="#9ca3af", primary_dark="#4b5563",
         accent="#8b5cf6", surface_rgb="107, 114, 128",

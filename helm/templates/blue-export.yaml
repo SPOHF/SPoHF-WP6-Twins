@@ -2,19 +2,6 @@
 {{- if .Values.dashboard.export.enabled }}
 {{- $blueSecret := .Values.dashboard.secrets.existingSecret | default (printf "%s-blue-secrets" .Chart.Name) }}
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ .Chart.Name }}-blue-exports
-  labels:
-    app.kubernetes.io/name: {{ .Chart.Name }}-blue-exports
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: {{ .Values.dashboard.export.storageSize | default "1Gi" }}
----
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -36,14 +23,6 @@ spec:
           labels:
             app.kubernetes.io/name: {{ .Chart.Name }}-blue-export
         spec:
-          # Must land on the dashboard's node — the exports PVC is RWO on block
-          # storage. See _export-affinity.tpl.
-          affinity:
-            {{- include "wp6-data.exportPodAffinity" (dict "root" $ "twin" "blue") | nindent 12 }}
-          # appuser (gid 1000) writes the exports PVC; fsGroup chowns the
-          # block-device volume so it can. See blue-dashboard.yaml for why.
-          securityContext:
-            fsGroup: 1000
           restartPolicy: OnFailure
           containers:
             - name: export
@@ -56,16 +35,8 @@ spec:
                     secretKeyRef:
                       name: {{ $blueSecret }}
                       key: tsdb-url
-                - name: WP6_BLUE_EXPORT_DIR
-                  value: /data/exports
-              volumeMounts:
-                - name: exports
-                  mountPath: /data/exports
+                {{- include "wp6-data.objectStoreEnv" (dict "root" $) | nindent 16 }}
               resources:
                 {{- toYaml .Values.dashboard.export.resources | nindent 16 }}
-          volumes:
-            - name: exports
-              persistentVolumeClaim:
-                claimName: {{ .Chart.Name }}-blue-exports
 {{- end }}
 {{- end }}

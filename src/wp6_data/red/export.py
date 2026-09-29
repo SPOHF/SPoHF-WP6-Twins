@@ -6,10 +6,8 @@ to `sync_metadata` so the status page reflects nightly job health.
 """
 
 import asyncio
-import json
 import time
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pandas as pd
 import structlog
@@ -18,6 +16,7 @@ from dotenv import load_dotenv
 from wp6_data.config import RedSettings
 from wp6_data.db.pool import close_pool, get_pool, init_pool
 from wp6_data.db.queries import record_sync_run, refresh_sensor_summary
+from wp6_data.red import deps
 from wp6_data.red.db import (
     COMMON_MEASUREMENTS,
     SENSOR_TABLES,
@@ -26,7 +25,8 @@ from wp6_data.red.db import (
 )
 from wp6_data.red.tsdb import ensure_schema_red
 from wp6_data.red.wires import undeclared_wire_ids, wire_ids
-from wp6_data.shared.export import clear_export_dir
+from wp6_data.shared.blob import BlobStore
+from wp6_data.shared.export import clear_exports, csv_key, write_export_metadata
 
 log = structlog.get_logger()
 
@@ -35,11 +35,11 @@ async def export_device(
     db: MySQLConnection,
     device_id: str,
     tables: list[str],
-    output_dir: Path,
-) -> Path | None:
+    store: BlobStore,
+) -> str | None:
     """Export all data for a device across its tables to CSV.
 
-    Returns the path to the exported file, or None if no data.
+    Returns the key the CSV was written to, or None if no data.
     """
     all_frames = []
 
@@ -65,17 +65,17 @@ async def export_device(
         return None
 
     df = pd.concat(all_frames, ignore_index=True).sort_values("received_at")
-    output_path = output_dir / f"{device_id}.csv"
-    df.to_csv(output_path, index=False)
+    key = csv_key(device_id)
+    await store.put(key, df.to_csv(index=False).encode("utf-8"), content_type="text/csv")
 
-    log.info("exported", device=device_id, rows=len(df), path=str(output_path))
-    return output_path
+    log.info("exported", device=device_id, rows=len(df), key=key)
+    return key
 
 
 async def export_wire(
     db: MySQLConnection,
     physical_device_id: str,
-    output_dir: Path,
+    store: BlobStore,
 ) -> list[str]:
     """Export one physical wire as one CSV per height device.
 
@@ -97,10 +97,10 @@ async def export_wire(
     written = []
     for device_id, records in sorted(split_wire_rows_by_height(rows).items()):
         df = pd.DataFrame(records)
-        output_path = output_dir / f"{device_id}.csv"
-        df.to_csv(output_path, index=False)
+        key = csv_key(device_id)
+        await store.put(key, df.to_csv(index=False).encode("utf-8"), content_type="text/csv")
         written.append(device_id)
-        log.info("exported", device=device_id, rows=len(df), path=str(output_path))
+        log.info("exported", device=device_id, rows=len(df), key=key)
 
     return written
 
@@ -108,11 +108,10 @@ async def export_wire(
 async def run_export() -> None:
     """Run the full CSV export job and refresh TSDB-side daily aggregates."""
     settings = RedSettings()
-    export_dir = Path(settings.export_dir)
-    log.info("export_started", export_dir=str(export_dir))
+    store = deps.EXPORT_STORE
+    log.info("export_started", store=type(store).__name__)
 
-    export_dir.mkdir(parents=True, exist_ok=True)
-    removed = clear_export_dir(export_dir)
+    removed = await clear_exports(store)
     if removed:
         log.info("cleared_stale_exports", files_removed=removed)
 
@@ -133,8 +132,8 @@ async def run_export() -> None:
 
         for device_id, info in all_devices.items():
             try:
-                path = await export_device(db, device_id, info["tables"], export_dir)
-                if path:
+                key = await export_device(db, device_id, info["tables"], store)
+                if key:
                     exported[device_id] = datetime.now(UTC).isoformat()
             except Exception as e:
                 log.error("export_failed", device=device_id, error=str(e))
@@ -145,17 +144,18 @@ async def run_export() -> None:
 
         for physical_id in wire_ids():
             try:
-                for device_id in await export_wire(db, physical_id, export_dir):
+                for device_id in await export_wire(db, physical_id, store):
                     exported[device_id] = datetime.now(UTC).isoformat()
             except Exception as e:
                 log.error("export_failed", device=physical_id, error=str(e))
 
-        metadata = {
-            "exported_at": datetime.now(UTC).isoformat(),
-            "devices": exported,
-        }
-        metadata_path = export_dir / "metadata.json"
-        metadata_path.write_text(json.dumps(metadata, indent=2))
+        await write_export_metadata(
+            store,
+            {
+                "exported_at": datetime.now(UTC).isoformat(),
+                "devices": exported,
+            },
+        )
 
         log.info("export_completed", devices=list(exported.keys()))
 

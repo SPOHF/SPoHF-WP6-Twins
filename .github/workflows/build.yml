@@ -31,7 +31,7 @@ jobs:
       - name: Set up Python
         run: uv python install
 
-      - name: Start TimescaleDB
+      - name: Start backing services (TimescaleDB + MinIO)
         run: docker compose -f docker-compose.tsdb.yml up -d
 
       - name: Install dependencies
@@ -57,14 +57,29 @@ jobs:
           docker compose -f docker-compose.tsdb.yml logs
           exit 1
 
+      - name: Wait for MinIO ready
+        run: |
+          for i in {1..30}; do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' \
+                 "$(docker compose -f docker-compose.tsdb.yml ps -q minio)" \
+                 2>/dev/null)" = "healthy" ]; then
+              echo "MinIO ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "MinIO did not become ready in time"
+          docker compose -f docker-compose.tsdb.yml logs minio
+          exit 1
+
       - name: Run e2e tests
         run: uv run pytest tests/e2e/ -v --tb=short
 
-      - name: Dump TimescaleDB logs on failure
+      - name: Dump service logs on failure
         if: failure()
         run: docker compose -f docker-compose.tsdb.yml logs
 
-      - name: Stop TimescaleDB
+      - name: Stop backing services
         if: always()
         run: docker compose -f docker-compose.tsdb.yml down -v
 

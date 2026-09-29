@@ -17,6 +17,31 @@ tsdbBootstrap:
   tsdbHost: "wp6-data-timescaledb"
   tsdbPort: "5432"
 
+# S3-compatible object store, shared by both twins.
+#
+# Exports (and later models and manual uploads) live here instead of on
+# ReadWriteOnce PVCs. A block PVC attaches to exactly one node, which is why
+# the dashboards run `strategy: Recreate` and why a deploy is a full outage,
+# and why the export CronJobs had to be pinned to the dashboard's node. See
+# issues/061-object-storage-to-end-deploy-downtime.md.
+#
+# ONE bucket serves everything; separation is by key prefix, chosen in code.
+#
+# REQUIRED — there is no on-disk fallback. The chart refuses to render without
+# these, and the application refuses to start, because a silent fallback meant
+# the export job wrote to disk while the dashboard read an empty bucket.
+objectStore:
+  bucket: ""  # REQUIRED, e.g. "spohf"
+  endpointUrl: ""  # REQUIRED, e.g. "https://buckets.educloud.fontysict.nl:4477"
+  region: "us-east-1"  # the store ignores it; botocore refuses to sign without one
+  # Override the CA bundle botocore verifies against. Empty falls back to
+  # certifi, which carries the HARICA 2021 root the store's chain needs.
+  caBundle: ""
+  secrets:
+    existingSecret: ""  # default: <release>-object-store
+    accessKeyIdKey: "access-key-id"
+    secretAccessKeyKey: "secret-access-key"
+
 # Dashboard
 dashboard:
   enabled: true
@@ -54,11 +79,12 @@ dashboard:
   # Empty disables the schedule. Offset from red's so the two twins don't fit
   # at the same moment on a shared cluster.
   retrainAt: "03:30"
-  # CSV export job (runs nightly, generates downloadable CSVs per device)
+  # CSV export job (runs nightly, generates downloadable CSVs per device).
+  # Writes to the object store when configured, otherwise to an emptyDir that
+  # lives only for the job — which serves nothing, so configure objectStore.
   export:
     enabled: true
     schedule: "0 2 * * *"  # 2 AM daily
-    storageSize: "1Gi"
     resources:
       requests:
         cpu: 100m
@@ -147,11 +173,12 @@ red:
   # the climate chain it is also when it re-decides its seasonal term and which
   # greenhouse reference wins. Empty disables the schedule.
   retrainAt: "03:00"
-  # CSV export job (runs nightly, generates downloadable CSVs)
+  # CSV export job (runs nightly, generates downloadable CSVs).
+  # Writes to the object store when configured, otherwise to an emptyDir that
+  # lives only for the job — which serves nothing, so configure objectStore.
   export:
     enabled: true
     schedule: "0 2 * * *"  # 2 AM daily
-    storageSize: "1Gi"
     resources:
       requests:
         cpu: 100m
