@@ -16,7 +16,6 @@ from wp6_data.config import ObjectStoreSettings, Settings
 from wp6_data.db import close_pool, get_pool, init_pool
 from wp6_data.shared.aggregation import CHART_AGG_FUNCS
 from wp6_data.shared.blob import make_store
-from wp6_data.shared.export import get_export_metadata as _get_export_metadata
 from wp6_data.shared.metadata import MetadataRegistry
 
 metadata = MetadataRegistry(Path(__file__).parent / "metadata.yaml")
@@ -257,7 +256,3 @@ async def fetch_sync_metrics() -> list[dict[str, Any]]:
         r["freshness_budget"] = budget if ep in automated else None
     return rows
 
-
-async def get_export_metadata() -> dict | None:
-    """Get metadata about available CSV exports."""
-    return await _get_export_metadata(EXPORT_STORE)

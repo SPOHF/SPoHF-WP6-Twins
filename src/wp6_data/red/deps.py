@@ -9,7 +9,6 @@ from wp6_data.red.db import MySQLConnection
 from wp6_data.red.dli import OpenMeteoClient
 from wp6_data.red.growth_sections import load_growth_sections
 from wp6_data.shared.blob import make_store
-from wp6_data.shared.export import get_export_metadata as _get_export_metadata
 from wp6_data.shared.metadata import MetadataRegistry
 
 load_dotenv()
@@ -69,14 +68,3 @@ def get_weather_client() -> OpenMeteoClient:
         weather_client = OpenMeteoClient()
     return weather_client
 
-
-def _export_info_html(export_meta: dict | None) -> str:
-    """Generate HTML snippet showing export metadata."""
-    if not export_meta:
-        return "<small>CSV exports not yet available.</small>"
-    return ""
-
-
-async def get_export_metadata() -> dict | None:
-    """Get metadata about available CSV exports."""
-    return await _get_export_metadata(EXPORT_STORE)
