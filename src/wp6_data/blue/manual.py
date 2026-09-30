@@ -18,6 +18,7 @@ import structlog
 from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
 
+from wp6_data.blue import deps
 from wp6_data.blue.fertigation_events import FERTIGATION_EVENTS
 from wp6_data.blue.insects import INSECTS
 from wp6_data.blue.long_data import LONG_DATA
@@ -69,9 +70,9 @@ def _service_dependency(
     """FastAPI dependency that builds the per-request service for ``source``."""
 
     def get_service() -> ManualIngestService:
-        settings = Settings()
+        Settings()
         storage = UploadStorage(
-            base_dir=Path(settings.blue_upload_dir), pool=get_pool(),
+            store=deps.UPLOADS_STORE, pool=get_pool(),
         )
         return _build_service(source, get_pool(), storage)
 
@@ -98,7 +99,7 @@ async def _run(source: ManualSource, path: Path) -> ApplyResult:
     await pool.open()
     try:
         storage = UploadStorage(
-            base_dir=Path(settings.blue_upload_dir), pool=pool,
+            store=deps.UPLOADS_STORE, pool=pool,
         )
         return await run_ingest(_build_service(source, pool, storage), path)
     finally:

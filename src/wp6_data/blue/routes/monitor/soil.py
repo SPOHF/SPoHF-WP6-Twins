@@ -8,15 +8,17 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 from plotly.subplots import make_subplots
 
+from wp6_data.blue import deps
 from wp6_data.blue.fertigation import (
-    load_fertigation_event_days,
-    resolve_fertigation_csv_path,
+    load_fertigation_csv,
+    parse_fertigation_event_days,
 )
 from wp6_data.blue.treatments import (
     load_device_treatment_map,
     treatment_color,
 )
 from wp6_data.config import Settings
+from wp6_data.db import get_pool
 from wp6_data.shared import render_date_filter, render_page, resolve_date_range
 from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.twin import SensorDataProvider
@@ -43,21 +45,19 @@ _PH_IDEAL_MAX = 5.5
 _settings = Settings()
 
 
-def _fertigation_csv_path():
-    return resolve_fertigation_csv_path(
-        _settings.blue_fertigation_events_csv,
-        _settings.blue_upload_dir,
+async def _fertigation_csv() -> bytes | None:
+    return await load_fertigation_csv(
+        _settings.blue_fertigation_events_csv, deps.UPLOADS_STORE, get_pool(),
     )
 
 
-def _load_fertigation_event_days() -> tuple[list[date], tuple[date, date] | None]:
+async def _load_fertigation_event_days() -> tuple[list[date], tuple[date, date] | None]:
     """Load global fertigation event dates from CSV (volume > 0 only)."""
     import csv
 
-    path = _fertigation_csv_path()
     try:
-        sorted_days = load_fertigation_event_days(path)
-    except (OSError, UnicodeError, csv.Error):
+        sorted_days = parse_fertigation_event_days(await _fertigation_csv())
+    except (UnicodeError, csv.Error):
         return [], None
 
     if not sorted_days:
@@ -110,7 +110,7 @@ async def soil_conditions(
 ) -> str:
     """Soil conditions dashboard: temperature, moisture, pH, conductivity."""
     start, end, start_dt, end_dt = resolve_date_range(start, end)
-    fert_days, fert_span = _load_fertigation_event_days()
+    fert_days, fert_span = await _load_fertigation_event_days()
     in_view_days = [d for d in fert_days if start <= d <= end]
     show_fert = bool(fert_events and fert_days)
 

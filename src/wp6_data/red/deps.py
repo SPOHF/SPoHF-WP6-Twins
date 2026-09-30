@@ -33,6 +33,7 @@ DB_PASSWORD = settings.db_password
 #: artifact kind; prefixes are the separation (see issue 061).
 EXPORT_PREFIX = "red/exports"
 MODELS_PREFIX = "red/models"
+UPLOADS_PREFIX = "red/manual-uploads"
 
 _object_store = ObjectStoreSettings()
 
@@ -48,6 +49,11 @@ MODELS_STORE = make_store(_object_store, prefix=MODELS_PREFIX)
 #: layout of red's prefix is visible in one place.
 DLI_MODEL_KEY = "light_model.pkl"
 CLIMATE_MODEL_KEY = "climate_model.pkl"
+
+#: Manually-uploaded source files (Sijia .xlsx and friends), content-addressed
+#: at {source}/{sha256}{suffix}. The `manual_uploads` audit table is the system
+#: of record; these are the files those rows point at.
+UPLOADS_STORE = make_store(_object_store, prefix=UPLOADS_PREFIX)
 
 # Database connection (managed via lifespan in dashboard.py)
 db: MySQLConnection | None = None

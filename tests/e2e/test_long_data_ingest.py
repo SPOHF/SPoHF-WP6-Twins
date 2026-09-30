@@ -21,6 +21,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from tests.e2e.conftest import TSDB_DSN
 from wp6_data.blue.long_data import LONG_DATA, SOURCE, parse
+from wp6_data.shared.blob import LocalBlobStore
 from wp6_data.shared.manual_ingest import ManualIngestService
 from wp6_data.shared.upload_storage import UploadStorage
 
@@ -52,7 +53,7 @@ async def service(tmp_path):
     pool = AsyncConnectionPool(TSDB_DSN, min_size=1, max_size=2, open=False)
     await pool.open()
     await _purge(pool)
-    storage = UploadStorage(base_dir=tmp_path, pool=pool)
+    storage = UploadStorage(store=LocalBlobStore(tmp_path), pool=pool)
     yield ManualIngestService(pool=pool, storage=storage, source=LONG_DATA)
     await _purge(pool)
     await pool.close()

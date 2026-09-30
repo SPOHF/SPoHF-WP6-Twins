@@ -32,6 +32,7 @@ MANUAL_SOURCES: tuple[str, ...] = tuple(sorted({
 #: Blue's corners of the shared bucket -- see red/deps.py for the rationale.
 EXPORT_PREFIX = "blue/exports"
 MODELS_PREFIX = "blue/models"
+UPLOADS_PREFIX = "blue/manual-uploads"
 
 _object_store = ObjectStoreSettings()
 
@@ -41,6 +42,11 @@ EXPORT_STORE = make_store(_object_store, prefix=EXPORT_PREFIX)
 #: stamp recording what fitted them. Separate prefix from exports, which the
 #: nightly job clears wholesale.
 MODELS_STORE = make_store(_object_store, prefix=MODELS_PREFIX)
+
+#: Manually-uploaded source files (insect CSV, fertigation events),
+#: content-addressed at {source}/{sha256}{suffix}. The `manual_uploads` audit
+#: table is the system of record; these are the files those rows point at.
+UPLOADS_STORE = make_store(_object_store, prefix=UPLOADS_PREFIX)
 
 
 async def init_db(dsn: str) -> None:

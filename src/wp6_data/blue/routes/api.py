@@ -7,11 +7,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
+from wp6_data.blue import deps
 from wp6_data.blue.fertigation import (
-    load_fertigation_event_days,
-    resolve_fertigation_csv_path,
+    load_fertigation_csv,
+    parse_fertigation_event_days,
 )
 from wp6_data.config import Settings
+from wp6_data.db import get_pool
 from wp6_data.shared.auth import verify_session_user
 
 _settings = Settings()
@@ -20,11 +22,10 @@ _FERT_CSV_SOURCE = "csv:fertigation_events"
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_session_user)])
 
 
-def _fertigation_csv_path():
-    """Resolve fertigation events CSV path for blue."""
-    return resolve_fertigation_csv_path(
-        _settings.blue_fertigation_events_csv,
-        _settings.blue_upload_dir,
+async def _fertigation_csv() -> bytes | None:
+    """The fertigation events CSV for blue, or None when there isn't one."""
+    return await load_fertigation_csv(
+        _settings.blue_fertigation_events_csv, deps.UPLOADS_STORE, get_pool(),
     )
 
 
@@ -34,8 +35,8 @@ async def fertigation_events(
     end: Annotated[date | None, Query()] = None,
 ) -> dict[str, Any]:
     """List farm-wide fertigation event starts from the blue CSV source."""
-    path = _fertigation_csv_path()
-    if not path.exists():
+    raw = await _fertigation_csv()
+    if raw is None:
         return {
             "events": [],
             "source": _FERT_CSV_SOURCE,
@@ -46,8 +47,8 @@ async def fertigation_events(
         }
 
     try:
-        sorted_all = load_fertigation_event_days(path)
-    except (OSError, UnicodeError, csv.Error):
+        sorted_all = parse_fertigation_event_days(raw)
+    except (UnicodeError, csv.Error):
         return JSONResponse(
             content={"error": "Failed to read fertigation events CSV"},
             status_code=500,

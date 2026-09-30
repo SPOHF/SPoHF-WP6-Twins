@@ -18,6 +18,7 @@ import pytest
 from wp6_data.red.sijia.ingest import ingest_sijia_file, main
 from wp6_data.red.sijia.parser import SijiaParseError
 from wp6_data.red.sijia.service import ApplyResult, ManualIngestService
+from wp6_data.shared.blob import LocalBlobStore
 from wp6_data.shared.upload_storage import UploadStorage
 
 
@@ -55,8 +56,8 @@ def test_main_invokes_ingest_with_path_from_argv():
 async def test_parser_failure_propagates_and_does_not_touch_the_db(tmp_path):
     """A structurally-bad file raises SijiaParseError without opening a DB connection.
 
-    storage.write() is filesystem-only (no DB), so persisting the file as
-    PRD §Upload flow specifies (line 285) is fine even on a bad file —
+    storage.write() only touches the object store (no DB), so persisting the
+    file as PRD §Upload flow specifies (line 285) is fine even on a bad file —
     what must not happen is any DB conversation.
     """
     bad_xlsx = tmp_path / "bad.xlsx"
@@ -66,7 +67,7 @@ async def test_parser_failure_propagates_and_does_not_touch_the_db(tmp_path):
     wb.save(bad_xlsx)
 
     pool = _mock_pool()
-    storage = UploadStorage(base_dir=tmp_path, pool=pool)
+    storage = UploadStorage(store=LocalBlobStore(tmp_path), pool=pool)
     service = ManualIngestService(pool=pool, storage=storage)
 
     with pytest.raises(SijiaParseError):

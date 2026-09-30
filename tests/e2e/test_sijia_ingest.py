@@ -17,6 +17,7 @@ from tests.e2e.conftest import RED_TSDB_DSN
 from wp6_data.red.sijia.ingest import ingest_sijia_file
 from wp6_data.red.sijia.service import ManualIngestService
 from wp6_data.red.tsdb import ensure_schema_red
+from wp6_data.shared.blob import LocalBlobStore
 from wp6_data.shared.upload_storage import UploadStorage
 
 pytestmark = pytest.mark.e2e
@@ -47,7 +48,7 @@ async def red_pool(red_tsdb_conn):
 
 @pytest.fixture()
 def service(red_pool, tmp_path):
-    storage = UploadStorage(base_dir=tmp_path, pool=red_pool)
+    storage = UploadStorage(store=LocalBlobStore(tmp_path), pool=red_pool)
     return ManualIngestService(pool=red_pool, storage=storage)
 
 

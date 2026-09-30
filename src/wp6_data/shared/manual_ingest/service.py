@@ -70,7 +70,7 @@ class ManualIngestService:
         return self._source
 
     async def validate(self, file_bytes: bytes) -> ValidationReport:
-        self.storage.write(
+        await self.storage.write(
             self._source.slug, file_bytes, suffix=self._source.file_suffix,
         )
         report = self._source.validate(file_bytes)
@@ -150,13 +150,13 @@ class ManualIngestService:
         """Apply the file at ``validation_id``, recording ``filename`` for provenance.
 
         Pass the human-meaningful original filename (the CLI's path name or
-        the web form's ``UploadFile.filename``) — what's stored on disk is
+        the web form's ``UploadFile.filename``) — what's stored is
         content-addressed by hash.
         """
-        path = self.storage.path_for(
+        key = self.storage.key_for(
             self._source.slug, validation_id, self._source.file_suffix,
         )
-        file_bytes = self.storage.read(path)
+        file_bytes = await self.storage.read(key)
         readings = self._source.parse(file_bytes)
 
         value = self._source.categorical_value
@@ -181,7 +181,7 @@ class ManualIngestService:
                         self._source.slug,
                         filename,
                         validation_id,
-                        str(path),
+                        key,
                         len(readings),
                     ),
                 )

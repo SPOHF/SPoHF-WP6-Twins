@@ -28,7 +28,12 @@ def test_fertigation_events_csv_fallback_contract(client, monkeypatch, tmp_path)
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(blue_api, "_fertigation_csv_path", lambda: csv_path)
+    # The endpoint reads bytes now — uploads live in the object store, so there
+    # is no path for it to stat.
+    async def _csv() -> bytes:
+        return csv_path.read_bytes()
+
+    monkeypatch.setattr(blue_api, "_fertigation_csv", _csv)
 
     resp = client.get("/api/fertigation-events?start=2026-06-02&end=2026-06-03")
 

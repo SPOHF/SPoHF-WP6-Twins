@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
 
 from wp6_data.config import RedSettings
+from wp6_data.red import deps
 from wp6_data.red.sijia.service import ApplyResult, ManualIngestService
 from wp6_data.shared.manual_ingest.cli import run_ingest as ingest_sijia_file
 from wp6_data.shared.upload_storage import UploadStorage
@@ -31,7 +32,7 @@ async def _run(path: Path) -> ApplyResult:
     pool = AsyncConnectionPool(settings.tsdb_url, min_size=1, max_size=2, open=False)
     await pool.open()
     try:
-        storage = UploadStorage(base_dir=Path(settings.upload_dir), pool=pool)
+        storage = UploadStorage(store=deps.UPLOADS_STORE, pool=pool)
         service = ManualIngestService(pool=pool, storage=storage)
         return await ingest_sijia_file(service, path)
     finally:

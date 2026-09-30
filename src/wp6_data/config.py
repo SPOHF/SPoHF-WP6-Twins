@@ -53,15 +53,10 @@ class Settings(BaseSettings):
     blue_retrain_at: str = ""
 
     # Optional CSV path for farm-wide fertigation events overlay in /chart.
-    # If empty, blue routes use the newest manual upload under
-    # {blue_upload_dir}/fertigation_events/*.csv, then fall back to a
-    # workspace-relative dev path uploads-blue/fertigation/fertigation_events.csv.
+    # If empty, blue routes use the newest `fertigation_events` manual upload in
+    # the object store (most recent by manual_uploads.uploaded_at), then fall
+    # back to uploads-blue/fertigation/fertigation_events.csv for a dev machine.
     blue_fertigation_events_csv: str = ""
-
-    # PVC mount for blue manual uploads (insect CSV, future sources). Mirrors
-    # red's upload_dir: files land at {blue_upload_dir}/{slug}/{sha256}{suffix};
-    # only the latest 2 per source are kept on disk (audit rows kept forever).
-    blue_upload_dir: str = "/data/blue-manual-uploads"
 
     # Blue farm weather location for GDD modeled-weather lookups
     # via OpenMeteo. Override per-deployment with WP6_BLUE_WEATHER_LAT/LON.
@@ -168,10 +163,6 @@ class RedSettings(BaseSettings):
 
     # TimescaleDB connection for manually-uploaded measurements (Sijia, etc.)
     tsdb_url: str
-
-    # PVC mount for manual uploads (issue 008). Files land at
-    # {upload_dir}/{source}/{sha256}.xlsx; only the latest 2 per source kept.
-    upload_dir: str = "/data/manual-uploads"
 
     # Time of day (UTC, "HH:MM") to refit the DLI and climate models. Models now
     # persist on the models PVC across a deploy, so a cold boot no longer

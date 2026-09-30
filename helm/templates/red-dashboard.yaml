@@ -10,18 +10,24 @@ metadata:
     app.kubernetes.io/name: {{ .Chart.Name }}-red-dashboard
 spec:
   replicas: {{ .Values.red.replicas }}
-  # Recreate, not RollingUpdate: this pod still mounts a ReadWriteOnce PVC
-  # (manual-uploads). On a block-device StorageClass the volume attaches
-  # to a single node, so RollingUpdate deadlocks — the new pod can't attach the
-  # volume the old pod still holds (Multi-Attach error). Terminate the old pod
-  # first, then start the new one. Fine for a single-replica dashboard.
+  # RollingUpdate: this pod mounts no ReadWriteOnce PVCs at all any more, so two
+  # generations can coexist and the new one must pass its readiness probe before
+  # the old one is torn down. That is the whole point of issue 061 — a deploy
+  # used to be a full outage because a block volume attaches to exactly one node,
+  # which made `Recreate` the only strategy that could complete.
   #
-  # Exports and models no longer count: both moved to the object store (issue
-  # 061 phases 1 and 2), which is also why the export CronJob is no longer
-  # pinned to this pod's node. Manual uploads are the last one — this becomes
-  # RollingUpdate, and the deploy stops being an outage, when phase 3 lands.
+  # maxUnavailable 0 / maxSurge 1, explicitly: the defaults (25%) round to 0 surge
+  # at one replica, which would silently keep the old behaviour.
+  #
+  # Two pods therefore overlap briefly, and both carry the nightly retrain
+  # schedule. That is safe: a concurrent PUT to one key was measured against the
+  # real store to give clean last-writer-wins, never a torn object — which is
+  # strictly better than the `open(path,'wb')` this replaced.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ .Chart.Name }}-red-dashboard
@@ -30,11 +36,6 @@ spec:
       labels:
         app.kubernetes.io/name: {{ .Chart.Name }}-red-dashboard
     spec:
-      # appuser (uid/gid 1000) must be able to write the manual-uploads PVC; on a
-      # block-device StorageClass the mount root is root:root, so fsGroup chowns
-      # it to gid 1000. See blue-dashboard.yaml for the full rationale.
-      securityContext:
-        fsGroup: 1000
       containers:
         - name: dashboard
           image: "{{ $redImage }}:{{ $redTag }}"
@@ -80,9 +81,6 @@ spec:
             # Refit on a clock, so persisting them doesn't freeze them.
             - name: WP6_RED_RETRAIN_AT
               value: {{ .Values.red.retrainAt | quote }}
-          volumeMounts:
-            - name: manual-uploads
-              mountPath: /data/manual-uploads
           resources:
             {{- toYaml .Values.red.resources | nindent 12 }}
           livenessProbe:
@@ -106,10 +104,6 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 5
             failureThreshold: 18
-      volumes:
-        - name: manual-uploads
-          persistentVolumeClaim:
-            claimName: {{ .Chart.Name }}-red-manual-uploads
 ---
 apiVersion: v1
 kind: Service

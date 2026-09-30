@@ -19,10 +19,11 @@ tsdbBootstrap:
 
 # S3-compatible object store, shared by both twins.
 #
-# Exports (and later models and manual uploads) live here instead of on
-# ReadWriteOnce PVCs. A block PVC attaches to exactly one node, which is why
-# the dashboards run `strategy: Recreate` and why a deploy is a full outage,
-# and why the export CronJobs had to be pinned to the dashboard's node. See
+# Exports, trained models and manual uploads all live here instead of on
+# ReadWriteOnce PVCs. A block PVC attaches to exactly one node, which is what
+# forced `strategy: Recreate` and made every deploy a full outage, and what
+# forced the export CronJobs onto the dashboard's node. With all three moved,
+# the dashboards mount no PVC at all and roll normally. See
 # issues/061-object-storage-to-end-deploy-downtime.md.
 #
 # ONE bucket serves everything; separation is by key prefix, chosen in code.
@@ -64,11 +65,6 @@ dashboard:
     existingSecret: ""  # default: <release>-blue-secrets
     # Keys expected in secret:
     # - tsdb-url: Postgres connection string for blue's database (wp6_blue)
-  # Persistent volume for blue manual uploads (insect CSV + future sources).
-  # Files: /data/blue-manual-uploads/{slug}/{sha256}{suffix}; only the latest
-  # 2 per source kept on disk (audit rows in manual_uploads kept forever).
-  manualUploads:
-    size: "5Gi"
   # Time of day (UTC, HH:MM) to refit the soil-forecast models. Persisting them
   # means a cold boot no longer does it, so this is what keeps them current.
   # Empty disables the schedule. Offset from red's so the two twins don't fit
@@ -155,9 +151,6 @@ red:
     # - tsdb-url: Postgres connection string for red's database (wp6_red)
     # - tsdb-red-password: password for the wp6_red role (used by bootstrap Job
     #   to provision the role; must match the password embedded in tsdb-url)
-  # PVC for manually-uploaded measurement files (Sijia, etc.)
-  manualUploads:
-    size: "5Gi"
   # Time of day (UTC, HH:MM) to refit both red models. Persisting them means a
   # cold boot no longer does it, so this is what keeps them current — and for
   # the climate chain it is also when it re-decides its seasonal term and which
