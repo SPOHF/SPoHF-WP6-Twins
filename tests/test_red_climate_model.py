@@ -19,6 +19,7 @@ from wp6_data.red.climate.model import (
     IndoorClimateModel,
     error_by_hour,
 )
+from wp6_data.shared.blob import LocalBlobStore
 
 METADATA = Path("src/wp6_data/red/metadata.yaml")
 HOURS = 24 * 60
@@ -163,41 +164,47 @@ class TestHonestyOnWeakSignal:
         assert verdicts <= {True, False}
 
 
+KEY = "climate.pkl"
+
+
+@pytest.mark.asyncio
 class TestPersistence:
-    def test_round_trip_preserves_the_chain_and_its_stats(self, trained, tmp_path):
+    async def test_round_trip_preserves_the_chain_and_its_stats(self, trained, tmp_path):
         model, stats = trained
-        path = model.save(tmp_path / "climate.pkl")
+        store = LocalBlobStore(tmp_path)
+        await model.save(store, KEY)
 
         restored = IndoorClimateModel(model.config, "unknown")
-        loaded = restored.load(path)
+        loaded = await restored.load(store, KEY)
 
         assert restored.reference_key == "s2103"
         assert restored.is_trained()
         assert loaded.trained_at == stats.trained_at
         assert sorted(restored.link2_models) == sorted(model.link2_models)
 
-    def test_absent_file_loads_as_none_rather_than_raising(self, config, tmp_path):
-        assert IndoorClimateModel(config, "s2103").load(tmp_path / "nope.pkl") is None
+    async def test_absent_artifact_loads_as_none_rather_than_raising(
+        self, config, tmp_path,
+    ):
+        store = LocalBlobStore(tmp_path)
+        assert await IndoorClimateModel(config, "s2103").load(store, "nope.pkl") is None
 
-    def test_a_model_from_an_older_era_is_refused(self, trained, tmp_path):
-        """A stale pickle on ephemeral disk must degrade to 'retrain', not to
-        wrong numbers."""
+    async def test_a_model_from_an_older_era_is_refused(self, trained, tmp_path):
+        """A stale pickle must degrade to 'retrain', not to wrong numbers."""
         import pickle
 
         model, _ = trained
-        path = tmp_path / "old.pkl"
-        model.save(path)
-        with open(path, "rb") as handle:
-            data = pickle.load(handle)
+        store = LocalBlobStore(tmp_path)
+        await model.save(store, KEY)
+
+        data = pickle.loads(await store.get(KEY))
         data["version"] = MODEL_VERSION - 1
-        with open(path, "wb") as handle:
-            pickle.dump(data, handle)
+        await store.put(KEY, pickle.dumps(data))
 
-        assert IndoorClimateModel(model.config, "s2103").load(path) is None
+        assert await IndoorClimateModel(model.config, "s2103").load(store, KEY) is None
 
-    def test_untrained_model_refuses_to_save(self, config, tmp_path):
+    async def test_untrained_model_refuses_to_save(self, config, tmp_path):
         with pytest.raises(RuntimeError, match="Train first"):
-            IndoorClimateModel(config, "s2103").save(tmp_path / "x.pkl")
+            await IndoorClimateModel(config, "s2103").save(LocalBlobStore(tmp_path), KEY)
 
 
 class TestErrorByHour:

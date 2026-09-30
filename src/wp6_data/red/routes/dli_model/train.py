@@ -64,7 +64,7 @@ async def train_model_from_db(db: MySQLConnection, weather_client: OpenMeteoClie
     if weather_df.empty:
         raise ValueError("No OpenMeteo weather data found for training")
 
-    model = get_model()
+    model = await get_model()
     stats = model.train(
         weather_df=weather_df,
         outdoor_df=outdoor_df,
@@ -73,7 +73,7 @@ async def train_model_from_db(db: MySQLConnection, weather_client: OpenMeteoClie
         plant_level_df=plant_level_df if not plant_level_df.empty else None,
         above_lamp_df=above_lamp_df,
     )
-    model.save()
+    await model.save()
     return stats
 
 PAGE_TITLE = "SPoHF Red - Train DLI Model"

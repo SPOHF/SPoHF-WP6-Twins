@@ -41,7 +41,9 @@ class _Stage:
         return [self.value]
 
 
-def _model() -> TwoStageLightModel:
+async def _model() -> TwoStageLightModel:
+    """Stands in for `get_model`, which is async now that the artifact is read
+    from the object store rather than a mounted volume."""
     model = TwoStageLightModel()
     model.stage1_features = ["shortwave_sum"]
     model.stage2_features = ["lux_hours"]

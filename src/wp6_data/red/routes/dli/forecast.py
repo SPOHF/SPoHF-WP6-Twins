@@ -57,7 +57,7 @@ async def dli_forecast(
 
     # Get weather client and model
     client = deps.get_weather_client()
-    model = get_model()
+    model = await get_model()
 
     # Read the lamps off the two PAR sensors over the recent window. Lamp light
     # is measured during hours the above-lamp sensor sees no daylight, so a

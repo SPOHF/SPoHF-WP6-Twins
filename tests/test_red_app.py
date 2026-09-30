@@ -24,6 +24,21 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
+from wp6_data.shared.blob import LocalBlobStore
+
+KEY = "climate_model.pkl"
+
+
+def _returns(value):
+    """An async stand-in for `load_chain`.
+
+    It reads the artifact from the object store now, so it is a coroutine — a
+    plain `lambda: value` patched over it fails with "object can't be awaited".
+    """
+    async def _load(*_args, **_kwargs):
+        return value
+
+    return _load
 
 @pytest.fixture(scope="module")
 def client():
@@ -86,7 +101,8 @@ def test_dli_history_renders_not_connected_page(client):
     assert PAGE_TITLE in resp.text
 
 
-def test_climate_forecast_survives_a_pickle_naming_a_dead_module(
+@pytest.mark.asyncio
+async def test_climate_forecast_survives_a_pickle_naming_a_dead_module(
     client, tmp_path, monkeypatch
 ):
     """A pickle naming a module that no longer exists must degrade to "retrain".
@@ -100,36 +116,45 @@ def test_climate_forecast_survives_a_pickle_naming_a_dead_module(
 
     # A GLOBAL opcode pointing at the module the lamp model used to live in —
     # byte-for-byte the failure a real saved artifact hits.
-    stale = tmp_path / "climate_model.pkl"
-    stale.write_bytes(b"\x80\x04cwp6_data.red.climate.lamp\nLampModel\n.")
+    raw = b"\x80\x04cwp6_data.red.climate.lamp\nLampModel\n."
 
     with pytest.raises(ModuleNotFoundError):
         import pickle
 
-        pickle.loads(stale.read_bytes())
+        pickle.loads(raw)
 
-    assert climate_model.read_artifact(stale) is None
+    store = LocalBlobStore(tmp_path)
+    await store.put(KEY, raw)
 
-    monkeypatch.setattr(climate_model, "MODEL_PATH", stale)
+    assert await climate_model.read_artifact(store, KEY) is None
+
+    # And the page still renders when that is what the real store holds.
+    monkeypatch.setattr(
+        climate_model, "artifact_target", lambda *_a, **_k: (store, KEY),
+    )
     resp = client.get("/climate/forecast")
     assert resp.status_code == 200
 
 
-def test_read_artifact_rejects_an_older_era(tmp_path):
+@pytest.mark.asyncio
+async def test_read_artifact_rejects_an_older_era(tmp_path):
     import pickle
 
     from wp6_data.red.climate.model import MODEL_VERSION, read_artifact
 
-    old = tmp_path / "old.pkl"
-    old.write_bytes(pickle.dumps({"version": MODEL_VERSION - 1, "chain": None}))
-    assert read_artifact(old) is None
+    store = LocalBlobStore(tmp_path)
 
-    current = tmp_path / "current.pkl"
-    current.write_bytes(pickle.dumps({"version": MODEL_VERSION, "chain": "x"}))
-    assert read_artifact(current) == {"version": MODEL_VERSION, "chain": "x"}
+    await store.put("old.pkl", pickle.dumps({"version": MODEL_VERSION - 1, "chain": None}))
+    assert await read_artifact(store, "old.pkl") is None
+
+    await store.put("current.pkl", pickle.dumps({"version": MODEL_VERSION, "chain": "x"}))
+    assert await read_artifact(store, "current.pkl") == {
+        "version": MODEL_VERSION, "chain": "x",
+    }
 
 
-def test_read_artifact_rejects_a_model_fitted_under_a_different_config(tmp_path):
+@pytest.mark.asyncio
+async def test_read_artifact_rejects_a_model_fitted_under_a_different_config(tmp_path):
     """The rail that persistence makes necessary.
 
     A config edit — a widened training window, an added horizon, a new
@@ -142,27 +167,28 @@ def test_read_artifact_rejects_a_model_fitted_under_a_different_config(tmp_path)
 
     from wp6_data.red.climate.model import MODEL_VERSION, read_artifact
 
-    path = tmp_path / "model.pkl"
-    path.write_bytes(
-        pickle.dumps({"version": MODEL_VERSION, "fingerprint": "abc", "chain": "x"})
+    store = LocalBlobStore(tmp_path)
+    await store.put(
+        KEY, pickle.dumps({"version": MODEL_VERSION, "fingerprint": "abc", "chain": "x"}),
     )
 
-    assert read_artifact(path, expect_fingerprint="abc") is not None
-    assert read_artifact(path, expect_fingerprint="def") is None
+    assert await read_artifact(store, KEY, expect_fingerprint="abc") is not None
+    assert await read_artifact(store, KEY, expect_fingerprint="def") is None
     # No expectation stated: the layout check still applies, the config one does not.
-    assert read_artifact(path) is not None
+    assert await read_artifact(store, KEY) is not None
 
 
-def test_an_unstamped_artifact_is_refused_when_a_config_is_expected(tmp_path):
+@pytest.mark.asyncio
+async def test_an_unstamped_artifact_is_refused_when_a_config_is_expected(tmp_path):
     """Artifacts written before fingerprinting existed cannot be vouched for."""
     import pickle
 
     from wp6_data.red.climate.model import MODEL_VERSION, read_artifact
 
-    path = tmp_path / "model.pkl"
-    path.write_bytes(pickle.dumps({"version": MODEL_VERSION, "chain": "x"}))
+    store = LocalBlobStore(tmp_path)
+    await store.put(KEY, pickle.dumps({"version": MODEL_VERSION, "chain": "x"}))
 
-    assert read_artifact(path, expect_fingerprint="abc") is None
+    assert await read_artifact(store, KEY, expect_fingerprint="abc") is None
 
 
 def test_the_config_fingerprint_moves_with_the_config():
@@ -202,10 +228,11 @@ def test_every_writer_of_the_artifact_stamps_it():
         assert '"fingerprint"' in source, writer.__qualname__
 
 
-def test_read_artifact_returns_none_for_a_missing_file(tmp_path):
+@pytest.mark.asyncio
+async def test_read_artifact_returns_none_for_a_missing_artifact(tmp_path):
     from wp6_data.red.climate.model import read_artifact
 
-    assert read_artifact(tmp_path / "nope.pkl") is None
+    assert await read_artifact(LocalBlobStore(tmp_path), "nope.pkl") is None
 
 
 def test_dli_lamps_renders_not_connected_page(client):
@@ -252,7 +279,7 @@ def test_climate_model_page_degrades_when_untrained(client, monkeypatch, tmp_pat
     the page must render — not a 500."""
     from wp6_data.red.routes.climate_model import status as status_route
 
-    monkeypatch.setattr(status_route, "load_chain", lambda: None)
+    monkeypatch.setattr(status_route, "load_chain", _returns(None))
 
     resp = client.get("/climate/model/")
 
@@ -297,14 +324,12 @@ def test_climate_model_page_reports_skill_not_just_r2(client, monkeypatch):
             )
         ],
     )
-    monkeypatch.setattr(
-        status_route, "load_chain",
-        lambda: TrainedChain(
-            trained_at=datetime(2026, 9, 16, tzinfo=UTC),
-            chosen_reference="s2103",
-            comparison={"s2103": stats},
-        ),
+    chain = TrainedChain(
+        trained_at=datetime(2026, 9, 16, tzinfo=UTC),
+        chosen_reference="s2103",
+        comparison={"s2103": stats},
     )
+    monkeypatch.setattr(status_route, "load_chain", _returns(chain))
 
     resp = client.get("/climate/model/")
 
@@ -325,21 +350,19 @@ def test_climate_model_surfaces_retraining_suggestions(client, monkeypatch):
     from wp6_data.red.routes.climate_model import status as status_route
 
     suggestion = "WS_01_03 now reports temp at height(s) H1"
-    monkeypatch.setattr(
-        status_route, "load_chain",
-        lambda: TrainedChain(
-            trained_at=datetime(2026, 9, 16, tzinfo=UTC),
-            chosen_reference="s2103",
-            comparison={
-                "s2103": ClimateModelStats(
-                    trained_at=datetime(2026, 9, 16, tzinfo=UTC),
-                    span=(date(2025, 10, 8), date(2026, 9, 16)),
-                    reference_key="s2103",
-                )
-            },
-            suggestions=[suggestion],
-        ),
+    chain = TrainedChain(
+        trained_at=datetime(2026, 9, 16, tzinfo=UTC),
+        chosen_reference="s2103",
+        comparison={
+            "s2103": ClimateModelStats(
+                trained_at=datetime(2026, 9, 16, tzinfo=UTC),
+                span=(date(2025, 10, 8), date(2026, 9, 16)),
+                reference_key="s2103",
+            )
+        },
+        suggestions=[suggestion],
     )
+    monkeypatch.setattr(status_route, "load_chain", _returns(chain))
 
     resp = client.get("/climate/model/")
 
@@ -400,7 +423,7 @@ def test_model_page_opens_with_an_overview_of_the_chain(client, monkeypatch):
     from wp6_data.red.routes.climate_model import status as status_route
 
     chain, _ = _stub_chain()
-    monkeypatch.setattr(status_route, "load_chain", lambda: chain)
+    monkeypatch.setattr(status_route, "load_chain", _returns(chain))
 
     resp = client.get("/climate/model/")
 
@@ -421,7 +444,7 @@ def test_overview_reports_the_lamp_state_it_was_trained_with(client, monkeypatch
         hours_on=frozenset({23, 0, 1, 2}), observed_days=14,
     )
     chain, _ = _stub_chain(lamp=lamp)
-    monkeypatch.setattr(status_route, "load_chain", lambda: chain)
+    monkeypatch.setattr(status_route, "load_chain", _returns(chain))
 
     resp = client.get("/climate/model/")
 

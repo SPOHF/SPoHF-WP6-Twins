@@ -12,6 +12,9 @@ import pickle
 import pytest
 
 from wp6_data.red.dli.model import MODEL_VERSION, TwoStageLightModel, fit_fingerprint
+from wp6_data.shared.blob import LocalBlobStore
+
+KEY = "light_model.pkl"
 
 
 def _artifact(**overrides) -> dict:
@@ -29,71 +32,76 @@ def _artifact(**overrides) -> dict:
     return data
 
 
-def _write(tmp_path, data) -> object:
-    path = tmp_path / "light_model.pkl"
-    path.write_bytes(pickle.dumps(data))
-    return path
+async def _store_with(tmp_path, raw: bytes) -> LocalBlobStore:
+    """A store holding `raw` at the model's key."""
+    store = LocalBlobStore(tmp_path)
+    await store.put(KEY, raw)
+    return store
 
 
+async def _write(tmp_path, data) -> LocalBlobStore:
+    return await _store_with(tmp_path, pickle.dumps(data))
+
+
+@pytest.mark.asyncio
 class TestLoad:
-    def test_a_current_artifact_loads(self, tmp_path):
-        path = _write(tmp_path, _artifact())
+    async def test_a_current_artifact_loads(self, tmp_path):
+        store = await _write(tmp_path, _artifact())
 
-        assert TwoStageLightModel().load(path) == "stats"
+        assert await TwoStageLightModel().load(store, KEY) == "stats"
 
-    def test_an_older_version_is_refused_not_migrated(self, tmp_path):
+    async def test_an_older_version_is_refused_not_migrated(self, tmp_path):
         """v4/v5/v6 used to load with defaults filled in for whatever was
         missing. Refusing costs one refit; migrating costs wrong numbers."""
         for version in (4, 5, 6):
-            path = _write(tmp_path, _artifact(version=version))
+            store = await _write(tmp_path, _artifact(version=version))
 
-            assert TwoStageLightModel().load(path) is None, version
+            assert await TwoStageLightModel().load(store, KEY) is None, version
 
-    def test_a_newer_version_is_refused_too(self, tmp_path):
+    async def test_a_newer_version_is_refused_too(self, tmp_path):
         """Equality, not a floor — a rollback must not read forward."""
-        path = _write(tmp_path, _artifact(version=MODEL_VERSION + 1))
+        store = await _write(tmp_path, _artifact(version=MODEL_VERSION + 1))
 
-        assert TwoStageLightModel().load(path) is None
+        assert await TwoStageLightModel().load(store, KEY) is None
 
-    def test_a_different_fit_configuration_is_refused(self, tmp_path):
+    async def test_a_different_fit_configuration_is_refused(self, tmp_path):
         """Move the training start or swap a sensor and the old fit answers a
         question nobody asked any more."""
-        path = _write(tmp_path, _artifact(fingerprint="somethingelse"))
+        store = await _write(tmp_path, _artifact(fingerprint="somethingelse"))
 
-        assert TwoStageLightModel().load(path) is None
+        assert await TwoStageLightModel().load(store, KEY) is None
 
-    def test_an_unstamped_artifact_is_refused(self, tmp_path):
+    async def test_an_unstamped_artifact_is_refused(self, tmp_path):
         data = _artifact()
         del data["fingerprint"]
-        path = _write(tmp_path, data)
+        store = await _write(tmp_path, data)
 
-        assert TwoStageLightModel().load(path) is None
+        assert await TwoStageLightModel().load(store, KEY) is None
 
-    def test_a_missing_key_is_refused_rather_than_defaulted(self, tmp_path):
+    async def test_a_missing_key_is_refused_rather_than_defaulted(self, tmp_path):
         """The old code filled `stage1_features` with a guess. A guessed feature
         list is indistinguishable from a fitted one once it is in memory."""
         data = _artifact()
         del data["stage1_features"]
-        path = _write(tmp_path, data)
+        store = await _write(tmp_path, data)
 
-        assert TwoStageLightModel().load(path) is None
+        assert await TwoStageLightModel().load(store, KEY) is None
 
-    def test_a_corrupt_pickle_returns_none_rather_than_raising(self, tmp_path):
+    async def test_a_corrupt_pickle_returns_none_rather_than_raising(self, tmp_path):
         """`load` runs during startup, where an exception is a failed boot."""
-        path = tmp_path / "light_model.pkl"
-        path.write_bytes(b"this is not a pickle")
+        store = await _store_with(tmp_path, b"this is not a pickle")
 
-        assert TwoStageLightModel().load(path) is None
+        assert await TwoStageLightModel().load(store, KEY) is None
 
-    def test_a_missing_file_returns_none(self, tmp_path):
-        assert TwoStageLightModel().load(tmp_path / "nope.pkl") is None
+    async def test_a_missing_artifact_returns_none(self, tmp_path):
+        assert await TwoStageLightModel().load(LocalBlobStore(tmp_path), KEY) is None
 
-    def test_the_attenuation_override_still_applies(self, tmp_path, monkeypatch):
+    async def test_the_attenuation_override_still_applies(self, tmp_path, monkeypatch):
         monkeypatch.setenv("WP6_RED_DLI_ATTENUATION_OVERRIDE", "0.8")
-        path = _write(tmp_path, _artifact())
+        store = await _write(tmp_path, _artifact())
 
         model = TwoStageLightModel()
-        model.load(path)
+        await model.load(store, KEY)
 
         assert model.attenuation_factor == pytest.approx(0.8)
 

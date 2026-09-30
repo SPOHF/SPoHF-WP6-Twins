@@ -27,10 +27,8 @@ with the better end-to-end skill wins, with the comparison kept for the page.
 from __future__ import annotations
 
 import asyncio
-import pickle
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 
 import numpy as np
 import pandas as pd  # type: ignore[import-untyped]
@@ -40,14 +38,15 @@ from wp6_data.red.climate import data as climate_data
 from wp6_data.red.climate.config import ClimateModelConfig
 from wp6_data.red.climate.downscale import DownscaleStats, WireDownscaler
 from wp6_data.red.climate.model import (
-    MODEL_PATH,
     MODEL_VERSION,
     WEATHER_VARIABLES,
     ClimateModelStats,
     IndoorClimateModel,
+    artifact_target,
     read_artifact,
 )
 from wp6_data.red.lamp import LampModel, derive_lamp_model
+from wp6_data.shared.artifacts import write_pickled
 from wp6_data.shared.weather import OpenMeteoClient
 
 # Measurements a wire reports that link 3 can model, in the order they must be
@@ -295,7 +294,7 @@ async def train_chain(
         lamp=lamp,
         suggestions=_suggestions(config, downscale_stats, observed),
     )
-    _save(chain, models[chosen], downscaler)
+    await _save(chain, models[chosen], downscaler)
     return chain
 
 
@@ -314,39 +313,39 @@ def _suggestions(
     return notes
 
 
-def _save(
+async def _save(
     chain: TrainedChain, model: IndoorClimateModel, downscaler: WireDownscaler
-) -> Path:
+) -> str:
     """Persist the chosen chain as one artifact.
 
-    Models live on their own volume and survive a deploy, so the dashboard reads
+    Models live in the object store and survive a deploy, so the dashboard reads
     them back rather than refitting on every cold boot. That makes the stamps
     below load-bearing: `version` for a deliberate break, and `fingerprint` for
     the config this was fitted under, which is what stops an artifact outliving
-    the metadata that shaped it. Deliberately not on the export PVC, which is
-    mounted read-only.
+    the metadata that shaped it. Under red's models prefix, not the exports one,
+    which is cleared wholesale by the nightly job.
     """
-    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(MODEL_PATH, "wb") as handle:
-        pickle.dump(
-            {
-                "version": MODEL_VERSION,
-                "fingerprint": model.config.fit_fingerprint(),
-                "chain": chain,
-                "link1_models": model.link1_models,
-                "link2_models": model.link2_models,
-                "climatology": model.climatology,
-                "link2_autoregressive": model.link2_autoregressive,
-                "link2_exogenous": model.link2_exogenous,
-                "link2_sources": model.link2_sources,
-                "downscale_models": downscaler.models,
-            },
-            handle,
-        )
-    return MODEL_PATH
+    store, key = artifact_target()
+    await write_pickled(
+        store,
+        key,
+        {
+            "version": MODEL_VERSION,
+            "fingerprint": model.config.fit_fingerprint(),
+            "chain": chain,
+            "link1_models": model.link1_models,
+            "link2_models": model.link2_models,
+            "climatology": model.climatology,
+            "link2_autoregressive": model.link2_autoregressive,
+            "link2_exogenous": model.link2_exogenous,
+            "link2_sources": model.link2_sources,
+            "downscale_models": downscaler.models,
+        },
+    )
+    return key
 
 
-def load_models(
+async def load_models(
     config: ClimateModelConfig,
 ) -> tuple[TrainedChain, IndoorClimateModel, WireDownscaler] | None:
     """Restore the saved chain *and* the fitted models behind it.
@@ -357,7 +356,7 @@ def load_models(
     numbers — and because the models now outlive the pod that fitted them, the
     config fingerprint is checked here too, not just the layout version.
     """
-    data = read_artifact(MODEL_PATH, expect_fingerprint=config.fit_fingerprint())
+    data = await read_artifact(expect_fingerprint=config.fit_fingerprint())
     if data is None:
         return None
 
@@ -380,7 +379,7 @@ def load_models(
     return chain, model, downscaler
 
 
-def load_chain(config: ClimateModelConfig | None = None) -> TrainedChain | None:
+async def load_chain(config: ClimateModelConfig | None = None) -> TrainedChain | None:
     """The saved chain, or ``None`` when absent or from an older era.
 
     Pass ``config`` to also refuse a chain fitted under a different one. The
@@ -389,16 +388,16 @@ def load_chain(config: ClimateModelConfig | None = None) -> TrainedChain | None:
     ``stale_config`` is how it labels that.
     """
     expect = config.fit_fingerprint() if config is not None else None
-    data = read_artifact(MODEL_PATH, expect_fingerprint=expect)
+    data = await read_artifact(expect_fingerprint=expect)
     return data.get("chain") if data else None
 
 
-def stale_config(config: ClimateModelConfig) -> bool:
+async def stale_config(config: ClimateModelConfig) -> bool:
     """Whether a readable artifact was fitted under a *different* config.
 
     True only when there is something on disk to disagree with: no model at all
     is "not trained", which the pages already say in their own words.
     """
-    if read_artifact(MODEL_PATH) is None:
+    if await read_artifact() is None:
         return False
-    return read_artifact(MODEL_PATH, expect_fingerprint=config.fit_fingerprint()) is None
+    return await read_artifact(expect_fingerprint=config.fit_fingerprint()) is None

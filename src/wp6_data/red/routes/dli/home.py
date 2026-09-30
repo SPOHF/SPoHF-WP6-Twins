@@ -19,7 +19,7 @@ async def dli_home(request: Request) -> str:
         return render_page(PAGE_TITLE, "<h1>Database not connected</h1>", show_back_link=True)
 
     # Get model status for the card
-    model = get_model()
+    model = await get_model()
     user_is_admin = is_admin(request)
 
     # Build model card based on status and permissions

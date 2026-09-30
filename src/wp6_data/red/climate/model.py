@@ -27,15 +27,17 @@ leads with.
 
 from __future__ import annotations
 
-import os
-import pickle
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd  # type: ignore[import-untyped]
+
+from wp6_data.shared.artifacts import read_pickled, write_pickled
+
+if TYPE_CHECKING:
+    from wp6_data.shared.blob import BlobStore
 
 from wp6_data.red.climate.config import ClimateModelConfig
 from wp6_data.red.climate.features import (
@@ -96,46 +98,36 @@ OUTDOOR_PREFIX = "out_"
 PREDICTED_OUTDOOR_PREFIX = "outhat_"
 
 
-def read_artifact(path: Path, *, expect_fingerprint: str | None = None) -> dict | None:
-    """The pickled artifact at ``path``, or ``None`` when it cannot be used.
+async def read_artifact(
+    store: BlobStore | None = None,
+    key: str = "",
+    *,
+    expect_fingerprint: str | None = None,
+) -> dict | None:
+    """The stored chain artifact, or ``None`` when it cannot be used.
 
-    A version check only protects against artifacts we can still *read*. Pickle
-    stores classes by module path, so moving or renaming one makes every older
-    artifact unreadable — the load fails before the version inside it can be
-    consulted. Treating that as "no model" is what keeps the promise the version
-    check makes on its own: a stale artifact on ephemeral disk degrades to
-    "retrain", never to a crash and never to wrong numbers.
-
-    Deliberately broad: anything a pickle from another era can raise
-    (a moved class, a removed attribute, a different library version, a
-    truncated write) means the same thing to a caller that can simply retrain.
+    A thin wrapper over :func:`shared.artifacts.read_pickled` that supplies this
+    model's version and defaults to red's models prefix. The reasoning behind
+    each gate lives there.
     """
-    if not path.exists():
-        return None
-    try:
-        with open(path, "rb") as handle:
-            data = pickle.load(handle)
-    except Exception:
-        return None
-    if not isinstance(data, dict) or data.get("version", 0) != MODEL_VERSION:
-        return None
-    if expect_fingerprint is not None and data.get("fingerprint") != expect_fingerprint:
-        # Fitted under a different configuration — a widened training window, a
-        # new horizon, a changed exclusion. The layout is fine, so the version
-        # gate above waves it through; what has moved is the question the model
-        # was fitted to answer. Same verdict as a missing file: refit.
-        return None
-    return data
+    store, key = artifact_target(store, key)
+    return await read_pickled(
+        store, key, version=MODEL_VERSION, expect_fingerprint=expect_fingerprint,
+    )
 
 
-def _default_model_dir() -> Path:
-    return Path.home() / ".wp6" / "models"
+def artifact_target(
+    store: BlobStore | None = None, key: str = "",
+) -> tuple[BlobStore, str]:
+    """The store and key to use, defaulting to red's models prefix.
 
+    ``red.deps`` builds its stores at import, so this import is deliberately
+    lazy — at module scope it would make import order matter. Overridable so
+    tests can hand in a ``LocalBlobStore``.
+    """
+    from wp6_data.red import deps
 
-_env_dir = os.getenv("WP6_RED_CLIMATE_MODEL_PATH", "")
-MODEL_PATH = (
-    Path(_env_dir) if _env_dir else _default_model_dir() / "climate_model.pkl"
-)
+    return store or deps.MODELS_STORE, key or deps.CLIMATE_MODEL_KEY
 
 
 @dataclass
@@ -497,36 +489,37 @@ class IndoorClimateModel:
 
     # ── persistence ─────────────────────────────────────────────────────────
 
-    def save(self, path: Path | None = None) -> Path:
-        """Pickle the trained chain. Training is cheap; a stale model is not."""
+    async def save(self, store: BlobStore | None = None, key: str = "") -> str:
+        """Store the trained chain. Training is cheap; a stale model is not."""
         if not self.is_trained():
             raise RuntimeError("No model to save. Train first.")
-        path = path or MODEL_PATH
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "wb") as handle:
-            pickle.dump(
-                {
-                    "version": MODEL_VERSION,
-                    # What the config looked like when this was fitted. Checked
-                    # on load so a config edit cannot be served by a model that
-                    # predates it — see `shared.artifacts`.
-                    "fingerprint": self.config.fit_fingerprint(),
-                    "reference_key": self.reference_key,
-                    "link1_models": self.link1_models,
-                    "link2_models": self.link2_models,
-                    "climatology": self.climatology,
-                    "link2_autoregressive": self.link2_autoregressive,
-                    "link2_exogenous": self.link2_exogenous,
-                    "link2_sources": self.link2_sources,
-                    "stats": self.stats,
-                },
-                handle,
-            )
-        return path
+        store, key = artifact_target(store, key)
+        await write_pickled(
+            store,
+            key,
+            {
+                "version": MODEL_VERSION,
+                # What the config looked like when this was fitted. Checked
+                # on load so a config edit cannot be served by a model that
+                # predates it — see `shared.artifacts`.
+                "fingerprint": self.config.fit_fingerprint(),
+                "reference_key": self.reference_key,
+                "link1_models": self.link1_models,
+                "link2_models": self.link2_models,
+                "climatology": self.climatology,
+                "link2_autoregressive": self.link2_autoregressive,
+                "link2_exogenous": self.link2_exogenous,
+                "link2_sources": self.link2_sources,
+                "stats": self.stats,
+            },
+        )
+        return key
 
-    def load(self, path: Path | None = None) -> ClimateModelStats | None:
-        """Restore a pickled chain, or ``None`` if absent or from an older era."""
-        data = read_artifact(path or MODEL_PATH)
+    async def load(
+        self, store: BlobStore | None = None, key: str = "",
+    ) -> ClimateModelStats | None:
+        """Restore a stored chain, or ``None`` if absent or from an older era."""
+        data = await read_artifact(store, key)
         if data is None:
             return None
         self.reference_key = data["reference_key"]

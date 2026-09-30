@@ -113,7 +113,7 @@ async def dli_performance(
     if not dli_data.is_connected():
         return _page("<h1>Database not connected</h1>")
 
-    model = get_model()
+    model = await get_model()
     if not model.is_trained():
         return _page(
             "<h1>Model not trained</h1><p>Train the prediction model first.</p>"

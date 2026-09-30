@@ -163,11 +163,6 @@ red:
   # PVC for manually-uploaded measurement files (Sijia, etc.)
   manualUploads:
     size: "5Gi"
-  # PVC for trained models (DLI + climate chain). Kept across a deploy so the
-  # dashboard reads them back instead of refitting on every cold boot. Pickles,
-  # not a dataset — 1Gi is generous.
-  models:
-    size: "1Gi"
   # Time of day (UTC, HH:MM) to refit both red models. Persisting them means a
   # cold boot no longer does it, so this is what keeps them current — and for
   # the climate chain it is also when it re-decides its seasonal term and which

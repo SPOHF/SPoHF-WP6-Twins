@@ -43,7 +43,7 @@ _retrain_task: asyncio.Task | None = None
 async def _train_dli_model_if_missing() -> None:
     from wp6_data.red.dli import get_model
 
-    model = get_model()
+    model = await get_model()
     if model.is_trained():
         log.info("dli_model_loaded_from_disk")
         return
@@ -79,7 +79,7 @@ async def _train_climate_model_if_missing() -> None:
 
     # Config-aware: a saved model fitted under a different metadata.yaml is not
     # a model we can use, so it refits here rather than being served.
-    if load_chain(load_climate_model(deps._METADATA_PATH)) is not None:
+    if await load_chain(load_climate_model(deps._METADATA_PATH)) is not None:
         log.info("climate_model_loaded_from_disk")
         return
     try:

@@ -105,7 +105,7 @@ async def dli_lamps(
         return render_page(PAGE_TITLE, "<h1>Database not connected</h1>",
                           show_back_link=True, back_url="/dli")
 
-    model = get_model()
+    model = await get_model()
 
     today = date.today()
     if end is None:

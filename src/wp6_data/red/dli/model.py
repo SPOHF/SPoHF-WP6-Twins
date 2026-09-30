@@ -13,13 +13,17 @@ Uses Ridge regression to handle correlated features.
 
 import contextlib
 import os
-import pickle
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+
+from wp6_data.shared.artifacts import read_pickled, write_pickled
+
+if TYPE_CHECKING:
+    from wp6_data.shared.blob import BlobStore
 
 from wp6_data.red.dli.aggregation import (
     add_day_of_year_features,
@@ -98,13 +102,16 @@ def fit_fingerprint() -> str:
     )
 
 
-def _default_model_path() -> Path:
-    """Get default model path in user's home directory."""
-    return Path.home() / ".wp6" / "models" / "light_model.pkl"
+def _resolve(store: BlobStore | None, key: str) -> tuple[BlobStore, str]:
+    """The store and key to use, defaulting to red's models prefix.
 
+    Imported lazily: ``red.deps`` builds its stores at import, and importing it
+    from module scope here would make this module's import order matter.
+    Overridable so tests can hand in a ``LocalBlobStore``.
+    """
+    from wp6_data.red import deps
 
-_env_path = os.getenv("WP6_RED_DLI_MODEL_PATH", "")
-MODEL_PATH = Path(_env_path) if _env_path else _default_model_path()
+    return store or deps.MODELS_STORE, key or deps.DLI_MODEL_KEY
 
 
 def _previous_day(days: np.ndarray, values: np.ndarray) -> np.ndarray:
@@ -607,13 +614,10 @@ class TwoStageLightModel:
         # this path: `readings_per_day` only ever stood in for one.
         return round(par_integral / UMOL_TO_MOL, 2)
 
-    def save(self, path: Path | None = None) -> Path:
-        """Save model to disk."""
+    async def save(self, store: BlobStore | None = None, key: str = "") -> str:
+        """Store the trained model, returning the key it was written to."""
         if not self.is_trained():
             raise RuntimeError("No model to save. Train first.")
-
-        path = path or MODEL_PATH
-        path.parent.mkdir(parents=True, exist_ok=True)
 
         data = {
             "stage1_model": self.stage1_model,
@@ -632,12 +636,11 @@ class TwoStageLightModel:
             "fingerprint": fit_fingerprint(),
         }
 
-        with open(path, "wb") as f:
-            pickle.dump(data, f)
+        store, key = _resolve(store, key)
+        await write_pickled(store, key, data)
+        return key
 
-        return path
-
-    def load(self, path: Path | None = None) -> ModelStats | None:
+    async def load(self, store: BlobStore | None = None, key: str = "") -> ModelStats | None:
         """Load the saved model, or return ``None`` when there isn't a usable one.
 
         **Equality on the version, not a floor.** Earlier revisions accepted v4,
@@ -649,26 +652,17 @@ class TwoStageLightModel:
         indistinguishable downstream from a fitted one. Refusing costs one refit;
         the alternative costs wrong numbers with no signal.
 
-        Never raises. Anything a pickle from another era can throw — a moved
-        class, a removed attribute, a truncated write — means the same thing to a
-        caller that can simply retrain, and this one is called during startup.
+        Never raises on a *stale* artifact. Anything a pickle from another era can
+        throw — a moved class, a removed attribute, a truncated write — means the
+        same thing to a caller that can simply retrain, and this one is called
+        during startup. The version and fingerprint gates live in
+        ``shared.artifacts.read_pickled``; see it for why each exists.
         """
-        path = path or MODEL_PATH
-
-        if not path.exists():
-            return None
-
-        try:
-            with open(path, "rb") as f:
-                data = pickle.load(f)
-        except Exception:
-            return None
-
-        if not isinstance(data, dict) or data.get("version") != MODEL_VERSION:
-            return None
-        if data.get("fingerprint") != fit_fingerprint():
-            # Same layout, different inputs: the training window moved, or a
-            # sensor was swapped. Refit rather than answer an older question.
+        store, key = _resolve(store, key)
+        data = await read_pickled(
+            store, key, version=MODEL_VERSION, expect_fingerprint=fit_fingerprint(),
+        )
+        if data is None:
             return None
 
         try:
@@ -703,12 +697,20 @@ LightCorrelationModel = TwoStageLightModel
 _model: TwoStageLightModel | None = None
 
 
-def get_model() -> TwoStageLightModel:
-    """Get or create the global model instance, loading from disk if available."""
+async def get_model() -> TwoStageLightModel:
+    """Get or create the global model instance, loading it back if one is stored.
+
+    Async because the artifact now lives in the object store rather than on a
+    mounted volume, and a read is a network round trip — done synchronously it
+    would block the event loop and every other in-flight request with it.
+    """
     global _model
 
     if _model is None:
-        _model = TwoStageLightModel()
-        _model.load()
+        model = TwoStageLightModel()
+        await model.load()
+        # Assigned only once loaded, so a failed load does not leave an empty
+        # model cached as if it were the real thing.
+        _model = model
 
     return _model

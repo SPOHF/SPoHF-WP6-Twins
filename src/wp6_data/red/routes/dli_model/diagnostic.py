@@ -224,7 +224,7 @@ async def dli_model_diagnostic() -> str:
                 else:
                     trend_label = "-"
 
-                model = get_model()
+                model = await get_model()
                 model_factor_html = ""
                 if model.stats and model.stats.attenuation_factor != 1.0:
                     model_factor_html = render_stat_tile(

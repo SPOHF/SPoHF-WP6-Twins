@@ -142,7 +142,7 @@ async def climate_forecast(
         return _message_page("<p>Database not connected.</p>")
 
     config = load_climate_model(deps._METADATA_PATH)
-    loaded = load_models(config)
+    loaded = await load_models(config)
     if loaded is None:
         return _message_page(
             "<p>No climate model has been trained yet. The model lives on "

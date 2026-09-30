@@ -49,7 +49,7 @@ def _verdict(stage) -> str:
 @router.get("/", response_class=HTMLResponse)
 async def dli_model_status() -> str:
     """View model status and training options."""
-    model = get_model()
+    model = await get_model()
 
     if model.is_trained() and model.stats:
         stats = model.stats

@@ -29,11 +29,25 @@ DB_NAME = settings.db_name
 DB_USER = settings.db_user
 DB_PASSWORD = settings.db_password
 
-#: Red's corner of the shared bucket. One bucket serves every twin and every
+#: Red's corners of the shared bucket. One bucket serves every twin and every
 #: artifact kind; prefixes are the separation (see issue 061).
 EXPORT_PREFIX = "red/exports"
+MODELS_PREFIX = "red/models"
 
-EXPORT_STORE = make_store(ObjectStoreSettings(), prefix=EXPORT_PREFIX)
+_object_store = ObjectStoreSettings()
+
+EXPORT_STORE = make_store(_object_store, prefix=EXPORT_PREFIX)
+
+#: Trained models (DLI + the climate chain). Separate prefix from exports, not
+#: because the store cares, but because exports are regenerated nightly and
+#: cleared wholesale first — a models artifact swept up by that would be a very
+#: confusing outage.
+MODELS_STORE = make_store(_object_store, prefix=MODELS_PREFIX)
+
+#: Keys within MODELS_STORE. Named here rather than in each model module so the
+#: layout of red's prefix is visible in one place.
+DLI_MODEL_KEY = "light_model.pkl"
+CLIMATE_MODEL_KEY = "climate_model.pkl"
 
 # Database connection (managed via lifespan in dashboard.py)
 db: MySQLConnection | None = None

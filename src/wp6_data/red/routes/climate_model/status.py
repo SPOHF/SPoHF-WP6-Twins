@@ -286,7 +286,7 @@ def _untrained_page() -> str:
 @router.get("/", response_class=HTMLResponse)
 async def climate_model_status() -> str:
     """Model status: what it was trained on, and what it actually beats."""
-    chain = load_chain()
+    chain = await load_chain()
     if chain is None or chain.stats is None:
         return _untrained_page()
 
