@@ -83,6 +83,22 @@ spec:
               value: {{ .Values.red.retrainAt | quote }}
           resources:
             {{- toYaml .Values.red.resources | nindent 12 }}
+          # Keep serving for a moment after SIGTERM, so Traefik has time to drop
+          # this pod from its endpoint list before the process stops accepting.
+          #
+          # Measured: the first rolling deploy (v1.0.469) served every request to
+          # red but returned a single 502 on blue, and the pod's own readiness
+          # probe recorded `connection refused` at the same instant — the process
+          # was gone while the ingress still routed to it. Endpoint removal and
+          # container shutdown are concurrent, and nothing orders them.
+          #
+          # 5s is comfortably longer than a Traefik endpoint update and well
+          # inside terminationGracePeriodSeconds (30), so it costs a few seconds
+          # of rollout and nothing else.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
           livenessProbe:
             httpGet:
               path: /health
