@@ -19,6 +19,9 @@ from wp6_data.blue.routes.monitor import soil_forecast
 from wp6_data.config import Settings
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
+from wp6_data.shared.object_store_health import (
+    status_card as object_store_status_card,
+)
 from wp6_data.shared.scheduling import parse_daily_time, run_daily
 from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 
@@ -129,7 +132,7 @@ config = TwinConfig(
         ),
     },
     hero_cards=[_gdd_card, _monitor_card],
-    status_extras=blue_manual.manual_cards(),
+    status_extras=[*blue_manual.manual_cards(), object_store_status_card],
     export_sanitise_names=True,
     # Authenticated twin (TwinConfig.require_auth defaults to True): the app
     # factory mounts SessionMiddleware, the /auth/* OIDC router, OIDC startup

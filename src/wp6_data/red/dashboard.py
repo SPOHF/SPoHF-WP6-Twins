@@ -26,6 +26,9 @@ from wp6_data.red.tsdb import ensure_schema_red
 from wp6_data.red.wires import undeclared_wire_ids
 from wp6_data.shared import render_card
 from wp6_data.shared.app_factory import create_app
+from wp6_data.shared.object_store_health import (
+    status_card as object_store_status_card,
+)
 from wp6_data.shared.scheduling import parse_daily_time, run_daily
 from wp6_data.shared.twin import DataSource, ThemeColors, TwinConfig
 
@@ -239,7 +242,7 @@ config = TwinConfig(
                    crop_cycles.router,
                    sijia.router],
     hero_cards=[_dli_card, _multi_height_card, _crop_cycles_card],
-    status_extras=[render_sijia_card],
+    status_extras=[render_sijia_card, object_store_status_card],
 
     home_extra_html=(
         '<a href="/static/red/sensor_locations.docx" download role="button"'
