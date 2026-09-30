@@ -340,14 +340,35 @@ class SoilForecaster:
 
     # ── persistence ───────────────────────────────────────────────────────────
 
+    # Bytes rather than a path: these live in the object store now, so the
+    # dashboard can drop its ReadWriteOnce models PVC and roll instead of being
+    # torn down first (issue 061). A whole `self` is pickled, not a dict, so
+    # `shared.artifacts.read_pickled`'s dict-shaped gates do not apply — the
+    # staleness check is the artifact stamp written beside these.
+    def to_bytes(self) -> bytes:
+        return pickle.dumps(self)
+
+    @classmethod
+    def from_bytes(cls, raw: bytes) -> SoilForecaster:
+        return pickle.loads(raw)
+
     def save(self, path) -> None:
-        with open(path, 'wb') as fh:
-            pickle.dump(self, fh)
+        """Write to a filesystem path. Only `train_soil_models.py` uses this."""
+        Path(path).write_bytes(self.to_bytes())
 
     @classmethod
     def load(cls, path) -> SoilForecaster:
-        with open(path, 'rb') as fh:
-            return pickle.load(fh)
+        return cls.from_bytes(Path(path).read_bytes())
+
+
+def artifact_name(sensor_type: str, treatment: str) -> str:
+    """The artifact name for one fitted model.
+
+    One place, because the dashboard both writes these and reads them back by
+    listing them — a mismatch would look like "no models trained yet" rather
+    than like an error.
+    """
+    return f"{sensor_type}_{treatment}.pkl"
 
 
 # ── batch training ────────────────────────────────────────────────────────────
@@ -355,7 +376,7 @@ class SoilForecaster:
 def train_all_forecasters(
     treatment_sensors_df: pd.DataFrame,
     exog_moisture: pd.DataFrame | dict | None = None,
-    output_dir: str = 'exports/models',
+    output_dir: str | None = None,
     min_days: int = 60,
     freq: str = 'D',
 ) -> dict:
@@ -378,14 +399,18 @@ def train_all_forecasters(
     exog_moisture : pd.DataFrame | dict | None
         Global precipitation exog from build_exog_moisture(), OR a dict
         {treatment: DataFrame} for per-treatment exog.
-    output_dir : str
-        Where to save .pkl files and manifest.csv.
+    output_dir : str | None
+        Where to write .pkl files and manifest.csv. None (the default) fits and
+        returns without persisting anything, which is what the dashboard wants:
+        it stores the returned models in the object store itself. Only the
+        standalone `train_soil_models.py` still writes a directory.
     min_days : int
         Minimum days of data required per treatment to train.
     freq : str
         'D' daily (default), 'H' hourly — resolution for model training.
     """
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    if output_dir is not None:
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     df = treatment_sensors_df.copy()
     df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -442,8 +467,9 @@ def train_all_forecasters(
             fc = SoilForecaster(sensor_type, treatment, freq=freq)
             fc.fit(series, exog=exog)
 
-            fname = f'{sensor_type}_{treatment}.pkl'
-            fc.save(Path(output_dir) / fname)
+            fname = artifact_name(sensor_type, treatment)
+            if output_dir is not None:
+                fc.save(Path(output_dir) / fname)
             forecasters[(sensor_type, treatment)] = fc
 
             for _, row in fc.summary().iterrows():
@@ -462,8 +488,12 @@ def train_all_forecasters(
                     'freq':         freq,
                 })
 
-    pd.DataFrame(manifest_rows).to_csv(
-        Path(output_dir) / 'manifest.csv', index=False
-    )
-    print(f'\n  {len(forecasters)} forecasters saved to {output_dir}/')
+    if output_dir is not None:
+        # Written for a human reading the output directory; nothing reads it back.
+        pd.DataFrame(manifest_rows).to_csv(
+            Path(output_dir) / 'manifest.csv', index=False
+        )
+        print(f'\n  {len(forecasters)} forecasters saved to {output_dir}/')
+    else:
+        print(f'\n  {len(forecasters)} forecasters trained')
     return forecasters

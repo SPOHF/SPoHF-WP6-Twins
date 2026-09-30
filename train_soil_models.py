@@ -1,12 +1,23 @@
-"""One-off script: train soil forecast models and save to blue_export_dir/models/."""
+"""One-off script: train soil forecast models and write them to a local directory.
+
+The dashboard does not use this — it fits on demand and stores the models in the
+object store (`blue/models/`). This writes .pkl files plus a manifest.csv for
+someone inspecting a fit by hand.
+
+Untested since the API drifted under it: `BlueSensorProvider(project=...)` went
+away with the `project` column, and `settings.blue_export_dir` went away when
+exports moved to the object store. Both are repaired below, but nothing exercises
+this path, so treat a run as exploratory.
+"""
 import asyncio
 import selectors
 from datetime import UTC, datetime
 from pathlib import Path
 
+from wp6_data.blue.routes.monitor._treatment import load_device_treatment_map
+
 from wp6_data.blue.deps import close_db, init_db
 from wp6_data.blue.provider import BlueSensorProvider
-from wp6_data.blue.routes.monitor._treatment import load_device_treatment_map
 from wp6_data.blue.soil_forecaster import train_all_forecasters
 from wp6_data.config import Settings
 
@@ -16,7 +27,7 @@ settings = Settings()
 async def main() -> None:
     await init_db(settings.tsdb_url)
 
-    provider = BlueSensorProvider(project="yookr-direct", source_key="yookr")
+    provider = BlueSensorProvider()
     print("Fetching 2025 soil data from TimescaleDB…")
     df = await provider.fetch_data(
         sensor_tags=["soilMoisture", "soilTemperature"],
@@ -40,7 +51,9 @@ async def main() -> None:
 
     train_df = df.rename(columns={"time": "timestamp", "sensor": "sensor_type"})
 
-    output_dir = Path(settings.blue_export_dir) / "models"
+    # An explicit local directory: the dashboard's models live in the object
+    # store now, and this script deliberately does not write there.
+    output_dir = Path("exports-blue") / "models"
     print(f"Output directory: {output_dir}")
 
     train_all_forecasters(train_df, output_dir=str(output_dir))

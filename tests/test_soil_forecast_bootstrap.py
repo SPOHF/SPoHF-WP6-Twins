@@ -5,7 +5,6 @@ startup only when needed and must never crash the app. These tests pin that
 decision logic (skip/train/no-data/locked/error) without doing a real fit.
 """
 
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pandas as pd
@@ -25,6 +24,14 @@ class _FakeProvider:
         return self._df
 
 
+def _scan_returning(keys):
+    """`_scan_models` is a coroutine now — the models are listed from the object
+    store rather than globbed off a volume."""
+    async def _scan():
+        return keys
+
+    return _scan
+
 def _readings() -> pd.DataFrame:
     """One row shaped like a provider fetch (columns bootstrap forwards on)."""
     return pd.DataFrame(
@@ -38,7 +45,7 @@ def _readings() -> pd.DataFrame:
 
 
 async def test_bootstrap_skips_when_models_present(monkeypatch) -> None:
-    monkeypatch.setattr(soil_forecast, "_scan_models", lambda: [Path("m.pkl")])
+    monkeypatch.setattr(soil_forecast, "_scan_models", _scan_returning(["m.pkl"]))
     train = AsyncMock()
     monkeypatch.setattr(soil_forecast, "_train_from_readings", train)
     provider = _FakeProvider(_readings())
@@ -50,7 +57,7 @@ async def test_bootstrap_skips_when_models_present(monkeypatch) -> None:
 
 
 async def test_bootstrap_trains_when_absent(monkeypatch) -> None:
-    monkeypatch.setattr(soil_forecast, "_scan_models", lambda: [])
+    monkeypatch.setattr(soil_forecast, "_scan_models", _scan_returning([]))
     train = AsyncMock(return_value={("soilMoisture", "Std"): object()})
     monkeypatch.setattr(soil_forecast, "_train_from_readings", train)
     provider = _FakeProvider(_readings())
@@ -62,7 +69,7 @@ async def test_bootstrap_trains_when_absent(monkeypatch) -> None:
 
 
 async def test_bootstrap_skips_when_no_data(monkeypatch) -> None:
-    monkeypatch.setattr(soil_forecast, "_scan_models", lambda: [])
+    monkeypatch.setattr(soil_forecast, "_scan_models", _scan_returning([]))
     train = AsyncMock()
     monkeypatch.setattr(soil_forecast, "_train_from_readings", train)
     provider = _FakeProvider(pd.DataFrame())  # empty fetch
@@ -74,7 +81,7 @@ async def test_bootstrap_skips_when_no_data(monkeypatch) -> None:
 
 
 async def test_bootstrap_noop_when_lock_held(monkeypatch) -> None:
-    monkeypatch.setattr(soil_forecast, "_scan_models", lambda: [])
+    monkeypatch.setattr(soil_forecast, "_scan_models", _scan_returning([]))
     train = AsyncMock()
     monkeypatch.setattr(soil_forecast, "_train_from_readings", train)
     provider = _FakeProvider(_readings())
@@ -90,7 +97,7 @@ async def test_bootstrap_noop_when_lock_held(monkeypatch) -> None:
 
 
 async def test_bootstrap_swallows_training_error(monkeypatch) -> None:
-    monkeypatch.setattr(soil_forecast, "_scan_models", lambda: [])
+    monkeypatch.setattr(soil_forecast, "_scan_models", _scan_returning([]))
     train = AsyncMock(side_effect=RuntimeError("boom"))
     monkeypatch.setattr(soil_forecast, "_train_from_readings", train)
     provider = _FakeProvider(_readings())

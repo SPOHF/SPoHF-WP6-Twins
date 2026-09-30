@@ -46,14 +46,6 @@ class Settings(BaseSettings):
     # Chart query limit (max data points per series in /api/series)
     chart_query_limit: int = 100000
 
-    # Directory for trained soil-forecast models. Separate from the CSV exports,
-    # which now live in the object store (see ObjectStoreSettings): models are
-    # dashboard-owned and get their own writable volume, so they survive a
-    # deploy and the dashboard does not refit on every cold boot (see
-    # blue.routes.monitor.soil_forecast.bootstrap_models_if_missing).
-    # Empty (the default) resolves to a writable home path at runtime.
-    blue_model_dir: str = ""
-
     # Time of day (UTC, "HH:MM") to refit the soil-forecast models. Models now
     # persist across a deploy, so this schedule is what keeps them current
     # rather than a cold boot. Empty disables it, which is the right default

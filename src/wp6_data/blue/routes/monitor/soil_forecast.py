@@ -6,7 +6,6 @@ import inspect
 import json
 import logging
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
@@ -17,7 +16,12 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from plotly.subplots import make_subplots
 
-from wp6_data.blue.soil_forecaster import SoilForecaster, train_all_forecasters
+from wp6_data.blue import deps
+from wp6_data.blue.soil_forecaster import (
+    SoilForecaster,
+    artifact_name,
+    train_all_forecasters,
+)
 from wp6_data.blue.treatments import (
     load_device_treatment_map,
     treatment_color,
@@ -26,6 +30,7 @@ from wp6_data.config import Settings
 from wp6_data.shared import render_card, render_page
 from wp6_data.shared.artifacts import fingerprint
 from wp6_data.shared.auth import is_admin, verify_session_admin
+from wp6_data.shared.blob import BlobStore
 from wp6_data.shared.routes.deps import get_provider
 from wp6_data.shared.twin import SensorDataProvider
 
@@ -49,17 +54,17 @@ _RECENT_DAYS = 30  # days of history needed for lag features
 _DEFAULT_TREATMENT = "Std"
 
 _settings = Settings()
-# Models live on their own writable volume (default: home dir off-cluster),
-# mirroring red's: they survive a deploy, so the dashboard reads them back
-# instead of refitting on every cold boot, and `retrain_models` on a nightly
-# schedule is what keeps them current. Deliberately NOT under blue_export_dir —
-# that PVC is the nightly CSV export, mounted read-only in the dashboard.
-# Override the location with WP6_BLUE_MODEL_DIR.
-_MODELS_DIR = (
-    Path(_settings.blue_model_dir)
-    if _settings.blue_model_dir
-    else Path.home() / ".wp6" / "blue-models"
-)
+
+# Models live under blue/models/ in the shared object store, mirroring red's:
+# they survive a deploy, so the dashboard reads them back instead of refitting on
+# every cold boot, and `retrain_models` on a nightly schedule is what keeps them
+# current. A store rather than a mounted volume is what lets the dashboard drop
+# its ReadWriteOnce PVC and roll instead of being torn down first (issue 061).
+#
+# Read through a function, not bound at import: tests substitute a
+# LocalBlobStore, and binding here would make that a module-global patch.
+def _models_store() -> BlobStore:
+    return deps.MODELS_STORE
 
 FORECAST_CSS = """
     .stats-grid { display: flex; gap: 0.5rem; flex-wrap: wrap; }
@@ -149,52 +154,71 @@ def _expected_stamp() -> dict:
     }
 
 
-def _write_stamp() -> None:
-    """Record what produced the models now on disk. Never fatal to a fit."""
+async def _write_stamp() -> None:
+    """Record what produced the stored models. Never fatal to a fit."""
     try:
-        _MODELS_DIR.mkdir(parents=True, exist_ok=True)
-        (_MODELS_DIR / _STAMP_NAME).write_text(json.dumps(_expected_stamp()))
-    except OSError:
+        await _models_store().put(
+            _STAMP_NAME,
+            json.dumps(_expected_stamp()).encode("utf-8"),
+            content_type="application/json",
+        )
+    except Exception:
         logger.exception("Soil forecast: could not write artifact stamp")
 
 
-def _stamp_matches() -> bool:
-    """Whether the models on disk were written by this code and config.
+async def _stamp_matches() -> bool:
+    """Whether the stored models were written by this code and config.
 
     A missing stamp counts as a mismatch: artifacts from before stamping
     existed cannot be vouched for, and refitting is the cheap, safe answer.
     """
     try:
-        found = json.loads((_MODELS_DIR / _STAMP_NAME).read_text())
-    except (OSError, ValueError):
+        raw = await _models_store().try_get(_STAMP_NAME)
+    except Exception:
+        # An unreachable store is not a mismatch to report here; `_scan_models`
+        # will have failed first and already said so.
         return False
-    return found == _expected_stamp()
+    if raw is None:
+        return False
+    try:
+        return json.loads(raw.decode("utf-8")) == _expected_stamp()
+    except ValueError:
+        return False
 
 
-def _scan_models() -> list[Path]:
-    """The usable models on disk — none, if they were not written by this code."""
-    if not _MODELS_DIR.exists():
+async def _scan_models() -> list[str]:
+    """The usable model keys — none, if they were not written by this code.
+
+    An unreachable store reads as "no models", the same as an empty one. The page
+    then offers the Update button, which is the honest thing to show; letting the
+    error out would 500 a page whose whole job is to say whether models exist.
+    """
+    try:
+        keys = await _models_store().list()
+    except Exception:
+        logger.exception("Soil forecast: could not list models")
         return []
-    found = sorted(_MODELS_DIR.glob("*.pkl"))
-    if found and not _stamp_matches():
+    found = sorted(k for k in keys if k.endswith(".pkl"))
+    if found and not await _stamp_matches():
         logger.warning(
-            "Soil forecast: %d model(s) on disk were fitted by different code or "
+            "Soil forecast: %d stored model(s) were fitted by different code or "
             "configuration; treating as absent so they are refitted", len(found),
         )
         return []
     return found
 
 
-def _load_models(pkl_paths: list[Path]) -> dict[tuple[str, str], SoilForecaster]:
+async def _load_models(keys: list[str]) -> dict[tuple[str, str], SoilForecaster]:
+    store = _models_store()
     result: dict[tuple[str, str], SoilForecaster] = {}
-    for path in pkl_paths:
+    for key in keys:
         try:
-            fc = SoilForecaster.load(path)
+            fc = SoilForecaster.from_bytes(await store.get(key))
             result[(fc.sensor_type, fc.treatment)] = fc
         except Exception:
             # Loud, not silent: the stamp cannot see every kind of drift, so a
             # model that will not unpickle is the last signal that one happened.
-            logger.exception("Soil forecast: failed to load model %s", path)
+            logger.exception("Soil forecast: failed to load model %s", key)
     return result
 
 
@@ -373,15 +397,15 @@ async def soil_forecast(
     # Retraining is admin-only (see the POST route). Hide the Update button from
     # non-admins so the action isn't exposed — mirrors red's DLI model card.
     update_button = _update_button_html() if is_admin(request) else ""
-    pkl_paths = _scan_models()
+    model_keys = await _scan_models()
 
-    if not pkl_paths:
+    if not model_keys:
         content = f"""
             <h1>Soil Forecast</h1>
             {status_banner}
             {update_button}
             <article>
-              <p>No forecast models found in <code>{_MODELS_DIR}</code> yet.</p>
+              <p>No forecast models stored yet. Use Update to fit them.</p>
             </article>
         """
         return render_page(
@@ -392,7 +416,7 @@ async def soil_forecast(
             extra_css=FORECAST_CSS,
         )
 
-    forecasters = _load_models(pkl_paths)
+    forecasters = await _load_models(model_keys)
 
     now = datetime.now(UTC)
     start_dt = now - timedelta(days=_RECENT_DAYS)
@@ -486,24 +510,46 @@ async def _train_from_readings(readings: pd.DataFrame) -> dict:
     train_df = df.rename(columns={"time": "timestamp", "sensor": "sensor_type"})
     # train_all_forecasters is CPU-bound (numpy) — run it off the event loop so
     # a retrain doesn't block every other request while it fits.
-    forecasters = await run_in_threadpool(
-        train_all_forecasters, train_df, output_dir=str(_MODELS_DIR),
-    )
-    _write_stamp()
+    # train_all_forecasters persists nothing now; it fits and returns, and the
+    # models are stored here. That keeps a training function free of storage, and
+    # is what lets these live in the object store rather than on a volume.
+    forecasters = await run_in_threadpool(train_all_forecasters, train_df)
+
+    store = _models_store()
+    # Clear first, so a treatment that stops qualifying (a failed sensor, too
+    # little growing-season data) does not keep serving last season's model.
+    await _clear_models()
+    for (sensor_type, treatment), fc in forecasters.items():
+        await store.put(
+            artifact_name(sensor_type, treatment),
+            fc.to_bytes(),
+            content_type="application/octet-stream",
+        )
+
+    # Last, so a stamp never vouches for models that failed to write.
+    await _write_stamp()
     return forecasters
+
+
+async def _clear_models() -> None:
+    """Remove every stored model and the stamp."""
+    store = _models_store()
+    keys = [k for k in await store.list() if k.endswith(".pkl") or k == _STAMP_NAME]
+    if keys:
+        await store.delete(*keys)
 
 
 async def bootstrap_models_if_missing(provider: SensorDataProvider) -> None:
     """Train soil models on startup when none exist on disk.
 
-    Models live on their own volume (see `_MODELS_DIR`), so on an ordinary
+    Models live in the object store (see `_models_store`), so on an ordinary
     deploy they are already there and this is a no-op — a first install is what
     it is really for. `retrain_models` keeps them current after that. Also a
     no-op when a manual retrain is already running. Never raises — a failure
     here must not take down startup; the admin Update button remains a fallback.
     """
-    if _scan_models():
-        logger.info("Soil forecast: models already on disk, skipping boot training")
+    if await _scan_models():
+        logger.info("Soil forecast: models already stored, skipping boot training")
         return
     if _training_lock.locked():
         return

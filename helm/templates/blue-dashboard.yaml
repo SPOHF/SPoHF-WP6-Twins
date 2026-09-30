@@ -8,16 +8,16 @@ metadata:
     app.kubernetes.io/name: {{ .Chart.Name }}-blue-dashboard
 spec:
   replicas: {{ .Values.dashboard.replicas }}
-  # Recreate, not RollingUpdate: this pod still mounts ReadWriteOnce PVCs
-  # (manual-uploads, models). On a block-device StorageClass the volume attaches
+  # Recreate, not RollingUpdate: this pod still mounts a ReadWriteOnce PVC
+  # (manual-uploads). On a block-device StorageClass the volume attaches
   # to a single node, so RollingUpdate deadlocks — the new pod can't attach the
   # volume the old pod still holds (Multi-Attach error). Terminate the old pod
   # first, then start the new one. Fine for a single-replica dashboard.
   #
-  # Exports no longer count: they moved to the object store (issue 061 phase 1),
-  # which is also why the export CronJob is no longer pinned to this pod's node.
-  # This becomes RollingUpdate — and the deploy stops being an outage — once
-  # models and manual-uploads follow, in phases 2 and 3.
+  # Exports and models no longer count: both moved to the object store (issue
+  # 061 phases 1 and 2), which is also why the export CronJob is no longer
+  # pinned to this pod's node. Manual uploads are the last one — this becomes
+  # RollingUpdate, and the deploy stops being an outage, when phase 3 lands.
   strategy:
     type: Recreate
   selector:
@@ -63,18 +63,15 @@ spec:
             - name: WP6_BLUE_UPLOAD_DIR
               value: /data/blue-manual-uploads
             {{- include "wp6-data.objectStoreEnv" (dict "root" $) | nindent 12 }}
-            # Models persist on their own volume, so a deploy reads them back
-            # instead of refitting — see helm/templates/blue-models.yaml.
-            - name: WP6_BLUE_MODEL_DIR
-              value: /data/models
-            # Refit on a clock instead, so persisting them doesn't freeze them.
+            # Models live under blue/models/ in the object store, so a deploy
+            # reads them back instead of refitting. Keys are chosen in code
+            # (blue/soil_forecaster.py:artifact_name), not configured here.
+            # Refit on a clock, so persisting them doesn't freeze them.
             - name: WP6_BLUE_RETRAIN_AT
               value: {{ .Values.dashboard.retrainAt | quote }}
           volumeMounts:
             - name: blue-manual-uploads
               mountPath: /data/blue-manual-uploads
-            - name: models
-              mountPath: /data/models
           resources:
             {{- toYaml .Values.dashboard.resources | nindent 12 }}
           livenessProbe:
@@ -102,9 +99,6 @@ spec:
         - name: blue-manual-uploads
           persistentVolumeClaim:
             claimName: {{ .Chart.Name }}-blue-manual-uploads
-        - name: models
-          persistentVolumeClaim:
-            claimName: {{ .Chart.Name }}-blue-models
 ---
 apiVersion: v1
 kind: Service

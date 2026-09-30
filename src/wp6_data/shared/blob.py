@@ -74,7 +74,7 @@ class BlobStore(Protocol):
         """Whether anything is stored at ``key``."""
         ...
 
-    async def list(self, prefix: str) -> list[str]:
+    async def list(self, prefix: str = "") -> list[str]:
         """Every key beginning with ``prefix``, sorted.
 
         Returns full keys, not names relative to the prefix, so the result can
@@ -154,7 +154,7 @@ class LocalBlobStore:
     async def exists(self, key: str) -> bool:
         return await asyncio.to_thread(lambda: self._path(key).is_file())
 
-    async def list(self, prefix: str) -> list[str]:
+    async def list(self, prefix: str = "") -> list[str]:
         def _list() -> list[str]:
             root = self.root.resolve()
             if not root.is_dir():
@@ -243,7 +243,7 @@ class S3BlobStore:
 
         return await asyncio.to_thread(_head)
 
-    async def list(self, prefix: str) -> list[str]:
+    async def list(self, prefix: str = "") -> list[str]:
         def _list() -> list[str]:
             paginator = self._client.get_paginator("list_objects_v2")
             return sorted(
