@@ -1,5 +1,8 @@
 # `long_data` models one device per treatment
 
+> **Amended by ADR 0008:** the device decision stands, but `Plant_nr` is no
+> longer discarded — it becomes the sample ordinal.
+
 `long_data` originally minted one device per `(treatment, plant_nr)` (plus a
 `"{treatment} / plant 0"` device for plant-less and pooled-sample rows). This
 produced an unbounded, year-varying device family: every yearly upload

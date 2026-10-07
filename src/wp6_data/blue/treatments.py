@@ -13,17 +13,26 @@ from pathlib import Path
 
 _CSV_PATH = Path(__file__).parent / "sensor_overview_SPoHF.csv"
 
-# Comparable fertilizer strategies kept adjacent for easy visual comparison.
-# The 2025 sub-strategy codes (V_CA, G_K, …) are the canonical device names as
-# stored in the DB by long_data ingest; they are not the same as Ca1/K1 etc.
-TREATMENT_ORDER: tuple[str, ...] = (
-    "Std",
-    "Org1", "Org2",
-    "Ca", "K",
-    "V_CA", "G_K",
-    "V_CA_G_BrPK", "V_K_G_CaBrP",
-    "Mix_D", "Mix_E",
+# Treatments grouped by where they sit in the field: rows A–C hold one
+# treatment each, rows D (calcium) and E (potassium) are split into three plots.
+# Charts draw a divider between groups. The 2025 sub-strategy codes (V_CA, G_K,
+# …) are the canonical device names as stored in the DB by long_data ingest;
+# they are not the same as Ca1/K1 etc. Each row's 2026 pooled mix closes it.
+TREATMENT_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("Org1", "Org2", "Std"),
+    ("V_CA", "Ca", "V_CA_G_BrPK", "Mix_D"),
+    ("G_K", "K", "V_K_G_CaBrP", "Mix_E"),
 )
+
+TREATMENT_ORDER: tuple[str, ...] = tuple(t for group in TREATMENT_GROUPS for t in group)
+
+# Field plot of each treatment: row letter, plus plot number in the split rows.
+# A pooled mix spans its whole row.
+TREATMENT_PLOTS: dict[str, str] = {
+    "Org1": "A", "Org2": "B", "Std": "C",
+    "V_CA": "D10", "Ca": "D20", "V_CA_G_BrPK": "D30", "Mix_D": "D",
+    "G_K": "E10", "K": "E20", "V_K_G_CaBrP": "E30", "Mix_E": "E",
+}
 
 # Colour per fertiliser treatment (consistent across all monitor charts).
 # Treatments within the same family use distinct hues, not just brightness.
@@ -104,6 +113,12 @@ def load_device_treatment_map() -> dict[str, str]:
                 mapping[device] = treatment
     mapping.update(_DEVICE_OVERRIDES)
     return mapping
+
+
+def treatment_label(treatment: str) -> str:
+    """Treatment code with its field plot, e.g. ``"Ca (D20)"``."""
+    plot = TREATMENT_PLOTS.get(treatment)
+    return f"{treatment} ({plot})" if plot else treatment
 
 
 def treatment_color(treatment: str) -> str:

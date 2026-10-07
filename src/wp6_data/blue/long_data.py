@@ -2,20 +2,20 @@
 
 ``long_data`` is delivered as one Excel file per year (``Long_Data <year>.xlsx``)
 in long/tidy form: ``Date, Meting, Treatment, Value`` (+ ``Plant_nr`` from 2025
-on). This module is the only ``long_data``-specific code: it harmonizes the two
+on). This module is the only ``long_data``-specific code: it harmonizes the
 yearly vocabularies into one canonical set of measures and treatments, models
-**one device per treatment**, and preserves every sample. The ``Plant_nr``
-column is tolerated on input but discarded — plants are not individually
-identified (see ADR 0004); every plant and pooled sample of a treatment coexists
-on its single device.
+**one device per treatment** (see ADR 0004), and preserves every sample.
 
 It does **not** use the shared mean-bucketing ``bind``: because the source is
-date-only, the unused time-of-day encodes each sample's file order
+date-only, the unused time-of-day carries the sample ordinal
 (``date 00:00:00 UTC + i seconds``), so many samples coexist at one
 device+date+measure without averaging and without per-sample devices
-(see ADR 0001). Ingest replaces only the calendar year(s) in the uploaded file
-(see ADR 0002). Treatment codes reuse the automated sensors' ``position``
-vocabulary so manual and automated readings of a plot group together.
+(see ADR 0001). When the file has a ``Plant_nr`` column the ordinal **is** the
+plant number, so a plant's values can be joined across dates and measures
+(:func:`plant_nr`); otherwise it is the file order. Ingest replaces only the
+calendar year(s) in the uploaded file (see ADR 0002). Treatment codes reuse the
+automated sensors' ``position`` vocabulary so manual and automated readings of
+a plot group together.
 """
 
 from __future__ import annotations
@@ -103,9 +103,13 @@ IGNORE_MEASURES: frozenset[str] = frozenset({
     "Total Weight (grams)",
 })
 
-# Required source columns (matched case-insensitively). A `Plant_nr` column may
-# also be present (2025+); it is read past and discarded — see ADR 0004.
+# Required source columns (matched case-insensitively). An optional `Plant_nr`
+# column (2025+) becomes the sample ordinal — see the module docstring.
 _REQUIRED_COLUMNS = ("date", "meting", "treatment", "value")
+_PLANT_COLUMN = "plant_nr"
+
+# Seconds in a day; an ordinal must stay inside its calendar date.
+_MAX_ORDINAL = 86_399
 
 
 class LongDataParseError(ManualParseError):
@@ -118,13 +122,16 @@ class LongDataParseError(ManualParseError):
 
 
 def _column_index(header: tuple) -> dict[str, int]:
-    """Map column role → index from the header row (case-insensitive)."""
+    """Map column role → index from the header row (case-insensitive).
+
+    ``plant_nr`` is present only when the file carries that optional column.
+    """
     found: dict[str, int] = {}
     for idx, cell in enumerate(header):
         if cell is None:
             continue
         name = str(cell).strip().lower()
-        if name in _REQUIRED_COLUMNS:
+        if name in _REQUIRED_COLUMNS or name == _PLANT_COLUMN:
             found[name] = idx
     missing = [c for c in _REQUIRED_COLUMNS if c not in found]
     if missing:
@@ -148,6 +155,30 @@ def _coerce_date(cell: object) -> date | None:
     return None
 
 
+def _coerce_plant(cell: object) -> int | None:
+    """Coerce a ``Plant_nr`` cell to a valid ordinal (``None`` if unusable)."""
+    if isinstance(cell, bool):
+        return None
+    if isinstance(cell, float) and cell.is_integer():
+        cell = int(cell)
+    if isinstance(cell, str) and cell.strip().isdigit():
+        cell = int(cell.strip())
+    if isinstance(cell, int) and 1 <= cell <= _MAX_ORDINAL:
+        return cell
+    return None
+
+
+def plant_nr(time: datetime) -> int:
+    """Recover the sample ordinal from a stored ``long_data`` timestamp.
+
+    For years whose file carried ``Plant_nr`` this is the plant number. The
+    ordinal counts from UTC midnight, so the time is read back in UTC.
+    """
+    utc = time.astimezone(UTC)
+    return int((utc - utc.replace(hour=0, minute=0, second=0, microsecond=0))
+               .total_seconds())
+
+
 def _aggregate(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]:
     """Decode the workbook into ordinal-timestamped readings.
 
@@ -164,9 +195,12 @@ def _aggregate(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]
         raise LongDataParseError("file is empty") from None
     cols = _column_index(tuple(header))
 
-    # Intermediate samples in file order; ordinals assigned after the full pass
-    # so each (device, date, sensor) group is numbered by entry sequence.
-    samples: list[tuple[str, date, str, float]] = []
+    has_plant = _PLANT_COLUMN in cols
+    # Intermediate samples in file order, with the plant number when the file
+    # has one; file-order ordinals are assigned after the full pass so each
+    # (device, date, sensor) group is numbered by entry sequence.
+    samples: list[tuple[str, date, str, float, int | None]] = []
+    seen_plants: set[tuple[str, date, str, int]] = set()
     skipped: list[SkippedRow] = []
     total = 0
 
@@ -210,24 +244,42 @@ def _aggregate(file_bytes: bytes) -> tuple[list[Reading], list[SkippedRow], int]
             skipped.append(SkippedRow(line_idx, f"value {raw_value!r} is not a number"))
             continue
 
+        plant: int | None = None
+        if has_plant:
+            plant = _coerce_plant(row[cols[_PLANT_COLUMN]])
+            if plant is None:
+                total += 1
+                skipped.append(SkippedRow(
+                    line_idx, f"Plant_nr {row[cols[_PLANT_COLUMN]]!r} is not a plant number",
+                ))
+                continue
+            key = (code, day, sensor_tag, plant)
+            if key in seen_plants:
+                total += 1
+                skipped.append(SkippedRow(
+                    line_idx, f"plant {plant} already has a {meting!r} value on {day}",
+                ))
+                continue
+            seen_plants.add(key)
+
         # The treatment code is the device — every plant and pooled sample of a
-        # treatment shares one device (ADR 0004); any Plant_nr column is ignored.
+        # treatment shares one device (ADR 0004).
         total += 1
-        samples.append((code, day, sensor_tag, value))
+        samples.append((code, day, sensor_tag, value, plant))
 
     wb.close()
 
     # Assign the per-(device, date, sensor) sample ordinal: sample i → midnight
-    # UTC + i seconds (i ≥ 1, so 00:00:00 stays reserved). Preserves spread and
-    # entry order; UTC anchor keeps the calendar date correct in both
-    # day-bucketing paths.
+    # UTC + i seconds (i ≥ 1, so 00:00:00 stays reserved), i = the plant number
+    # when known, else the entry sequence. UTC anchor keeps the calendar date
+    # correct in both day-bucketing paths.
     ordinal: dict[tuple[str, date, str], int] = defaultdict(int)
     readings: list[Reading] = []
-    for device_name, day, sensor_tag, value in samples:
+    for device_name, day, sensor_tag, value, plant in samples:
         key = (device_name, day, sensor_tag)
         ordinal[key] += 1
         ts = datetime(day.year, day.month, day.day, tzinfo=UTC) + timedelta(
-            seconds=ordinal[key],
+            seconds=plant if plant is not None else ordinal[key],
         )
         readings.append(
             Reading(

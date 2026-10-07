@@ -337,10 +337,10 @@ devices:
       suzukii:
         intention: "Spotted-wing drosophila (D. suzukii) caught per round"
 
-  # long_data models one device per treatment (plant_nr is discarded — see
-  # ADR 0004), so the device set is this fixed list of treatments. `position` reuses
-  # the automated sensors' codes so manual + automated readings of a plot group
-  # together.
+  # long_data models one device per treatment (a plant is a sample on it, not a
+  # device — see ADR 0004), so the device set is this fixed list of treatments.
+  # `position` reuses the automated sensors' codes so manual + automated
+  # readings of a plot group together.
   "Org1":
     position: "Org1"
     type: "Blueberry plant (manual)"

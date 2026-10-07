@@ -35,19 +35,20 @@ Source-label → canonical: `Organic 1`/`Organisch-1` → `Org1`; `Organic 2`/
 unchanged.
 
 ### Plant
-One physical blueberry plant. Plants are **not** individually modelled: a
-`Plant_nr` that some source files carry is discarded on ingest (see ADR 0004),
-because per-plant devices proved too cumbersome in the UI and were never queried
-below the treatment. A plant's measured values are kept — they live as
-**Samples** on the treatment device — but they are not labelled by plant.
+One physical blueberry plant, numbered within its treatment by the `Plant_nr`
+that source files carry from 2025 on. Plants are **not** devices (see ADR 0004):
+their values live as **Samples** on the treatment device, and the plant number
+is the sample's ordinal (see ADR 0008). That keeps one plant's values joinable
+across dates and measures — e.g. its season yield is the sum of its picks.
+2024 has no plant numbers.
 
 ### Sample
 An individual measured value (a shoot, a berry, a pooled stored-berry sample).
 Samples are **not** given their own devices — they attach to the **treatment**
 device. Multiple samples on the same date for the same device + measure are kept
-individually (no averaging) by encoding the sample's file order in the
-timestamp: `date 00:00:00 UTC + i seconds`, `i` = 1-based file order (so
-`00:00:00` is reserved/unused). This preserves the full distribution and entry
+individually (no averaging) by encoding an ordinal in the timestamp:
+`date 00:00:00 UTC + i seconds`, `i` = the **Plant** number when the file has
+one, else the 1-based file order (so `00:00:00` is reserved/unused). This preserves the full distribution and entry
 order without per-sample devices or a schema change. Date-only data is anchored
 at **UTC midnight, not localized** — unlike [[insects]] — so both day-bucketing
 paths file it under the correct date.
@@ -96,8 +97,8 @@ Already in long/tidy form: `Date, Meting (measure), Treatment, Value`
 vocabularies (incl. unit conversion) into one canonical set is the core of
 this source.
 
-Every reading — both years, including 2025's `Plant_nr`-tagged rows and the
-pooled storage samples — resolves to its treatment device `"{treatment}"`. The
+Every reading — every year, including `Plant_nr`-tagged rows and the pooled
+storage samples — resolves to its treatment device `"{treatment}"`. The
 individual samples within a treatment are preserved via the timestamp-ordinal
 encoding (see **Sample**), not by minting per-plant or per-sample devices
 (see ADR 0004).

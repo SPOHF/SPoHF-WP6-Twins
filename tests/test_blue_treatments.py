@@ -5,7 +5,9 @@ from wp6_data.blue.treatments import (
     LONG_DATA_TREATMENT_MAP,
     TREATMENT_COLORS,
     TREATMENT_ORDER,
+    TREATMENT_PLOTS,
     treatment_color,
+    treatment_label,
 )
 
 
@@ -24,3 +26,12 @@ def test_every_canonical_treatment_has_a_colour():
 
 def test_unknown_treatment_gets_fallback_colour():
     assert treatment_color("no-such-treatment").startswith("#")
+
+
+def test_every_canonical_treatment_has_a_field_plot():
+    assert set(TREATMENT_PLOTS) == set(TREATMENT_ORDER)
+
+
+def test_treatment_label_names_the_plot():
+    assert treatment_label("Ca") == f"Ca ({TREATMENT_PLOTS['Ca']})"
+    assert treatment_label("no-such-treatment") == "no-such-treatment"

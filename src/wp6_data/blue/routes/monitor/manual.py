@@ -1,6 +1,5 @@
 """Manual monitor hub and permanent long_data dashboards."""
 
-from datetime import UTC, datetime
 from typing import Annotated
 
 import pandas as pd
@@ -28,9 +27,6 @@ from wp6_data.shared.twin import SensorDataProvider
 router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 PAGE_TITLE = "SPoHF Blue - Manual Monitor"
-YEAR_START = datetime(2024, 1, 1, tzinfo=UTC)
-YEAR_END = datetime(2026, 1, 1, tzinfo=UTC)
-YEARS: tuple[int, ...] = (2024, 2025)
 
 # Device names used by long_data ingest are canonical treatment codes.
 _LONG_DATA_DEVICES: frozenset[str] = frozenset(_LONG_DATA_TREATMENT_MAP.values())
@@ -76,9 +72,16 @@ async def manual_home() -> str:
 
         {render_hub_grid([
             render_hub_card(
+                "Harvest per Treatment",
+                "Per-plant season yield per treatment and how each pick date "
+                "builds it up, per year.",
+                href="/manual-monitor/harvest",
+                label="View Harvest",
+            ),
+            render_hub_card(
                 "Measure Comparison",
                 "Year-by-year treatment box plots for measures that are present "
-                "in both 2024 and 2025.",
+                "in more than one year.",
                 href="/manual-monitor/measure-comparison",
                 label="View Measure Comparison",
             ),
@@ -118,7 +121,7 @@ async def measure_comparison(
         <h1>Measure Comparison</h1>
         <p>
             One treatment-comparison box plot per year for each measure that
-            appears in both 2024 and 2025.
+            appears in more than one year.
         </p>
         {measure_cards}
     """
@@ -182,8 +185,6 @@ async def _load_long_data(
         df = await provider.fetch_data(
             sensor_tags=_ALL_LONG_DATA_SENSORS,
             device_names=sorted(_LONG_DATA_DEVICES),
-            start=YEAR_START,
-            end=YEAR_END,
         )
     except Exception as e:
         return None, None, render_page(
@@ -196,7 +197,7 @@ async def _load_long_data(
     if df.empty:
         return None, None, render_page(
             PAGE_TITLE,
-            "<h1>Manual Monitor</h1><p>No data found for 2024-2025.</p>",
+            "<h1>Manual Monitor</h1><p>No long_data rows found.</p>",
             show_back_link=True,
             back_url="/manual-monitor",
         )
@@ -206,20 +207,12 @@ async def _load_long_data(
     df = df[df["device"].isin(_LONG_DATA_DEVICES)]
 
     df["year"] = df["time"].dt.year
-    df = df[df["year"].isin(YEARS)]
-    if df.empty:
-        return None, None, render_page(
-            PAGE_TITLE,
-            "<h1>Manual Monitor</h1><p>No long_data rows in 2024-2025.</p>",
-            show_back_link=True,
-            back_url="/manual-monitor",
-        )
 
     comparable = _find_comparable_measures(df)
     if not comparable:
         return None, None, render_page(
             PAGE_TITLE,
-            "<h1>Manual Monitor</h1><p>No measures shared by 2024 and 2025.</p>",
+            "<h1>Manual Monitor</h1><p>No measure appears in more than one year.</p>",
             show_back_link=True,
             back_url="/manual-monitor",
         )
@@ -227,9 +220,9 @@ async def _load_long_data(
 
 
 def _find_comparable_measures(df: pd.DataFrame) -> list[str]:
-    """Return sensor tags present in both 2024 and 2025, in display order."""
-    by_year = df.groupby("year")["sensor"].apply(frozenset)
-    shared = frozenset.intersection(*by_year.values) if len(by_year) >= 2 else frozenset()
+    """Return sensor tags present in more than one year, in display order."""
+    years_per_sensor = df.groupby("sensor")["year"].nunique()
+    shared = frozenset(years_per_sensor[years_per_sensor >= 2].index)
     ordered = [m for m in _MEASURE_DISPLAY_ORDER if m in shared]
     ordered += sorted(shared - set(_MEASURE_DISPLAY_ORDER))
     return ordered
@@ -254,7 +247,7 @@ def _render_measure_card(
     sensor_df["treatment"] = sensor_df["device"]
     include_for_next = include_js
     plots: list[str] = []
-    for year in YEARS:
+    for year in sorted(sensor_df["year"].unique()):
         year_html = _build_year_boxplot(sensor_df, sensor, year, include_js=include_for_next)
         if year_html:
             plots.append(year_html)

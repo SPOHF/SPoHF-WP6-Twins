@@ -18,6 +18,13 @@ from plotly.subplots import make_subplots
 DIVERGING_SCALE = [[0.0, "#e34948"], [0.5, "#f0efec"], [1.0, "#2a78d6"]]
 SEQUENTIAL_SCALE = [[0.0, "#cde2fb"], [0.5, "#3987e5"], [1.0, "#0d366b"]]
 
+# Categorical hues for identity (one per series), assigned in this fixed order
+# and never cycled: a series beyond the last slot needs grouping, not a new hue.
+CATEGORICAL_COLORS = (
+    "#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+    "#e87ba4", "#008300", "#4a3aa7", "#e34948",
+)
+
 
 def render_matrix_heatmap_html(
     z: list[list[float | None]],

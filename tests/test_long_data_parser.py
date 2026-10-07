@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 from io import BytesIO
+from zoneinfo import ZoneInfo
 
 import pytest
 from openpyxl import Workbook
@@ -18,6 +19,7 @@ from wp6_data.blue.long_data import (
     LongDataParseError,
     _calendar_year_scope,
     parse,
+    plant_nr,
     validate,
 )
 
@@ -44,8 +46,8 @@ def _by_device(readings: list) -> dict[str, list]:
     return out
 
 
-def test_2025_layout_plant_nr_is_ignored_device_is_treatment() -> None:
-    """The 2025 Plant_nr column is read past — the device is the treatment."""
+def test_2025_layout_device_is_treatment_not_plant() -> None:
+    """Plant_nr does not mint a device — the device is the treatment (ADR 0004)."""
     data = _xlsx(H_2025, [(date(2025, 7, 31), "Shoot_Length", 12, "Organisch-1", 90.0)])
     (r,) = parse(data)
     assert r.source == SOURCE
@@ -102,8 +104,8 @@ def test_measure_harmonization(meting: str, sensor_tag: str) -> None:
 
 
 def test_storage_sample_lands_on_treatment_device() -> None:
-    """Storage-sample measures carry a Plant_nr too; like every row it is
-    ignored and the reading lands on the treatment device."""
+    """Storage-sample measures carry a Plant_nr too; like every row the reading
+    lands on the treatment device."""
     data = _xlsx(H_2025, [(date(2025, 9, 3), "Weigth before storage", 16, "Ca", 580.0)])
     (r,) = parse(data)
     assert r.sensor_tag == "sample_weight_before_storage"
@@ -127,22 +129,50 @@ def test_samples_get_ordinal_timestamps_preserving_order() -> None:
     assert midnight not in {r.time for r in readings}  # midnight reserved
 
 
-def test_plants_of_a_treatment_merge_into_ordinal_samples() -> None:
-    """Two plants measured on the same date+measure no longer get their own
-    devices: they share the treatment device as ordinal-timestamped samples."""
+def test_plant_nr_is_the_sample_ordinal() -> None:
+    """With a Plant_nr column the ordinal is the plant number, not file order,
+    so plants share the treatment device yet stay joinable across dates."""
     rows = [
-        (date(2025, 7, 31), "Shoot_Length", 1, "Standaard", 50.0),
-        (date(2025, 7, 31), "Shoot_Length", 2, "Standaard", 60.0),
+        (date(2025, 7, 31), "Shoot_Length", 7, "Standaard", 50.0),
+        (date(2025, 7, 31), "Shoot_Length", 3, "Standaard", 60.0),
     ]
     by_dev = _by_device(parse(_xlsx(H_2025, rows)))
     assert set(by_dev) == {"Std"}
     midnight = datetime(2025, 7, 31, tzinfo=UTC)
     readings = by_dev["Std"]
     assert [r.time for r in readings] == [
-        midnight + timedelta(seconds=1),
-        midnight + timedelta(seconds=2),
+        midnight + timedelta(seconds=7),
+        midnight + timedelta(seconds=3),
     ]
-    assert [r.value for r in readings] == [50.0, 60.0]  # file order preserved
+    assert [plant_nr(r.time) for r in readings] == [7, 3]
+
+
+def test_plant_nr_round_trips_through_a_display_timezone() -> None:
+    """The ordinal is measured from UTC midnight, so it must be read in UTC."""
+    (r,) = parse(_xlsx(H_2025, [(date(2025, 7, 9), "Yield per plant", 42, "K", 9.0)]))
+    assert plant_nr(r.time.astimezone(ZoneInfo("Europe/Amsterdam"))) == 42
+
+
+def test_duplicate_plant_value_becomes_skipped_row() -> None:
+    """Two values for one plant+measure+date would collide on the ordinal."""
+    data = _xlsx(H_2025, [
+        (date(2025, 7, 9), "Yield per plant", 5, "K", 100.0),
+        (date(2025, 7, 9), "Yield per plant", 5, "K", 120.0),
+    ])
+    report = validate(data)
+    assert report.valid_rows == 1
+    (skip,) = report.skipped_rows
+    assert skip.row_index == 3
+    assert "plant 5" in skip.reason
+
+
+@pytest.mark.parametrize("plant", [None, 0, "x", 2.5])
+def test_unusable_plant_nr_becomes_skipped_row(plant: object) -> None:
+    data = _xlsx(H_2025, [(date(2025, 7, 9), "Yield per plant", plant, "K", 100.0)])
+    report = validate(data)
+    assert report.valid_rows == 0
+    (skip,) = report.skipped_rows
+    assert "Plant_nr" in skip.reason
 
 
 def test_ignored_measures_are_dropped_not_skipped() -> None:
