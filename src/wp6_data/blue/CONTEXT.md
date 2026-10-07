@@ -22,10 +22,17 @@ vocabulary so manual + automated readings of one plot group together):
   `V_K_G_CaBrP` = potassium in the vegetative stage, then calcium + boron +
   phosphorus in the generative stage. These are first-class treatments, not
   sub-variants of `Ca`/`K`.
+- `Mix_D`, `Mix_E` — **pooled** treatments, 2026 fruit-quality measures only
+  (berry weight, Brix, firmness). The berries of three treatments were combined
+  before measuring, so they cannot be attributed to any one of them:
+  `Mix_D` = `Ca` + `V_CA` + `V_CA_G_BrPK`, `Mix_E` = `K` + `G_K` + `V_K_G_CaBrP`.
+  Yield, shoot length and scores were still recorded per treatment that year.
+  Never alias a mix onto a member treatment.
 
 Source-label → canonical: `Organic 1`/`Organisch-1` → `Org1`; `Organic 2`/
 `Organisch-2` → `Org2`; `Standard`/`Standaard` → `Std`; `Calcium`/`Ca` → `Ca`;
-`Kalium`/`K` → `K`; the four 2025 codes pass through unchanged.
+`Kalium`/`K` → `K`; the four 2025 codes and the 2026 mixes pass through
+unchanged.
 
 ### Plant
 One physical blueberry plant. Plants are **not** individually modelled: a

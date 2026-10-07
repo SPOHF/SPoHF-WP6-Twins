@@ -70,6 +70,8 @@ def test_2024_layout_device_is_treatment() -> None:
         ("Standaard", "Std"),
         ("V_K_G_CaBrP", "V_K_G_CaBrP"),  # 2025 regime passes through
         ("G_K", "G_K"),
+        ("Mix_D", "Mix_D"),  # 2026 pooled sample passes through
+        ("Mix_E", "Mix_E"),
     ],
 )
 def test_treatment_harmonization(treatment: str, code: str) -> None:

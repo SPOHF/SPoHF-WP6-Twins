@@ -22,6 +22,7 @@ TREATMENT_ORDER: tuple[str, ...] = (
     "Ca", "K",
     "V_CA", "G_K",
     "V_CA_G_BrPK", "V_K_G_CaBrP",
+    "Mix_D", "Mix_E",
 )
 
 # Colour per fertiliser treatment (consistent across all monitor charts).
@@ -39,6 +40,8 @@ TREATMENT_COLORS: dict[str, str] = {
     "V_CA":            "#fb7185",  # rose          — legacy code (V_Ca_G_-)
     "V_CA_G_BrPK":     "#7c2d12",  # brown         — legacy code
     "V_K_G_CaBrP":     "#4c1d95",  # indigo        — legacy code
+    "Mix_D":           "#f59e0b",  # amber         — pooled Ca-group sample
+    "Mix_E":           "#38bdf8",  # sky blue      — pooled K-group sample
     "Weather Station": "#111827",  # near-black    — outdoor reference
 }
 _FALLBACK_COLOR = "#94a3b8"
@@ -57,6 +60,11 @@ LONG_DATA_TREATMENT_MAP: dict[str, str] = {
     "V_CA": "V_CA",
     "V_CA_G_BrPK": "V_CA_G_BrPK",
     "V_K_G_CaBrP": "V_K_G_CaBrP",
+    # 2026 fruit-quality berries were pooled across three treatments before
+    # measuring, so these are not separable into their members:
+    # Mix_D = Ca + V_CA + V_CA_G_BrPK, Mix_E = K + G_K + V_K_G_CaBrP.
+    "Mix_D": "Mix_D",
+    "Mix_E": "Mix_E",
 }
 
 # Row labels used in fertilizer_strategy_2025.xlsx → canonical code.

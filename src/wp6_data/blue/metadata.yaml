@@ -338,7 +338,7 @@ devices:
         intention: "Spotted-wing drosophila (D. suzukii) caught per round"
 
   # long_data models one device per treatment (plant_nr is discarded — see
-  # ADR 0004), so the device set is this fixed list of nine. `position` reuses
+  # ADR 0004), so the device set is this fixed list of treatments. `position` reuses
   # the automated sensors' codes so manual + automated readings of a plot group
   # together.
   "Org1":
@@ -376,4 +376,14 @@ devices:
   "V_K_G_CaBrP":
     position: "V_K_G_CaBrP"
     type: "Blueberry plant (manual)"
+    source: "long_data"
+  # 2026 pooled fruit-quality samples spanning three treatments each (see
+  # treatments.py) — no single plot, so no automated-sensor position to share.
+  "Mix_D":
+    position: "Mix_D"
+    type: "Blueberry plant (manual, pooled)"
+    source: "long_data"
+  "Mix_E":
+    position: "Mix_E"
+    type: "Blueberry plant (manual, pooled)"
     source: "long_data"
