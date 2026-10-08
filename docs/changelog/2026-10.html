@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WP6 Digital Twins — Changelog (12 October 2026)</title>
+<style>
+  :root {
+    --red: #c0392b;   --red-bg: #fdecea;
+    --blue: #2471a3;  --blue-bg: #eaf2fa;
+    --grey: #566573;  --grey-bg: #eef1f3;
+    --shared:#7d3c98; --shared-bg:#f4ecf7;
+    --ink: #1c2833;   --muted: #5d6d7e;
+    --line:#d5dbdb;   --bg:#f7f9f9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink); background: var(--bg); margin: 0; line-height: 1.55;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 24px 80px; }
+  header.page { border-bottom: 3px solid var(--ink); padding-bottom: 18px; margin-bottom: 8px; }
+  header.page h1 { margin: 0 0 4px; font-size: 30px; letter-spacing: -0.5px; }
+  header.page .sub { color: var(--muted); font-size: 15px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 28px; }
+  .pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; }
+  .pill.red   { background: var(--red-bg);   color: var(--red);   border-color: var(--red); }
+  .pill.blue  { background: var(--blue-bg);  color: var(--blue);  border-color: var(--blue); }
+  .pill.grey  { background: var(--grey-bg);  color: var(--grey);  border-color: var(--grey); }
+  .pill.shared{ background: var(--shared-bg);color: var(--shared);border-color: var(--shared); }
+  .tldr { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin-bottom: 36px; }
+  .tldr h2 { margin: 0 0 10px; font-size: 16px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .tldr ul { margin: 0; padding-left: 20px; }
+  .tldr li { margin: 6px 0; }
+  section.theme { margin-bottom: 44px; }
+  section.theme > h2 { font-size: 22px; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+  section.theme > .theme-sub { color: var(--muted); margin: 0 0 20px; font-size: 15px; }
+  .hero { border-left: 5px solid var(--line); padding-left: 18px; }
+  .hero.blue { border-color: var(--blue); }
+  .hero.red  { border-color: var(--red); }
+  .hero.grey { border-color: var(--grey); }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin-bottom: 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 18px; }
+  .card .tags { margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .card p { margin: 0 0 12px; }
+  .card ul { margin: 0 0 12px; padding-left: 20px; }
+  .card ul li { margin: 3px 0; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 4px; }
+  a.btn { display: inline-block; text-decoration: none; font-weight: 600; font-size: 14px; padding: 8px 14px; border-radius: 8px; color: #fff; background: var(--ink); }
+  a.btn.blue { background: var(--blue); }
+  a.btn.red  { background: var(--red); }
+  a.btn.grey { background: var(--grey); }
+  a.btn.shared { background: var(--shared); }
+  a.btn::after { content: " ↗"; font-weight: 400; }
+  .route { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  details.more { margin-top: 6px; }
+  details.more summary { cursor: pointer; font-weight: 600; color: var(--muted); font-size: 14px; }
+  .commitlist { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .commitlist code { color: var(--ink); }
+  footer.page { border-top: 1px solid var(--line); margin-top: 40px; padding-top: 20px; color: var(--muted); font-size: 13.5px; }
+  footer.page code { background: #eef1f3; padding: 1px 5px; border-radius: 4px; }
+  @media print {
+    body { background: #fff; }
+    .card, .tldr { break-inside: avoid; }
+    a.btn { color: #000; background: none; border: 1px solid #999; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <p style="margin:0 0 8px;"><a href="./" style="color:var(--muted); text-decoration:none; font-size:14px;">← All changelogs</a></p>
+    <h1>WP6 Digital Twins — What shipped this update</h1>
+    <div class="sub">Changelog · <strong>update of 12 October 2026</strong> · covering 3 Sep – 8 Oct · branch <code>main</code> · 34 commits · 0 merged PRs · 1 contributor</div>
+  </header>
+
+  <div class="legend">
+    <span class="pill blue">Blue — blueberry farm · wp6-blue.spohf.fontysvenlo.dev</span>
+    <span class="pill red">Red — tomato greenhouse · wp6-red.spohf.fontysvenlo.dev</span>
+    <span class="pill grey">Grey — public platform demo · wp6-grey.spohf.fontysvenlo.dev</span>
+    <span class="pill shared">Shared — twin-agnostic platform</span>
+  </div>
+
+  <div class="tldr">
+    <h2>Headlines</h2>
+    <ul>
+      <li><strong>Red's light model is now honest, and it got much better.</strong> Scored properly on days it had never seen, the old model was no better than "same as yesterday". After fixing what it was measuring, the full weather-to-plant-light chain now explains <strong>93%</strong> of the day-to-day variation in light at the plants (up from 66%) and clearly beats that baseline.</li>
+      <li><strong>The lamps are measured, not guessed.</strong> Red now detects from the two light sensors which hours the grow lamps actually ran, and a new <em>lamp calendar</em> shows it. The old method had underestimated winter lamp light by about half.</li>
+      <li><strong>A climate forecast per height in the crop.</strong> A new model predicts temperature, humidity, CO₂ and light at each height on the measuring wires, starting from the public weather forecast. A new page also compares the three wires to show where the greenhouse is uniform and where it isn't.</li>
+      <li><strong>Deploying an update no longer takes the dashboards offline.</strong> Exports, trained models and uploads moved to object storage. Both twins now update by starting the new version before stopping the old one, and the first measured rollouts dropped no requests.</li>
+      <li><strong>Blue: harvest per plant and per pick date.</strong> A new page shows how each treatment's season yield spreads across plants and how each pick date adds to it, now including the 2026 pooled fruit-quality samples.</li>
+    </ul>
+  </div>
+
+  <p style="color:var(--muted); font-size:13.5px; margin:-18px 0 30px;">
+    🔗 The <strong>Open live</strong> buttons (↗) deep-link into the deployed dashboards. Blue and Red require a login on first open; Grey is a public demo (no login). Model pages are admin-only.
+  </p>
+
+  <!-- ===================================================================== -->
+  <section class="theme">
+    <h2>🔴 Red's light model: measured, honest, and better</h2>
+    <p class="theme-sub">It began as one odd report: on long summer days the lamps are off, yet the forecast page showed three different numbers where two should match. Following that up turned up a series of quiet errors in how light was measured and scored.</p>
+    <div class="hero red">
+
+      <div class="card">
+        <h3>Lamp light is measured, not inferred</h3>
+        <div class="tags"><span class="pill red">Red</span></div>
+        <p>Red has two light sensors, one at the roof above the lamps and one at plant level below them. Until now the lamps' share of the light was worked out as "whatever the model got wrong". A model error is not a lamp, and this method could never report "lamps off": on a summer day with a perfect daily prediction it still made up a 5.5&nbsp;mol lamp contribution.</p>
+        <p>The new rule is simple and physical. <strong>If the plants get more light than the roof sensor above them, a lamp must be on</strong>, because glass and screens can only take light away. Judged over a rolling two-week window per hour of the day, it finds:</p>
+        <ul>
+          <li>zero lamp hours in May, July and August, which is correct;</li>
+          <li>lamps running <strong>23:00 – 15:00 through the winter daylight</strong>. The old method only looked at dark hours, found 8 of those 17 hours and <strong>underestimated winter lamp light by 53%</strong>;</li>
+          <li>a lamp schedule that crosses midnight, which the old code couldn't represent at all;</li>
+          <li>a light-loss factor through the roof and screens of 0.625, agreeing with two independent earlier estimates. Previously they only agreed in summer.</li>
+        </ul>
+        <p>The forecast was also being given different weather inputs than it was trained on: total sunlight in place of direct sunlight, and a fixed 50% cloud cover. It now gets the real inputs, and refuses to predict if one is missing, rather than quietly filling in a value that looks plausible.</p>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/dli/forecast">Open DLI forecast</a>
+          <span class="route">/dli/forecast</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>af710f8</code> fix(red): the light model — lamps measured, not inferred from model error<br><code>94c64e3</code> feat(shared): resample readings to any interval, and encode hour of day<br></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>New: the lamp calendar</h3>
+        <div class="tags"><span class="pill red">Red</span></div>
+        <p>One square for every hour of every day, coloured by what lit the crop: <em>lamps only</em>, <em>daylight + lamps</em>, <em>daylight</em> or <em>dark</em>. You can check the lamp detection by looking at it instead of taking it on trust. On December data it shows lamps from 23:00 to 06:00, daylight plus lamps until 15:00 and darkness after that. Toward February the 16:00 hour switches on as the days get longer, which nothing was programmed to show.</p>
+        <p>Days when the sensors weren't measuring (they were outside the greenhouse from 27 May to 12 July) are left out instead of being drawn as dark nights.</p>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/dli/lamps">Open lamp calendar</a>
+          <span class="route">/dli/lamps</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>61ed817</code> feat(red): a lamp calendar — which hours the lamps actually ran<br><code>a2d42ab</code> feat(shared): let a page say where its "All" date preset begins<br></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>The model is scored on unseen days, and now beats "same as yesterday"</h3>
+        <div class="tags"><span class="pill red">Red</span></div>
+        <p>The DLI model used to report only how well it fitted its own training data. It is now tested the way the climate model is: on whole days held out from training, and compared with the two simple forecasts any model has to beat, "same as yesterday" and "the usual for this time of year". The first honest result was uncomfortable. The weather step had <strong>no real skill</strong> (it had memorised its training data), and the full chain only matched "same as yesterday".</p>
+        <p>The main cause turned out to be the data, not the model. A daily total was computed by adding up sensor readings, so it partly measured <em>how often the sensor reported</em>. In June the roof sensor dropped from ~270 to 97 readings a day, and the sunniest days of the year came out at a third of their real value. Daily totals are now proper integrals over time:</p>
+        <ul>
+          <li>full chain on unseen days: <strong>R² 0.655 → 0.926</strong></li>
+          <li>skill against "same as yesterday": <strong>−0.02 → +0.52</strong></li>
+        </ul>
+        <p>The performance page had three related fixes. It compared a plant-level prediction with the roof sensor, which looked like a 38% underprediction but was a units mismatch. It counted sensor outages as perfect days. And it drew outages as days of zero light. Outages now show as a labelled gap in the line and are left out of the score.</p>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/dli/performance">Open DLI performance</a>
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/dli/model/">Open DLI model (admin)</a>
+          <span class="route">/dli/performance · /dli/model/</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>e724186</code> feat(red): DLI chain beats persistence — a daily total is an integral<br><code>5c6bc56</code> feat(red): DLI scored out of sample — and stage 1 has no skill at all<br><code>a977724</code> fix(red): DLI performance — compare like with like, and stop scoring outages<br><code>da6cdcd</code> fix(red): an outage is a gap in the line, not a day of zero light<br></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>DLI history: sensors labelled by where they hang</h3>
+        <div class="tags"><span class="pill red">Red</span></div>
+        <p>The two light lines were labelled "Natural Light" and "Total Light", which suggests the second includes the first. Whenever the sun was out, the plant-level line fell below the roof line and the chart looked self-contradictory. They are now <em>Light above lamps</em> and <em>Light below lamps, at plant level</em>, with a short explanation of why the crop gets less light than the roof.</p>
+        <p>The "Lamp DLI" column, which had been calculated as total minus natural, went negative all summer and was too high in winter. It now uses the measured lamp contribution described above.</p>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/dli/history">Open DLI history</a>
+          <span class="route">/dli/history</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>49ac8b1</code> fix(red): DLI history — label the sensors by height, measure the lamp<br></div>
+        </details>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="theme">
+    <h2>🔴 Red's climate, height by height</h2>
+    <p class="theme-sub">The goal is to predict the climate at the level of the plants. These features move from greenhouse-wide averages to what each height and each fruit cohort actually experienced.</p>
+    <div class="hero red">
+
+      <div class="card">
+        <h3>New: climate forecast per growth section</h3>
+        <div class="tags"><span class="pill red">Red</span><span class="pill shared">Shared</span></div>
+        <p>A three-step model predicts <strong>temperature, humidity, CO₂ and light at each height on the measuring wires</strong>:</p>
+        <ol style="margin:0 0 12px; padding-left:20px;">
+          <li>public weather (OpenMeteo) is calibrated against the weather station on site;</li>
+          <li>that, plus the greenhouse's recent state, predicts the greenhouse-wide sensors;</li>
+          <li>each height is predicted as a deviation from the greenhouse-wide reading.</li>
+        </ol>
+        <p>The model is split where the data is. The wires have about nine usable summer weeks and the greenhouse sensors have eleven months, so only the smallest step learns from the wires. Light reuses the measured lamp contribution from the DLI work instead of trying to learn the operators' lamp schedule from the weather. Every score is tested on held-out whole days against simple baselines.</p>
+        <p>Growers see a band chart per height on <em>/climate/forecast</em>. Admins see the skill grids and retraining suggestions on <em>/climate/model/</em>. The full method is written up in the model paper in the repository.</p>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/climate/forecast">Open climate forecast</a>
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/climate/model/">Open climate model (admin)</a>
+          <span class="route">/climate/forecast · /climate/model/</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>6ca623e</code> feat(red): climate model — weather to greenhouse level to per-height wire<br><code>ee0d079</code> refactor(red): one forecast chart, not two — and mend the outdoor line<br></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>New: uniformity across the wires</h3>
+        <div class="tags"><span class="pill red">Red</span></div>
+        <p>Three measuring wires hang in the greenhouse, but every multi-height page made you pick one, so you couldn't ask whether the greenhouse is uniform. This page shows all three side by side, per growth section. Each wire gets a verdict that separates a <em>constant offset</em> (how it hangs or is calibrated) from a <em>divergence at one height</em> (a genuinely different microclimate there).</p>
+        <p>Colours use a fixed scale, so a calm day and a drifting day can't look alike. Every number shows how much data is behind it. Against production data it immediately showed two things:</p>
+        <ul>
+          <li>the wires are <strong>not instrumented alike</strong>: some heights report no light, and one wire reports no climate at all;</li>
+          <li><strong>light differs sharply between wires while climate doesn't</strong>. PAR and DLI spread well past the "notable" threshold, while temperature, humidity, CO₂ and VPD agree closely.</li>
+        </ul>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/multi_height/uniformity">Open wire uniformity</a>
+          <span class="route">/multi_height/uniformity</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>fce36c7</code> feat(red): uniformity across wires — where the greenhouse agrees, and where it doesn't<br></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>New: crop cycles, linking each fruit sample to the climate it grew in</h3>
+        <div class="tags"><span class="pill red">Red</span><span class="pill shared">Shared</span></div>
+        <p>A tomato plant sets a new truss every week, and each one ripens over about eight weeks, so several "cohorts" are always growing at once. The crop-cycles page gives each cohort its own lane, coloured by the climate it lived through. Its measured outcome (Brix, weight, …) is shown at the harvest end, so you can see which cohorts were exposed to a particular spell of weather.</p>
+        <ul>
+          <li>The caption now says <strong>where the chosen climate metric was measured</strong>. For example, temperature and humidity come from a sensor at the top of the greenhouse, above the screens. A colour shouldn't suggest more than the sensor's position supports.</li>
+          <li>Several samples from one cohort are combined into one marker that says "mean of N", and the labels no longer cover the ripening weeks they describe.</li>
+          <li>Measurements that fall outside every declared cycle are flagged, never dropped. That flag is how the provisional cycle dates get corrected, and it has already flagged two dates.</li>
+          <li>The underlying cycles/cohorts model is twin-agnostic. A Blue version (treatments against the season's weather) was built, reviewed and deliberately not kept.</li>
+        </ul>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/crop-cycles/">Open crop cycles</a>
+          <span class="route">/crop-cycles/</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>4625820</code> feat(red): crop cycles waterfall, on a shared cycles/cohorts model<br><code>45aae7c</code> fix(red): one marker per cohort and cultivar, aggregated as the measure declares<br><code>761fa28</code> fix(shared): a value chip is a label, not a lid<br><code>be4c565</code> feat(red): say where the climate on crop-cycles was measured<br><code>8db3f65</code> / <code>7a30286</code> / <code>315948c</code> blue seasons page: built, fixed, reverted<br></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>Brix in the fruit-quality upload</h3>
+        <div class="tags"><span class="pill red">Red</span></div>
+        <p>The final 2025/26 fruit-quality dataset added a converted-°Brix column, so production rejected the upload. Brix is now ingested (all 128 rows land between 2.6 and 6.2 °Brix, the normal range for tomato). The rejection message is fixed too: it used to report the <em>last</em> column as missing, which pointed away from the real cause. It now names the added column by its Excel letter.</p>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>a01aefc</code> feat(red): ingest Sijia's Brix column, and say which column drifted<br></div>
+        </details>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="theme">
+    <h2>🚀 Updates without downtime</h2>
+    <p class="theme-sub">Until now, every deploy was a short outage, and every restart threw away the trained models. Both have been fixed.</p>
+    <div class="hero grey">
+
+      <div class="card">
+        <h3>Files moved to object storage, so the dashboards update without going offline</h3>
+        <div class="tags"><span class="pill shared">Shared</span><span class="pill red">Red</span><span class="pill blue">Blue</span></div>
+        <p>Each dashboard kept its files (nightly exports, trained models, uploaded spreadsheets) on a disk that can only attach to one machine at a time. So the old version had to stop before the new one could start, and every deploy meant downtime. It is also why the nightly exports silently failed for 23 days after the cluster move (see the previous update).</p>
+        <p>In three steps, all of those files moved to the university's object storage:</p>
+        <ul>
+          <li><strong>Exports</strong>, which also removed the workaround that pinned export jobs to one machine;</li>
+          <li><strong>Trained models</strong> for both twins;</li>
+          <li><strong>Manual uploads</strong>, the last disk. Every file was copied and verified by checksum.</li>
+        </ul>
+        <p>Both dashboards now attach <strong>no disks at all</strong>. A deploy starts the new version, waits until it is ready, and only then stops the old one. The first rolling deploy served every request to Red but dropped one request on Blue, because the old pod shut down a moment before the router noticed. A short pause on shutdown closed that gap.</p>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>519e24f</code> feat: CSV exports live in the bucket, so the export job stops being pinned to a node<br><code>0e455dd</code> feat(red): trained models live in the bucket, and red is down to one PVC<br><code>c68af06</code> feat(blue): soil models in the bucket — both twins now hold one PVC each<br><code>b6d8e66</code> feat: uploads in the bucket — no PVCs left, and the dashboards finally roll<br><code>0de5c75</code> fix(helm): preStop sleep, so a rollout drops nothing at all<br><code>9a543d9</code> fix(ci): swap MinIO for adobe/s3mock — MinIO's images need auth now<br></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>A data-loss bug in upload clean-up, found and fixed</h3>
+        <div class="tags"><span class="pill shared">Shared</span><span class="pill blue">Blue</span><span class="pill red">Red</span></div>
+        <p>Uploads are stored by content, so uploading the same file twice gives two records that point at one stored file. Blue's yearly <code>long_data</code> workbook is re-uploaded like that on purpose. The clean-up of old uploads deleted the file without checking whether a newer record still needed it, which is how Blue's 2024 workbook and Red's original fruit-quality file had silently disappeared. Clean-up now keeps any file that a kept record still uses. The missing files were restored from operator copies and matched against their checksums, so every live upload record has its file again.</p>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>b6d8e66</code> feat: uploads in the bucket — no PVCs left, and the dashboards finally roll<br></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>Trained models survive a deploy, and know what they were trained on</h3>
+        <div class="tags"><span class="pill shared">Shared</span><span class="pill red">Red</span><span class="pill blue">Blue</span></div>
+        <p>Models used to be lost on every deploy or restart and retrained on startup. For Red's climate model that takes ~17 minutes in the cluster, and during that time the page was "up" with nothing to show. Models are now kept, and <strong>retrained every night</strong> (Red 03:00, Blue 03:30 UTC) so they keep learning as new data comes in.</p>
+        <p>Keeping models brings a risk: serving a model trained for a different question. So each model stores a fingerprint of the settings it was trained with. If the configuration changes (a wider training window, a new forecast horizon, a different sensor), the model is retrained instead of serving stale answers. Earlier, Red's DLI model filled gaps in old files with guessed defaults, and once loaded a guess looks exactly like a fitted value. Old or mismatched models are now refused.</p>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>1e70f07</code> feat: trained models survive a deploy, and say what fitted them<br></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>Object-storage certificate on the Status page</h3>
+        <div class="tags"><span class="pill red">Red</span><span class="pill blue">Blue</span><span class="pill shared">Shared</span></div>
+        <p>Now that exports, models and uploads all depend on object storage, its security certificate matters. The one in use at the time of writing expires on <strong>11 October</strong>. The risky case isn't the expiry date but a renewal signed by an authority our software doesn't trust (one of the two roots involved isn't in the default list). So the check does a real connection test the same way the twins connect, and shows both the days left and who signed the certificate.</p>
+        <p>The Status page shows <strong>OK</strong> above 21 days, <strong>RENEW SOON</strong> below that and <strong>ACTION NEEDED</strong> under 7 days or if the connection test fails. The check can never crash the Status page itself.</p>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/status">Open Red status</a>
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/status">Open Blue status</a>
+          <span class="route">/status</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>1aada56</code> feat: watch the object store's certificate, which expires in 11 days<br></div>
+        </details>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="theme">
+    <h2>🟦 Blue: harvest and the 2026 data</h2>
+    <p class="theme-sub">The first look at yield per plant, and support for this year's pooled fruit-quality samples.</p>
+    <div class="hero blue">
+
+      <div class="card">
+        <h3>New: harvest per treatment, per plant and per pick date</h3>
+        <div class="tags"><span class="pill blue">Blue</span></div>
+        <p>A new Manual Monitor page shows, for each year, how per-plant season yield varies within each treatment, and how each pick date adds to the season total. A plant's season yield is the sum of its picks, so the plant number from the <code>long_data</code> workbook is now kept as a sample number. Treatments are listed in field-layout order with their plot codes. The Manual Monitor now takes its years from the data, so it no longer stops at 2025.</p>
+        <div class="actions">
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/manual-monitor/harvest">Open harvest</a>
+          <span class="route">/manual-monitor/harvest</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>cb5ca1d</code> feat(blue): harvest per treatment, per plant and per pick date<br></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>2026's pooled fruit-quality samples accepted</h3>
+        <div class="tags"><span class="pill blue">Blue</span></div>
+        <p>In 2026 the berries of three treatments are pooled before measuring weight, Brix and firmness: <strong>Mix_D</strong> (Ca + V_CA + V_CA_G_BrPK) and <strong>Mix_E</strong> (K + G_K + V_K_G_CaBrP). These are now separate pooled groups, because a blend can't be credited to any one of its members. Before this, 180 rows of the 2026 file were skipped as unknown.</p>
+        <div class="actions">
+          <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/manual-monitor">Open Manual Monitor</a>
+          <span class="route">/manual-monitor</span>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>b0689bc</code> feat(blue): accept 2026's pooled Mix_D/Mix_E fruit-quality samples<br></div>
+        </details>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="theme">
+    <h2>⚙️ Platform &amp; architecture (under the hood)</h2>
+    <p class="theme-sub">Less visible, but it keeps the twins trustworthy and the codebase maintainable.</p>
+
+    <div class="card">
+      <h3>Shared building blocks promoted out of Red</h3>
+      <div class="tags"><span class="pill shared">Shared</span></div>
+      <ul>
+        <li>Resampling readings to any interval, leaving empty intervals as gaps instead of zeros, plus an hour-of-day encoding where 23:00 and 00:00 count as neighbours. Both light and climate models use these.</li>
+        <li>The date filter's "All" button can now start where a page's data actually begins, not at a fixed 2024-01-01.</li>
+        <li>A general matrix heatmap chart, and twin-agnostic cycles/cohorts and waterfall components.</li>
+      </ul>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist"><code>94c64e3</code> feat(shared): resample readings to any interval, and encode hour of day<br><code>a2d42ab</code> feat(shared): let a page say where its "All" date preset begins<br></div>
+      </details>
+    </div>
+
+    <div class="card">
+      <h3>Test and tooling hardening</h3>
+      <div class="tags"><span class="pill shared">Shared</span><span class="pill red">Red</span><span class="pill blue">Blue</span></div>
+      <ul>
+        <li>Fixed a second intermittent CI-only test failure, where a background database refresh started on a fresh database at the same moment as the first tests.</li>
+        <li>A backup script for Red's upstream MySQL database that works with read-only access.</li>
+        <li>A check script for whether the datalake API's paging is safe yet. Earlier it both skipped and duplicated rows between pages.</li>
+        <li>The local test object store is now a lightweight S3 mock, because MinIO's images no longer allow anonymous downloads.</li>
+        <li>Unused export helpers removed.</li>
+      </ul>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist"><code>439630d</code> test(e2e): disarm blue's cagg refresh policy so it cannot race the tests<br><code>893ed4f</code> chore(scripts): add a red MySQL backup script<br><code>57b22bc</code> chore(scripts): check whether datalake offset pagination is safe yet<br><code>00ad1c6</code> chore: drop the dead export-metadata helpers<br></div>
+      </details>
+    </div>
+  </section>
+
+  <footer class="page">
+    <p>Live dashboards: <code>wp6-blue.spohf.fontysvenlo.dev</code> · <code>wp6-red.spohf.fontysvenlo.dev</code> (login required) · <code>wp6-grey.spohf.fontysvenlo.dev</code> (public demo, synthetic data).</p>
+    <p>Generated from <code>git log --since=2026-09-03</code> on <code>main</code>, plus <code>issues/</code> PRDs. All deep links verified against the live environment.</p>
+  </footer>
+
+</div>
+</body>
+</html>
