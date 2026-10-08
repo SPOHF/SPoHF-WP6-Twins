@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import sys
+import time
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 from uuid import uuid4
@@ -87,6 +89,27 @@ class BlobStore(Protocol):
         ...
 
 
+def _replace(src: Path, dst: Path) -> None:
+    """``src.replace(dst)``, retried while Windows holds ``dst`` briefly locked.
+
+    POSIX rename is atomic regardless of who else is renaming onto ``dst``.
+    Windows refuses with ``PermissionError`` while another replace onto the
+    same target is in flight, so two racing writers would fail instead of
+    last-writer-wins. The lock lasts microseconds; a short retry rides it out.
+    """
+    if sys.platform != "win32":
+        src.replace(dst)
+        return
+    for attempt in range(50):
+        try:
+            src.replace(dst)
+            return
+        except PermissionError:
+            if attempt == 49:
+                raise
+            time.sleep(0.01)
+
+
 class LocalBlobStore:
     """A :class:`BlobStore` over a directory tree.
 
@@ -130,7 +153,7 @@ class LocalBlobStore:
             tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
             try:
                 tmp.write_bytes(data)
-                tmp.replace(path)
+                _replace(tmp, path)
             finally:
                 tmp.unlink(missing_ok=True)
 
@@ -159,8 +182,10 @@ class LocalBlobStore:
             root = self.root.resolve()
             if not root.is_dir():
                 return []
+            # as_posix, not str: keys are "/"-separated on every OS, and on
+            # Windows str() yields backslashes that no prefix would match.
             found = [
-                str(p.resolve().relative_to(root))
+                p.resolve().relative_to(root).as_posix()
                 for p in root.rglob("*")
                 if p.is_file() and not p.name.startswith(".")
             ]
