@@ -70,13 +70,13 @@ class RedSensorProvider:
         self.tsdb_sensors: frozenset[str] = frozenset(
             tag for tag, meta in metadata.sensor_defaults.items() if meta.source
         )
-        # Third routing leg: devices typed "wire" are served from the wide
-        # wire_sensors table (see ADR 0001). Map virtual device id -> its sensors.
-        self.wire_devices: dict[str, list[str]] = {
-            device_id: list(meta.sensors.keys())
-            for device_id, meta in metadata.devices.items()
-            if meta.type == "wire"
-        }
+
+    async def wire_devices(self) -> dict[str, list[str]]:
+        """Third routing leg: the installed wires' per-height devices, served
+        from the wide wire_sensors table (see ADR 0001). Device id -> sensors."""
+        from wp6_data.red.wires import wire_devices
+
+        return await wire_devices(self.db)
 
     @property
     def db(self) -> MySQLConnection:
@@ -119,6 +119,8 @@ class RedSensorProvider:
         from wp6_data.red.tsdb import fetch_daily_coverage_from_cagg
 
         records: list[dict[str, Any]] = []
+        # Resolved before taking a pool connection: on a cache miss it needs one.
+        wire_devices = await self.wire_devices()
         async with self.db.pool.acquire() as conn, conn.cursor() as cursor:
             for table, measurements in SENSOR_TABLES.items():
                 try:
@@ -138,9 +140,9 @@ class RedSensorProvider:
                             "manual": False,
                         })
 
-            # Wire leg: one virtual device per height, each with its declared
-            # sensors. Wire is a live (automated) feed, like the MySQL leg.
-            if self.wire_devices:
+            # Wire leg: one virtual device per height of each installed wire.
+            # Wire is a live (automated) feed, like the MySQL leg.
+            if wire_devices:
                 try:
                     await cursor.execute(
                         f"SELECT DISTINCT device_id, DATE(received_at) AS day "
@@ -152,7 +154,7 @@ class RedSensorProvider:
                 for physical_id, day in wire_rows:
                     for height in WIRE_DEVICE_HEIGHTS:
                         device_id = wire_device_id(physical_id, height)
-                        for sensor in self.wire_devices.get(device_id, []):
+                        for sensor in wire_devices.get(device_id, []):
                             records.append({
                                 "device": device_id,
                                 "sensor": sensor,
@@ -245,9 +247,10 @@ class RedSensorProvider:
         frames: list[pd.DataFrame] = []
 
         # Partition the requested devices into wire vs the rest.
-        wire_names = [d for d in (device_names or []) if d in self.wire_devices]
+        wire_devices = await self.wire_devices() if device_names else {}
+        wire_names = [d for d in (device_names or []) if d in wire_devices]
         other_names = (
-            [d for d in device_names if d not in self.wire_devices]
+            [d for d in device_names if d not in wire_devices]
             if device_names is not None
             else None
         )
@@ -346,7 +349,7 @@ class RedSensorProvider:
             })
 
         wire_summary = await self.db.get_wire_device_summary()
-        for device_id, sensors in self.wire_devices.items():
+        for device_id, sensors in (await self.wire_devices()).items():
             readings = wire_summary.get(device_id, {}).get("readings", 0)
             for sensor in sensors:
                 result.append({
@@ -394,7 +397,7 @@ class RedSensorProvider:
                 entry["sensors"].append(sensor)
 
         wire_summary = await self.db.get_wire_device_summary()
-        for device_id, sensors in self.wire_devices.items():
+        for device_id, sensors in (await self.wire_devices()).items():
             info = wire_summary.get(device_id, {})
             device_data[device_id] = {
                 "sensors": list(sensors),

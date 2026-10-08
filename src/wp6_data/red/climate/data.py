@@ -105,9 +105,8 @@ async def wire_frames(
 
     Reuses ``multi_height.data.load_wire_readings`` rather than issuing its own
     query, so the wide-table unpivot and the null handling stay in one place.
-    Only the ``heights`` asked for are returned; the caller gets them from
-    config, because each wire is broken differently and none may be assumed to
-    report everything.
+    Only the ``heights`` asked for that hold readings are returned, so a height
+    the wire never filled is absent rather than an empty frame.
     """
     from wp6_data.red.db import wire_physical_id
 

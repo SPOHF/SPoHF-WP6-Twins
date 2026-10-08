@@ -35,6 +35,7 @@ def mock_mysql(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     # Wire leg defaults to empty so explorer enumerations don't choke on a mock;
     # tests that exercise the wire override this.
     db.get_wire_device_summary.return_value = {}
+    db.get_active_wire_ids.return_value = []
     monkeypatch.setattr(red_deps, "db", db)
     return db
 
@@ -53,15 +54,17 @@ def mock_tsdb_fetch_data(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 
 @pytest.fixture(autouse=True)
 def clear_caches() -> None:
-    """Clear the provider's coverage cache and the shared sensor_summary cache.
+    """Clear the provider's coverage, sensor_summary and wire-map caches.
 
-    Both have multi-minute TTLs that would otherwise carry state across tests.
+    All have multi-minute TTLs that would otherwise carry state across tests.
     """
     from wp6_data.red.provider import _coverage_cache
+    from wp6_data.red.wires import invalidate_wire_cache
     from wp6_data.shared import sensor_summary
 
     _coverage_cache.clear()
     sensor_summary.invalidate()
+    invalidate_wire_cache()
 
 
 @pytest.fixture()
@@ -353,17 +356,21 @@ async def test_invalidate_caches_drops_both_cagg_and_coverage(
     assert devices["neurath-B-2034-strabelina"]["readings"] == 42
 
 
-def test_init_enumerates_wire_devices_from_metadata(
+async def test_wire_devices_come_from_the_upstream_wire_map(
     red_metadata: MetadataRegistry,
+    mock_mysql: AsyncMock,
 ) -> None:
-    """Devices typed `wire` form the third routing leg, each with 4 sensors."""
+    """The installed wires form the third routing leg: radiation above, then
+    four sensors per height. A wire the map no longer lists is not a device,
+    whatever wire_sensors still holds for it."""
+    mock_mysql.get_active_wire_ids.return_value = ["WS_01_02", "WS_01_03"]
     provider = RedSensorProvider(metadata=red_metadata)
 
-    assert "WS_01_01-h1" in provider.wire_devices
-    assert "WS_01_01-h5" in provider.wire_devices
-    assert set(provider.wire_devices["WS_01_01-h3"]) == {"par", "temp", "hum", "co2"}
-    # The retired PAR-only multi-height sensors are gone.
-    assert "s2100-10-par" not in provider.wire_devices
+    wire_devices = await provider.wire_devices()
+
+    assert set(wire_devices["WS_01_03-h3"]) == {"par", "temp", "hum", "co2"}
+    assert wire_devices["WS_01_03-h0"] == ["rad"]
+    assert not any(d.startswith("WS_01_01") for d in wire_devices)
 
 
 async def test_fetch_device_data_includes_wire_devices(
@@ -373,6 +380,7 @@ async def test_fetch_device_data_includes_wire_devices(
 ) -> None:
     """Wire devices appear in the explorer with their declared sensors + counts."""
     mock_mysql.get_all_devices.return_value = {}
+    mock_mysql.get_active_wire_ids.return_value = ["WS_01_01"]
     mock_mysql.get_wire_device_summary.return_value = {
         "WS_01_01-h1": {"readings": 1234, "last_seen": None},
     }
@@ -391,6 +399,7 @@ async def test_fetch_data_routes_wire_device_to_wire_table(
     mock_tsdb_fetch_data: AsyncMock,
 ) -> None:
     """A wire device request hits the wire reader, not the legacy MySQL leg."""
+    mock_mysql.get_active_wire_ids.return_value = ["WS_01_01"]
     mock_mysql.get_wire_sensor_readings.return_value = pd.DataFrame([
         {"device": "WS_01_01-h3", "height": 3, "measurement": "par",
          "time": pd.Timestamp("2026-05-26T12:00:00", tz=UTC), "value": 7.0},

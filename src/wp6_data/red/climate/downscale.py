@@ -162,6 +162,18 @@ class WireDownscaler:
     def is_trained(self) -> bool:
         return bool(self.models)
 
+    def heights(self, wire: str, measurement: str) -> list[int]:
+        """Heights fitted for ``wire``'s ``measurement``, sorted; empty if none.
+
+        What was fitted is what had readings at training time — a wire that
+        never filled a height has nothing to fit there, so nothing is declared.
+        """
+        return sorted(h for (w, m, h) in self.models if w == wire and m == measurement)
+
+    def wires_reporting(self, measurement: str) -> list[str]:
+        """Wires with a fit for ``measurement`` at one or more heights, sorted."""
+        return sorted({w for (w, m, _h) in self.models if m == measurement})
+
     def _features(
         self, reference: pd.Series, *, seasonal: bool
     ) -> tuple[np.ndarray, list[str]]:

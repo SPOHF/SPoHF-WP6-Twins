@@ -37,5 +37,9 @@ suffix. This fully replaces the older PAR-only per-height sensors
   shape is contained entirely within the red provider/db.
 - A naming convention (`<device>-h<n>`) now carries semantic meaning the
   provider parses — renaming wire devices requires updating the parse helper.
-- A second physical wire is a future change: enumeration is metadata-driven, so
-  it means new `type: "wire"` entries, not new code.
+- ~~A second physical wire is a future change: enumeration is metadata-driven, so
+  it means new `type: "wire"` entries, not new code.~~ **Amended 2026-10-07:**
+  enumeration is now driven by upstream's `wire_sensor_map` (active wires). A
+  hand-kept metadata list had drifted into declaring a wire that was never
+  installed (`docs/red/wire-data-coverage.md`). `metadata.yaml` describes wire
+  heights by glob pattern only, and a new wire needs no change here at all.

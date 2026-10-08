@@ -6,16 +6,17 @@ twin-agnostic). Like ``risk/config.py``, the models declare **no defaults**: a
 missing or malformed block fails loudly at load rather than training on guessed
 dates and sensor ids.
 
-Three things live here rather than in code because they are findings about the
+Two things live here rather than in code because they are findings about the
 greenhouse, not decisions about the software, and they will change without any
 code changing:
 
 - ``training_start`` — supersedes the former ``DEFAULT_TRAINING_START`` constant.
 - ``exclusions`` — dated spans no fit may see. The dates are measured; the
   *cause* is recorded as prose and may be corrected independently.
-- ``wire_availability`` — which heights each wire actually reports per
-  measurement. Each wire is broken differently, so nothing may assume a wire
-  reports everything.
+
+Which wires exist and which heights they report is deliberately *not* here: the
+wires come from upstream's ``wire_sensor_map`` (see ``red/wires.py``), and a
+height the wire never filled simply has no readings to fit.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd  # type: ignore[import-untyped]
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from wp6_data.shared.artifacts import fingerprint
 
@@ -81,22 +82,6 @@ class Exclusion(BaseModel):
         return self.start <= day < self.end
 
 
-class WireAvailability(BaseModel):
-    """Which heights one wire actually reports, per measurement."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    available_from: date = Field(alias="from")
-    temp: list[int]
-    hum: list[int]
-    co2: list[int]
-    par: list[int]
-
-    def heights(self, measurement: str) -> list[int]:
-        """Heights this wire reports for ``measurement``; empty if none."""
-        return list(getattr(self, measurement, []) or [])
-
-
 class ClimateModelConfig(BaseModel):
     """The full climate-model configuration block."""
 
@@ -108,15 +93,13 @@ class ClimateModelConfig(BaseModel):
     lag_hours: list[int]
     par_floor: float
     exclusions: list[Exclusion]
-    wire_availability: dict[str, WireAvailability]
 
     def fit_fingerprint(self) -> str:
         """Identifies the configuration a model was fitted under.
 
         Every field is included, because every field shapes the fit: the
         training window, the horizons, the lag set, the references, the PAR
-        floor, the exclusions and which heights each wire is declared to
-        report. A model whose fingerprint does not match the config now on disk
+        floor and the exclusions. A model whose fingerprint does not match the config now on disk
         was fitted to answer a different question, and is refused rather than
         served — see `shared.artifacts`.
         """
@@ -146,14 +129,6 @@ class ClimateModelConfig(BaseModel):
         days = pd.to_datetime(df[time_col], utc=True).dt.date
         keep = ~days.map(self.is_excluded).astype(bool)
         return df[keep]
-
-    def wires_reporting(self, measurement: str) -> list[str]:
-        """Wires that report ``measurement`` at one or more heights, sorted."""
-        return sorted(
-            wire
-            for wire, availability in self.wire_availability.items()
-            if availability.heights(measurement)
-        )
 
 
 def load_climate_model(yaml_path: Path) -> ClimateModelConfig:

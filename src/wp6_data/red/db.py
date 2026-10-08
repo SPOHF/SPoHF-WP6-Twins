@@ -121,6 +121,11 @@ def expand_measurement(measurement: str) -> list[str]:
 # ``par1``..``par5``, ``co21``..``co25``. This is the external table's schema (a
 # fixed structural fact, like SENSOR_TABLES above), not tunable config.
 WIRE_SENSORS_TABLE = "wire_sensors"
+# Upstream's map from each Modbus sensor to the wire and position it is installed
+# on. ``active`` marks whether that sensor is installed; a wire with no active
+# sensor is not installed at all. Rows in WIRE_SENSORS_TABLE are labelled with
+# this map at ingest, so it decides which wire a reading is filed under.
+WIRE_SENSOR_MAP_TABLE = "wire_sensor_map"
 WIRE_SENSOR_MEASUREMENTS = ["par", "temp", "hum", "co2"]
 WIRE_SENSOR_HEIGHTS = [1, 2, 3, 4, 5]
 
@@ -729,6 +734,19 @@ class MySQLConnection:
                 (physical_device_id,),
             )
             return list(await cursor.fetchall())
+
+    @_retry_on_disconnect()
+    async def get_active_wire_ids(self) -> list[str]:
+        """Physical wires with an active sensor in the upstream map, sorted."""
+        if not self.pool:
+            raise RuntimeError("Not connected")
+
+        async with self.pool.acquire() as conn, conn.cursor() as cursor:
+            await cursor.execute(
+                f"SELECT DISTINCT device_id FROM {WIRE_SENSOR_MAP_TABLE} "
+                f"WHERE active = 1 ORDER BY device_id"
+            )
+            return [row[0] for row in await cursor.fetchall()]
 
     @_retry_on_disconnect()
     async def get_wire_device_summary(self) -> dict[str, dict[str, Any]]:

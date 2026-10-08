@@ -24,7 +24,7 @@ from wp6_data.red.db import (
     split_wire_rows_by_height,
 )
 from wp6_data.red.tsdb import ensure_schema_red
-from wp6_data.red.wires import undeclared_wire_ids, wire_ids
+from wp6_data.red.wires import wire_ids
 from wp6_data.shared.blob import BlobStore
 from wp6_data.shared.export import clear_exports, csv_key, write_export_metadata
 
@@ -138,11 +138,7 @@ async def run_export() -> None:
             except Exception as e:
                 log.error("export_failed", device=device_id, error=str(e))
 
-        undeclared = await undeclared_wire_ids(db)
-        if undeclared:
-            log.warning("wire_sensors_undeclared", wires=undeclared)
-
-        for physical_id in wire_ids():
+        for physical_id in await wire_ids(db):
             try:
                 for device_id in await export_wire(db, physical_id, store):
                     exported[device_id] = datetime.now(UTC).isoformat()

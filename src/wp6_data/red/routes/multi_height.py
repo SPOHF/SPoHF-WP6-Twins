@@ -164,7 +164,7 @@ async def single_simple_page(
     if measurement not in WIRE_SENSOR_MEASUREMENTS:
         measurement = "par"
 
-    wires = wire_ids()
+    wires = await wire_ids()
     if wire not in wires:
         wire = wires[0] if wires else ""
 
@@ -339,7 +339,7 @@ async def wire_trends_page(
 ):
     timezone = deps.base_settings.display_timezone
 
-    wires = wire_ids()
+    wires = await wire_ids()
     if wire not in wires:
         wire = wires[0] if wires else ""
 
@@ -437,7 +437,7 @@ async def crop_climate_page(
     sections = deps.growth_sections
     risk_t = load_risk_thresholds(deps._METADATA_PATH)
 
-    wires = wire_ids()
+    wires = await wire_ids()
     if wire not in wires:
         wire = wires[0] if wires else ""
 
@@ -581,7 +581,7 @@ async def crop_climate_page(
 )
 async def crop_climate_update(wire: Annotated[str, Form()]):
     """Incrementally extend the wire's risk log up to now (cron stand-in)."""
-    if wire not in wire_ids():
+    if wire not in await wire_ids():
         return RedirectResponse(url="/multi_height/crop-climate", status_code=303)
 
     pool = get_pool()
@@ -609,7 +609,7 @@ async def crop_climate_rebuild(
     end: Annotated[date, Form()],
 ):
     """Recompute the wire's risk log over a selectable date range."""
-    if wire not in wire_ids():
+    if wire not in await wire_ids():
         return RedirectResponse(url="/multi_height/crop-climate", status_code=303)
 
     tz = deps.base_settings.display_timezone
@@ -646,7 +646,7 @@ async def uniformity_page(
         metric = DEFAULT_UNIFORMITY_METRIC
 
     timezone = deps.base_settings.display_timezone
-    wires = wire_ids()
+    wires = await wire_ids()
     risk_t = load_risk_thresholds(deps._METADATA_PATH)
     # Read per request beside the risk thresholds, not cached at import: both are
     # PROVISIONAL, and retuning either is meant to stay a YAML edit rather than a
@@ -760,7 +760,7 @@ async def crop_climate_audit(
     ] = None,
 ):
     tz = deps.base_settings.display_timezone
-    wires = wire_ids()
+    wires = await wire_ids()
     if wire not in wires:
         wire = wires[0] if wires else ""
 
@@ -819,7 +819,7 @@ async def crop_climate_chart(
             status_code=400,
         )
 
-    wires = wire_ids()
+    wires = await wire_ids()
     if wire not in wires:
         wire = wires[0] if wires else ""
 

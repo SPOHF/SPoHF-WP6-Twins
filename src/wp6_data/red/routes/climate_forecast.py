@@ -151,11 +151,11 @@ async def climate_forecast(
         )
     chain, model, downscaler = loaded
 
-    wires = config.wires_reporting(measure)
+    wires = downscaler.wires_reporting(measure)
     if not wires:
         return _message_page(
-            f"<p>No wire reports {measure}. See "
-            f"<code>climate_model.wire_availability</code>.</p>"
+            f"<p>No wire had {measure} readings to fit when the model was "
+            f"last trained.</p>"
         )
     wire = wire if wire in wires else wires[0]
 
@@ -168,7 +168,7 @@ async def climate_forecast(
     measures = [
         (key, MEASUREMENT_LABELS.get(key, key))
         for key in ("temp", "hum", "co2", "par")
-        if config.wires_reporting(key)
+        if downscaler.wires_reporting(key)
     ]
     controls = (
         pill_row(BASE_PATH, "measure", measures, measure, {"wire": wire}, "Measurement")

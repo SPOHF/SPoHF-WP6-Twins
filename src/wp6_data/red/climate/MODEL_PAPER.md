@@ -273,6 +273,10 @@ on **link 1's predictions**, and no product appears anywhere.
 2. **Only one wire is complete.** `WS_01_02` alone reports all four measurements
    at all five heights; `WS_01_03` has lost temp/hum/CO₂, `WS_01_01` has lost PAR
    above H5. The per-wire intercept has very little to vary over.
+   *Corrected 2026-10-07:* `WS_01_01` was never installed. Its data was
+   `WS_01_03`'s, misfiled upstream, so the fits in this paper treated one wire as
+   two. Wires and heights are now derived from upstream's map and the data
+   (`docs/red/wire-data-coverage.md`), and the numbers here predate that.
 3. **CO₂ is weakly predictable** at every horizon, and beaten by climatology in
    the middle of the range.
 4. **A 46-day exclusion sits inside the training span** (2026-05-28 → 2026-07-12)

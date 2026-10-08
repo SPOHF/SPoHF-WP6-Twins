@@ -11,8 +11,8 @@ the span the model has seen, and the reported skill moves with it. Two things
 are surfaced so that improvement is visible rather than implicit:
 
 - :attr:`TrainedChain.span_days` and the row counts, so growth is on the page.
-- :attr:`TrainedChain.suggestions` — config that has become improvable, such as
-  a wire now reporting heights the config does not declare.
+- :attr:`TrainedChain.suggestions` — what a future run could do better, such as
+  a link that is not yet earning its place.
 
 Whether link 3 uses a day-of-year term is **not** config and not a suggestion:
 each fit tries both and keeps the better out-of-fold score, so a term that only
@@ -45,7 +45,9 @@ from wp6_data.red.climate.model import (
     artifact_target,
     read_artifact,
 )
+from wp6_data.red.db import WIRE_SENSOR_HEIGHTS
 from wp6_data.red.lamp import LampModel, derive_lamp_model
+from wp6_data.red.wires import wire_ids
 from wp6_data.shared.artifacts import write_pickled
 from wp6_data.shared.weather import OpenMeteoClient
 
@@ -109,30 +111,6 @@ def choose_reference(comparison: dict[str, ClimateModelStats]) -> str:
         return len(comparison[key].targets), mean_skill(comparison[key])
 
     return max(comparison, key=rank)
-
-
-def config_drift(
-    config: ClimateModelConfig, observed: dict[tuple[str, str], list[int]]
-) -> list[str]:
-    """Wires now reporting heights the config does not declare.
-
-    Config records what each wire was measured to report
-    (``docs/red/wire-data-coverage.md``). Sensors come back, so a run that sees
-    more than the config admits should say so rather than silently keep
-    ignoring the extra heights.
-    """
-    notes: list[str] = []
-    for (wire, measurement), heights in sorted(observed.items()):
-        declared = set(config.wire_availability[wire].heights(measurement))
-        extra = sorted(set(heights) - declared)
-        if extra:
-            notes.append(
-                f"{wire} now reports {measurement} at height(s) "
-                f"{', '.join(f'H{h}' for h in extra)}, which "
-                f"climate_model.wire_availability does not declare — "
-                f"add them to train on them."
-            )
-    return notes
 
 
 async def _fetch_weather(
@@ -258,26 +236,15 @@ async def train_chain(
     lamp = derive_lamp_model(natural_par, canopy_par)
 
     wire_series: dict[tuple[str, str], dict[str, pd.DataFrame]] = {}
-    observed: dict[tuple[str, str], list[int]] = {}
-    for wire, availability in sorted(config.wire_availability.items()):
-        wire_start = max(
-            start,
-            datetime.combine(
-                availability.available_from, datetime.min.time(), tzinfo=UTC
-            ),
-        )
+    # Every height of every installed wire is offered; one the wire never
+    # filled comes back without frames and is simply not fitted.
+    for wire in await wire_ids(climate_data.require_db()):
         for measurement in WIRE_MEASUREMENTS:
-            heights = availability.heights(measurement)
-            if not heights:
-                continue
             frames = await climate_data.wire_frames(
-                wire, measurement, heights, wire_start, end
+                wire, measurement, WIRE_SENSOR_HEIGHTS, start, end
             )
             if frames:
                 wire_series[(wire, measurement)] = frames
-                observed[(wire, measurement)] = [
-                    int(key.lstrip("h")) for key in frames
-                ]
 
     downscaler = WireDownscaler(config, chosen)
     downscale_stats = (
@@ -292,19 +259,15 @@ async def train_chain(
         comparison=comparison,
         downscale=downscale_stats,
         lamp=lamp,
-        suggestions=_suggestions(config, downscale_stats, observed),
+        suggestions=_suggestions(downscale_stats),
     )
     await _save(chain, models[chosen], downscaler)
     return chain
 
 
-def _suggestions(
-    config: ClimateModelConfig,
-    downscale: DownscaleStats | None,
-    observed: dict[tuple[str, str], list[int]],
-) -> list[str]:
+def _suggestions(downscale: DownscaleStats | None) -> list[str]:
     """What a future retrain could do better, given what this one just saw."""
-    notes = config_drift(config, observed)
+    notes: list[str] = []
     if downscale is not None and downscale.fits and not downscale.earned_its_place:
         notes.append(
             "No per-height model beat simply using the greenhouse-level "

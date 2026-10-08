@@ -266,7 +266,7 @@ async def build_forecast(
 
     notes.extend(_known_caveats(measurement, now, chain.lamp))
 
-    heights = config.wire_availability[wire].heights(measurement)
+    heights = downscaler.heights(wire, measurement)
     if not heights:
         return ForecastView(
             wire, measurement, unit, now, chain.chosen_reference,

@@ -1,36 +1,57 @@
-"""Which multi-height wires exist, and whether the data agrees.
+"""Which multi-height wires are installed.
 
-`metadata.yaml` is the source of truth for the installed wires (red ADR 0001:
-"enumeration is metadata-driven, so a new wire means new `type: "wire"` entries,
-not new code"). Every view, the risk CLI and the export job enumerate from here,
-so a wire the greenhouse reports but nobody declared is invisible platform-wide.
-:func:`undeclared_wire_ids` is what notices.
+Upstream's ``wire_sensor_map`` is the source of truth: it maps every Modbus
+sensor to the wire and position it is physically installed on, and a wire with
+no active sensor is not installed. Every view, the risk CLI and the export job
+enumerate from here, so a wire the map retires disappears platform-wide — even
+though ``wire_sensors`` keeps carrying rows for it (see
+``docs/red/wire-data-coverage.md`` for the July–October 2026 remap).
+
+Which heights and measurements a wire *reports* is not declared anywhere: the
+table's columns are fixed, and a column a wire never fills simply has no
+readings yet.
 
 Lives above `multi_height` and `risk` because both need it and `multi_height`
 already depends on `risk.metrics` — a shared home avoids inverting that.
 """
 
+from cachetools import TTLCache
+
 from wp6_data.red import deps
-from wp6_data.red.db import MySQLConnection, wire_physical_id
+from wp6_data.red.db import (
+    WIRE_DEVICE_HEIGHTS,
+    MySQLConnection,
+    wire_device_id,
+    wire_height_measurements,
+)
+
+# The map changes only when sensors are re-installed, but picking that up must
+# not need a restart — and it is read on every wire request, from a remote DB.
+_wire_ids_cache: TTLCache[str, list[str]] = TTLCache(maxsize=1, ttl=300)
+_CACHE_KEY = "red:wire-ids"
 
 
-def wire_ids() -> list[str]:
-    """Physical wire ids declared in metadata (devices typed 'wire'), sorted."""
-    ids = {
-        wire_physical_id(device_id)
-        for device_id, meta in deps.metadata.devices.items()
-        if meta.type == "wire"
+def invalidate_wire_cache() -> None:
+    """Forget the cached wire list, so the next read goes to the map."""
+    _wire_ids_cache.clear()
+
+
+async def wire_ids(db: MySQLConnection | None = None) -> list[str]:
+    """Physical ids of the installed wires, sorted."""
+    if _CACHE_KEY in _wire_ids_cache:
+        return _wire_ids_cache[_CACHE_KEY]
+    db = db or deps.db
+    if db is None:
+        raise RuntimeError("Database not connected")
+    ids = await db.get_active_wire_ids()
+    _wire_ids_cache[_CACHE_KEY] = ids
+    return ids
+
+
+async def wire_devices(db: MySQLConnection | None = None) -> dict[str, list[str]]:
+    """Virtual per-height device id -> its sensors, for every installed wire."""
+    return {
+        wire_device_id(wire, height): wire_height_measurements(height)
+        for wire in await wire_ids(db)
+        for height in WIRE_DEVICE_HEIGHTS
     }
-    return sorted(ids)
-
-
-async def undeclared_wire_ids(db: MySQLConnection) -> list[str]:
-    """Physical wires reporting into wire_sensors but absent from metadata, sorted.
-
-    One-directional on purpose: a declared wire that has gone silent is a dead
-    sensor (the coverage status page's job), whereas a reporting wire nobody
-    declared is a config gap here — and one that silently drops its data.
-    """
-    summary = await db.get_wire_device_summary()
-    reporting = {wire_physical_id(device_id) for device_id in summary}
-    return sorted(reporting - set(wire_ids()))

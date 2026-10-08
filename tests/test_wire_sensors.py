@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 import pandas as pd
+import pytest
 
 from wp6_data.red.db import (
     WIRE_DEVICE_HEIGHTS,
@@ -204,48 +205,60 @@ class TestWireDeviceId:
         assert wire_physical_id("s2100-01-par") == "s2100-01-par"
 
 
+class _StubDb:
+    """Stands in for MySQLConnection with a canned upstream wire map."""
+
+    def __init__(self, *active_wires: str) -> None:
+        self.active_wires = list(active_wires)
+        self.reads = 0
+
+    async def get_active_wire_ids(self) -> list[str]:
+        self.reads += 1
+        return self.active_wires
+
+
 class TestWireEnumeration:
-    def test_wire_ids_lists_declared_wires(self):
-        """Every wire declared in metadata is enumerated, de-duped, sorted."""
+    """Upstream's wire_sensor_map decides which wires exist, not metadata."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_cache(self):
+        from wp6_data.red.wires import invalidate_wire_cache
+
+        invalidate_wire_cache()
+        yield
+        invalidate_wire_cache()
+
+    async def test_wire_ids_are_the_active_wires_in_the_map(self):
         from wp6_data.red.wires import wire_ids
 
-        assert wire_ids() == ["WS_01_01", "WS_01_02", "WS_01_03"]
+        assert await wire_ids(_StubDb("WS_01_02", "WS_01_03")) == ["WS_01_02", "WS_01_03"]
 
+    async def test_every_installed_wire_gets_all_its_height_devices(self):
+        """Columns are fixed by the table, so no per-wire declaration is needed:
+        a column a wire never fills just has no readings."""
+        from wp6_data.red.wires import wire_devices
 
-class _StubDb:
-    """Stands in for MySQLConnection with a canned wire-device summary."""
+        devices = await wire_devices(_StubDb("WS_01_03"))
 
-    def __init__(self, *physical_ids: str) -> None:
-        self._summary = {
-            wire_device_id(physical_id, height): {"readings": 1, "last_seen": TS}
-            for physical_id in physical_ids
-            for height in WIRE_SENSOR_HEIGHTS
-        }
+        assert set(devices) == {wire_device_id("WS_01_03", h) for h in WIRE_DEVICE_HEIGHTS}
 
-    async def get_wire_device_summary(self) -> dict:
-        return self._summary
+    async def test_map_is_cached_between_requests(self):
+        from wp6_data.red.wires import wire_ids
 
+        db = _StubDb("WS_01_02")
+        await wire_ids(db)
+        await wire_ids(db)
 
-class TestUndeclaredWireDrift:
-    """A wire reporting into wire_sensors but missing from metadata is invisible
-    to every view, since views enumerate wires from metadata. Startup warns."""
+        assert db.reads == 1
 
-    async def test_reporting_wire_missing_from_metadata_is_flagged(self):
-        from wp6_data.red.wires import undeclared_wire_ids
+    def test_wire_devices_resolve_their_description_from_a_pattern(self):
+        """Metadata describes wire heights by pattern, so a wire the map adds is
+        described without a metadata edit."""
+        from wp6_data.red import deps
 
-        db = _StubDb("WS_01_01", "WS_99_99")
-        assert await undeclared_wire_ids(db) == ["WS_99_99"]
-
-    async def test_all_declared_wires_reporting_is_no_drift(self):
-        from wp6_data.red.wires import undeclared_wire_ids, wire_ids
-
-        assert await undeclared_wire_ids(_StubDb(*wire_ids())) == []
-
-    async def test_declared_wire_not_yet_reporting_is_not_drift(self):
-        """Drift is one-directional: a silent wire is a sensor problem, not config."""
-        from wp6_data.red.wires import undeclared_wire_ids
-
-        assert await undeclared_wire_ids(_StubDb("WS_01_01")) == []
+        assert deps.metadata.device(wire_device_id("WS_09_09", 3)).type == "wire"
+        radiation = deps.metadata.device(wire_device_id("WS_09_09", WIRE_RADIATION_HEIGHT))
+        assert list(radiation.sensors) == [WIRE_RADIATION_MEASUREMENT]
 
 
 class TestSplitWireRowsByHeight:

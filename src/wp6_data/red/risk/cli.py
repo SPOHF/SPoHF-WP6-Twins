@@ -40,13 +40,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-async def _load_wire(start_utc, end_utc) -> pd.DataFrame:
+async def _load_wire(start_utc, end_utc) -> tuple[list[str], pd.DataFrame]:
+    """The installed wires, and every wire reading in the window."""
     db = MySQLConnection(
         deps.DB_HOST, deps.DB_PORT, deps.DB_USER, deps.DB_PASSWORD, deps.DB_NAME,
     )
     await db.connect()
     try:
-        return await db.get_wire_sensor_readings(start=start_utc, end=end_utc)
+        wires = await wire_ids(db)
+        return wires, await db.get_wire_sensor_readings(start=start_utc, end=end_utc)
     finally:
         await db.close()
 
@@ -93,8 +95,6 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     tz = deps.base_settings.display_timezone
 
-    wires = wire_ids()
-    wire = args.wire or (wires[0] if wires else "")
     end_day = args.end or date.today()
     start_day = args.start or (end_day - timedelta(days=7))
 
@@ -105,7 +105,8 @@ def main(argv: list[str] | None = None) -> int:
         .to_pydatetime()
     )
 
-    df = run_async(_load_wire(start_utc, end_utc))
+    wires, df = run_async(_load_wire(start_utc, end_utc))
+    wire = args.wire or (wires[0] if wires else "")
     if not df.empty:
         df = df[df["device"].map(wire_physical_id) == wire]
 

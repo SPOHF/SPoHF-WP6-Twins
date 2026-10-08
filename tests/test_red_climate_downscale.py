@@ -126,6 +126,27 @@ class TestCoverageIsTheWiresOwn:
         assert stats.days_covered <= 41
 
 
+class TestFittedHeightsAreWhatHadReadings:
+    """No config declares which heights a wire reports: the forecast offers
+    exactly the heights training found readings for."""
+
+    def test_a_height_the_wire_never_filled_is_not_offered(self, config):
+        reference_index = _index()
+        hour = reference_index.hour.to_numpy()
+        reference = 22 + 5 * np.sin(2 * np.pi * (hour - 13) / 24)
+        filled = {
+            f"h{h}": _frame(reference_index, reference - h) for h in (1, 2, 3, 5)
+        }
+
+        model = WireDownscaler(config, "s2103")
+        model.train({"temp": _frame(reference_index, reference)}, {(WIRE, "temp"): filled})
+
+        assert model.heights(WIRE, "temp") == [1, 2, 3, 5]
+        assert model.heights(WIRE, "co2") == []
+        assert model.wires_reporting("temp") == [WIRE]
+        assert model.wires_reporting("co2") == []
+
+
 class TestHonestWhenThereIsNoGradient:
     def test_a_height_equal_to_the_reference_claims_no_skill(self, config):
         """If the height simply is the reference, the model must not report

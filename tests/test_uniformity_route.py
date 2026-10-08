@@ -30,7 +30,7 @@ from wp6_data.red.routes.multi_height import (
     DEFAULT_UNIFORMITY_METRIC,
     MULTI_HEIGHT_VIEWS,
 )
-from wp6_data.red.wires import wire_ids
+from wp6_data.red.wires import invalidate_wire_cache
 
 UNIFORMITY_PATH = "/multi_height/uniformity"
 DAY = datetime(2026, 8, 12, tzinfo=UTC)
@@ -39,12 +39,20 @@ CONFIG = load_uniformity_config(deps._METADATA_PATH)
 HOURS = int(CONFIG.min_coverage_hours) + 6
 
 
+# The wires the stubbed upstream map lists as installed.
+WIRES = ["WS_01_01", "WS_01_02", "WS_01_03"]
+
+
 class _StubDb:
-    """Serves a fixed readings frame; the page needs no other database call."""
+    """Serves the wire map and a fixed readings frame; the page needs no other
+    database call."""
 
     def __init__(self, frame: pd.DataFrame, last_seen=DAY):
         self._frame = frame
         self._last_seen = last_seen
+
+    async def get_active_wire_ids(self):
+        return list(WIRES)
 
     async def get_wire_sensor_readings(self, start=None, end=None, limit=None):
         return self._frame
@@ -52,7 +60,7 @@ class _StubDb:
     async def get_wire_device_summary(self):
         return {
             wire_device_id(wire, height): {"readings": 1, "last_seen": self._last_seen}
-            for wire in wire_ids()
+            for wire in WIRES
             for height in (1,)
         }
 
@@ -101,6 +109,8 @@ def app():
 
 @pytest.fixture
 def client(app, monkeypatch):
+    invalidate_wire_cache()
+
     def _make(frame: pd.DataFrame):
         monkeypatch.setattr(deps, "db", _StubDb(frame))
         c = TestClient(app)
@@ -118,6 +128,7 @@ def client(app, monkeypatch):
     yield _factory
     for c in made:
         c.__exit__(None, None, None)
+    invalidate_wire_cache()
 
 
 class TestHubRegistration:
@@ -133,11 +144,11 @@ class TestHubRegistration:
 
 class TestUniformityPage:
     def test_renders_without_naming_a_wire(self, client):
-        resp = client(_readings({w: 20.0 for w in wire_ids()})).get(UNIFORMITY_PATH)
+        resp = client(_readings({w: 20.0 for w in WIRES})).get(UNIFORMITY_PATH)
 
         assert resp.status_code == 200
         # Every declared wire gets a column — the page never picks one for you.
-        for wire in wire_ids():
+        for wire in WIRES:
             assert wire in resp.text
 
     def test_a_silent_day_renders_rather_than_500s(self, client):
@@ -148,12 +159,12 @@ class TestUniformityPage:
         assert "excluded" in resp.text
 
     def test_every_metric_is_selectable(self, client):
-        c = client(_readings({w: 20.0 for w in wire_ids()}))
+        c = client(_readings({w: 20.0 for w in WIRES}))
         for metric in CROP_METRICS:
             assert c.get(f"{UNIFORMITY_PATH}?metric={metric}").status_code == 200
 
     def test_an_unknown_metric_falls_back_rather_than_erroring(self, client):
-        c = client(_readings({w: 20.0 for w in wire_ids()}))
+        c = client(_readings({w: 20.0 for w in WIRES}))
 
         resp = c.get(f"{UNIFORMITY_PATH}?metric=nonsense")
 
@@ -166,27 +177,27 @@ class TestUniformityPage:
         ) in resp.text
 
     def test_the_metric_pills_keep_the_chosen_date(self, client):
-        resp = client(_readings({w: 20.0 for w in wire_ids()})).get(
+        resp = client(_readings({w: 20.0 for w in WIRES})).get(
             f"{UNIFORMITY_PATH}?date=2026-08-12&metric=hum"
         )
 
         assert "date=2026-08-12" in resp.text
 
     def test_the_date_form_keeps_the_chosen_metric(self, client):
-        resp = client(_readings({w: 20.0 for w in wire_ids()})).get(
+        resp = client(_readings({w: 20.0 for w in WIRES})).get(
             f"{UNIFORMITY_PATH}?metric=co2"
         )
 
         assert '<input type="hidden" name="metric" value="co2">' in resp.text
 
     def test_wire_columns_link_into_the_single_wire_page(self, client):
-        resp = client(_readings({w: 20.0 for w in wire_ids()})).get(UNIFORMITY_PATH)
+        resp = client(_readings({w: 20.0 for w in WIRES})).get(UNIFORMITY_PATH)
 
-        first = wire_ids()[0]
+        first = WIRES[0]
         assert f"/multi_height/crop-climate?wire={first}&date=" in resp.text
 
     def test_a_drifting_wire_is_reported_as_an_offset(self, client):
-        wires = wire_ids()
+        wires = WIRES
         drift = CONFIG.notable_spread["temp"] * 3
         temps = {w: 20.0 for w in wires}
         temps[wires[1]] = 20.0 + drift
@@ -197,7 +208,7 @@ class TestUniformityPage:
         assert f"{drift:+.2f}" in resp.text
 
     def test_agreeing_wires_say_so(self, client):
-        resp = client(_readings({w: 20.0 for w in wire_ids()})).get(UNIFORMITY_PATH)
+        resp = client(_readings({w: 20.0 for w in WIRES})).get(UNIFORMITY_PATH)
 
         assert "agrees with the other wires" in resp.text
         assert "consistent offset" not in resp.text
