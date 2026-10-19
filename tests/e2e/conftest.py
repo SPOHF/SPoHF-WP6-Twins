@@ -18,8 +18,11 @@ os.environ.setdefault("WP6_S3_ACCESS_KEY_ID", "wp6")
 os.environ.setdefault("WP6_S3_SECRET_ACCESS_KEY", "wp6devsecret")
 
 import asyncio  # noqa: E402
+import sys  # noqa: E402
+import warnings  # noqa: E402
 
 import psycopg  # noqa: E402
+import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from botocore.exceptions import ClientError  # noqa: E402
 from psycopg_pool import AsyncConnectionPool  # noqa: E402
@@ -78,6 +81,24 @@ async def remove_cagg_refresh_policy(conn) -> None:
         END $$;
         """
     )
+
+
+@pytest.fixture(scope="session")
+def event_loop_policy():
+    """SelectorEventLoop on Windows, for the same reason as ``shared.compat.run_async``.
+
+    psycopg's async mode needs ``add_reader()``, which the default
+    ``ProactorEventLoop`` lacks, so on Windows every pool connect fails and the
+    whole suite errors out with ``PoolTimeout``. CI runs on Linux and never sees it.
+
+    Event-loop policies are deprecated since Python 3.14, but pytest-asyncio
+    1.3 offers no loop-factory hook yet; switch once it does.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        if sys.platform == "win32":
+            return asyncio.WindowsSelectorEventLoopPolicy()
+        return asyncio.DefaultEventLoopPolicy()
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session", autouse=True)
