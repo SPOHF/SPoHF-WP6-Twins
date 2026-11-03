@@ -13,11 +13,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from tests.e2e.conftest import TSDB_DSN
 from wp6_data.db import close_pool, init_pool, upsert_readings
 
 pytestmark = pytest.mark.e2e
 
-TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
 DEVICE = "e2e-dedup-dev"
 SENSOR = "e2e-dedup-temp"
 TS = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)

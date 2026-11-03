@@ -8,13 +8,13 @@ failure streak, and the enriched metrics query aggregates it (7-day SLA, sparkli
 import pytest
 from psycopg.rows import dict_row
 
+from tests.e2e.conftest import TSDB_DSN
 from wp6_data.db import close_pool, init_pool
 from wp6_data.db.queries import fetch_sync_metrics_rows
 from wp6_data.sync.state import SyncStateManager
 
 pytestmark = pytest.mark.e2e
 
-TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
 EP = "e2e-sync-hist"
 
 

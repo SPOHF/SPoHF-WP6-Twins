@@ -10,6 +10,7 @@ import respx
 from httpx import ASGITransport
 from psycopg.rows import dict_row
 
+from tests.e2e.conftest import TSDB_DSN
 from wp6_data.config import Settings
 from wp6_data.sync.orchestrator import SyncOrchestrator
 
@@ -71,8 +72,6 @@ def _build_fake_readings() -> list[dict]:
 FAKE_READINGS = _build_fake_readings()
 
 # ── Helpers ──────────────────────────────────────────────────────────
-
-TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
 
 
 def _make_settings() -> Settings:

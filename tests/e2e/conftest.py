@@ -28,13 +28,23 @@ from wp6_data.blue.tsdb import ensure_schema_blue  # noqa: E402
 from wp6_data.config import ObjectStoreSettings  # noqa: E402
 from wp6_data.shared.blob import S3BlobStore  # noqa: E402
 
-TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
-RED_TSDB_DSN = "postgresql://wp6_red:wp6dev@localhost:5433/wp6_red"
+# e2e gets its own two databases, not the ones `.env` points the dashboards at.
+#
+# The red suite bootstraps and DROPS its schema per test, so sharing meant a
+# local e2e run deleted the dev data you were working with and left you
+# re-ingesting uploads-red/ afterwards — which made the suite something you
+# avoided running before a push, the one moment it is worth most. The s3mock
+# container already separates wp6-e2e from wp6-dev for exactly this reason
+# (docker-compose.tsdb.yml); the databases simply never got the same treatment.
+TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue_e2e"
+RED_TSDB_DSN = "postgresql://wp6_red:wp6dev@localhost:5433/wp6_red_e2e"
+
+# Superuser connection, used only to create the two above when absent.
+MAINTENANCE_DSN = "postgresql://wp6:wp6dev@localhost:5433/postgres"
+E2E_DATABASES = (("wp6_blue_e2e", "wp6"), ("wp6_red_e2e", "wp6_red"))
+
 E2E_PREFIX = "e2e-"
-_TSDB_HINT = (
-    "Start it with: docker compose -f docker-compose.tsdb.yml up -d "
-    "(use `down -v` once if you have an old volume without the wp6_red database)"
-)
+_TSDB_HINT = "Start it with: docker compose -f docker-compose.tsdb.yml up -d"
 
 
 async def remove_cagg_refresh_policy(conn) -> None:
@@ -81,7 +91,45 @@ async def remove_cagg_refresh_policy(conn) -> None:
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session", autouse=True)
-async def _bootstrap_blue_schema():
+async def _ensure_e2e_databases():
+    """Create the e2e databases when the container predates them.
+
+    ``scripts/init-tsdb.sh`` provisions them, but the Postgres entrypoint runs
+    it only on first volume initialisation and a developer's volume is rarely
+    fresh. Creating them here means an existing container gains them without
+    ``down -v`` — which would destroy the very dev data this separation exists
+    to protect.
+    """
+    try:
+        conn = await psycopg.AsyncConnection.connect(MAINTENANCE_DSN, autocommit=True)
+    except Exception as exc:
+        raise RuntimeError(
+            f"TimescaleDB is not reachable at {MAINTENANCE_DSN}. {_TSDB_HINT}"
+        ) from exc
+    try:
+        for name, owner in E2E_DATABASES:
+            found = await conn.execute(
+                "SELECT 1 FROM pg_database WHERE datname = %s", (name,)
+            )
+            if await found.fetchone():
+                continue
+            # Interpolated, not parameterised: these are identifiers, and CREATE
+            # DATABASE cannot run inside a transaction. Both names are literals
+            # in E2E_DATABASES above.
+            await conn.execute(f'CREATE DATABASE "{name}" OWNER "{owner}"')
+            created = await psycopg.AsyncConnection.connect(
+                MAINTENANCE_DSN.replace("/postgres", f"/{name}"), autocommit=True
+            )
+            try:
+                await created.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
+            finally:
+                await created.close()
+    finally:
+        await conn.close()
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session", autouse=True)
+async def _bootstrap_blue_schema(_ensure_e2e_databases):
     """Create blue tables once per session so cleanup_e2e_data has something to delete from."""
     pool = AsyncConnectionPool(TSDB_DSN, min_size=1, max_size=1, open=False)
     await pool.open()
