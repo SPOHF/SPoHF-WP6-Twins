@@ -16,10 +16,10 @@ wrong one here, for two reasons the export CronJob itself documents:
   exports for 23 days after the v2 migration (see ``_export-affinity.tpl``).
   A job running *inside* the dashboard cannot hit it at all.
 - *Cache coherence.* A model written by another pod is only picked up by code
-  that re-reads it from disk. Red's climate chain does; red's DLI model holds
-  it in a module global. So a CronJob would refit DLI into a file the running
-  dashboard would ignore until its next restart, which is precisely the thing
-  we are trying to stop depending on.
+  that re-reads it from storage, and the dashboards hold theirs in memory once
+  loaded. So a CronJob would refit into a file the running dashboard would
+  ignore until its next restart, which is precisely the thing we are trying to
+  stop depending on.
 
 The training code already runs in this process for the boot bootstrap and the
 admin retrain button, under a lock that a scheduled run shares. This adds a

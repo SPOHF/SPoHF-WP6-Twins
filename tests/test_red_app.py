@@ -40,6 +40,24 @@ def _returns(value):
 
     return _load
 
+
+@pytest.fixture(autouse=True)
+def _forget_held_climate_artifacts():
+    """`read_artifact` holds what it read per process; start each test empty."""
+    from wp6_data.red.climate import model as climate_model
+
+    climate_model._held.clear()
+    yield
+    climate_model._held.clear()
+
+
+class _UnreachableStore(LocalBlobStore):
+    """The object store as it looks during an outage: reads raise."""
+
+    async def try_get(self, key):
+        raise ConnectionRefusedError("object store unreachable")
+
+
 @pytest.fixture(scope="module")
 def client():
     # Importing red.dashboard runs create_app -> configure_dashboard, which
@@ -233,6 +251,78 @@ async def test_read_artifact_returns_none_for_a_missing_artifact(tmp_path):
     from wp6_data.red.climate.model import read_artifact
 
     assert await read_artifact(LocalBlobStore(tmp_path), "nope.pkl") is None
+
+
+@pytest.mark.asyncio
+async def test_a_held_artifact_survives_an_object_store_outage(tmp_path, monkeypatch):
+    """Once read, the artifact comes from memory: an outage no longer reaches it."""
+    import pickle
+
+    from wp6_data.red.climate.model import MODEL_VERSION, read_artifact
+
+    store = LocalBlobStore(tmp_path)
+    payload = {"version": MODEL_VERSION, "fingerprint": "abc", "chain": "x"}
+    await store.put(KEY, pickle.dumps(payload))
+    assert await read_artifact(store, KEY) == payload
+
+    monkeypatch.setattr(store, "try_get", _UnreachableStore.try_get.__get__(store))
+
+    assert await read_artifact(store, KEY, expect_fingerprint="abc") == payload
+
+
+@pytest.mark.asyncio
+async def test_a_written_artifact_is_read_back_without_the_store(tmp_path):
+    from wp6_data.red.climate.model import MODEL_VERSION, read_artifact, write_artifact
+
+    store = _UnreachableStore(tmp_path)
+    payload = {"version": MODEL_VERSION, "fingerprint": "abc", "chain": "x"}
+    await write_artifact(payload, store, KEY)
+
+    assert await read_artifact(store, KEY) == payload
+
+
+@pytest.mark.asyncio
+async def test_a_held_artifact_still_answers_to_the_fingerprint(tmp_path):
+    """Holding it must not bypass the config gate that persistence needs."""
+    from wp6_data.red.climate.model import MODEL_VERSION, read_artifact, write_artifact
+
+    store = LocalBlobStore(tmp_path)
+    await write_artifact(
+        {"version": MODEL_VERSION, "fingerprint": "abc", "chain": "x"}, store, KEY,
+    )
+
+    assert await read_artifact(store, KEY, expect_fingerprint="def") is None
+
+
+def test_climate_forecast_explains_an_unreachable_store(client, tmp_path, monkeypatch):
+    """Regression: an object-store outage before any model was held was a 500."""
+    from wp6_data.red.climate import model as climate_model
+    from wp6_data.red.routes import climate_forecast
+
+    monkeypatch.setattr(climate_forecast.climate_data, "is_connected", lambda: True)
+    monkeypatch.setattr(
+        climate_model, "artifact_target",
+        lambda *_a, **_k: (_UnreachableStore(tmp_path), KEY),
+    )
+
+    resp = client.get("/climate/forecast")
+
+    assert resp.status_code == 200
+    assert "cannot be reached" in resp.text
+
+
+def test_climate_model_status_explains_an_unreachable_store(client, tmp_path, monkeypatch):
+    from wp6_data.red.climate import model as climate_model
+
+    monkeypatch.setattr(
+        climate_model, "artifact_target",
+        lambda *_a, **_k: (_UnreachableStore(tmp_path), KEY),
+    )
+
+    resp = client.get("/climate/model/")
+
+    assert resp.status_code == 200
+    assert "cannot be reached" in resp.text
 
 
 def test_dli_lamps_renders_not_connected_page(client):

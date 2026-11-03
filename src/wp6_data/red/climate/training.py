@@ -42,13 +42,12 @@ from wp6_data.red.climate.model import (
     WEATHER_VARIABLES,
     ClimateModelStats,
     IndoorClimateModel,
-    artifact_target,
     read_artifact,
+    write_artifact,
 )
 from wp6_data.red.db import WIRE_SENSOR_HEIGHTS
 from wp6_data.red.lamp import LampModel, derive_lamp_model
 from wp6_data.red.wires import wire_ids
-from wp6_data.shared.artifacts import write_pickled
 from wp6_data.shared.weather import OpenMeteoClient
 
 # Measurements a wire reports that link 3 can model, in the order they must be
@@ -288,10 +287,7 @@ async def _save(
     the metadata that shaped it. Under red's models prefix, not the exports one,
     which is cleared wholesale by the nightly job.
     """
-    store, key = artifact_target()
-    await write_pickled(
-        store,
-        key,
+    return await write_artifact(
         {
             "version": MODEL_VERSION,
             "fingerprint": model.config.fit_fingerprint(),
@@ -305,7 +301,6 @@ async def _save(
             "downscale_models": downscaler.models,
         },
     )
-    return key
 
 
 async def load_models(

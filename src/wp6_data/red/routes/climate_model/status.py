@@ -8,6 +8,7 @@ error the model actually removed, and a cell that removed none says so.
 
 from __future__ import annotations
 
+import structlog
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
@@ -21,6 +22,8 @@ from wp6_data.red.climate.forecast import UNITS, quantity
 from wp6_data.red.climate.model import ClimateModelStats
 from wp6_data.red.climate.training import TrainedChain, load_chain, mean_skill
 from wp6_data.shared import render_card, render_page, render_stat_grid, render_table
+
+log = structlog.get_logger()
 
 router = APIRouter()
 
@@ -274,8 +277,8 @@ def _untrained_page() -> str:
         PAGE_TITLE,
         render_card(
             "No climate model yet",
-            "<p>The model lives on ephemeral storage, so a restart clears it and "
-            "the dashboard retrains on boot. If this persists, train it here.</p>"
+            "<p>No trained model is stored. The dashboard trains one on boot "
+            "when none is found; if this persists, train it here.</p>"
             "<form method='post' action='/climate/model/train'>"
             "<button type='submit'>Train now</button></form>",
         ),
@@ -286,7 +289,19 @@ def _untrained_page() -> str:
 @router.get("/", response_class=HTMLResponse)
 async def climate_model_status() -> str:
     """Model status: what it was trained on, and what it actually beats."""
-    chain = await load_chain()
+    try:
+        chain = await load_chain()
+    except Exception as exc:
+        log.warning("climate_model_store_unavailable", error=str(exc))
+        return render_page(
+            PAGE_TITLE,
+            render_card(
+                "Model storage unreachable",
+                "<p>The trained model cannot be loaded because the model "
+                "storage cannot be reached right now. Try again later.</p>",
+            ),
+            show_back_link=True,
+        )
     if chain is None or chain.stats is None:
         return _untrained_page()
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from zoneinfo import ZoneInfo
 
+import structlog
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 
@@ -29,6 +30,8 @@ from wp6_data.red.climate.forecast import (
 from wp6_data.red.climate.training import load_models
 from wp6_data.shared import pill_row, render_card, render_page, render_table
 from wp6_data.shared.auth import verify_session_user
+
+log = structlog.get_logger()
 
 router = APIRouter(
     prefix="/climate", dependencies=[Depends(verify_session_user)]
@@ -142,12 +145,21 @@ async def climate_forecast(
         return _message_page("<p>Database not connected.</p>")
 
     config = load_climate_model(deps._METADATA_PATH)
-    loaded = await load_models(config)
+    try:
+        loaded = await load_models(config)
+    except Exception as exc:
+        # Only reachable before this process has held a model: once one is
+        # held, an object-store outage no longer touches this page.
+        log.warning("climate_model_store_unavailable", error=str(exc))
+        return _message_page(
+            "<p>The model storage cannot be reached right now, so the trained "
+            "model cannot be loaded. Try again later.</p>"
+        )
     if loaded is None:
         return _message_page(
-            "<p>No climate model has been trained yet. The model lives on "
-            "ephemeral storage and is retrained on boot; an admin can also "
-            "train it from <a href='/climate/model/'>the model page</a>.</p>"
+            "<p>No climate model has been trained yet. The dashboard trains "
+            "one on boot when none is stored; an admin can also train it from "
+            "<a href='/climate/model/'>the model page</a>.</p>"
         )
     chain, model, downscaler = loaded
 
