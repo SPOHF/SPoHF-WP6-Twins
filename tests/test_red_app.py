@@ -325,6 +325,97 @@ def test_climate_model_status_explains_an_unreachable_store(client, tmp_path, mo
     assert "cannot be reached" in resp.text
 
 
+# --- A store that is down from boot: fit in memory, hold it, persist later ---
+
+
+class _DownStore(_UnreachableStore):
+    """An outage that refuses writes as well as reads."""
+
+    async def put(self, key, data, *, content_type=None):
+        raise ConnectionRefusedError("object store unreachable")
+
+
+@pytest.fixture(autouse=True)
+def _forget_held_dli_model(monkeypatch):
+    """`get_model`/`save` hold the DLI model per process; start each test empty."""
+    from wp6_data.red.dli import model as dli_model
+
+    monkeypatch.setattr(dli_model, "_model", None)
+
+
+def test_dli_home_survives_an_unreachable_store(client, tmp_path, monkeypatch):
+    """Regression: an outage before any model was held made /dli a 500."""
+    from wp6_data.red import deps
+    from wp6_data.red.routes.dli import home
+
+    monkeypatch.setattr(home.dli_data, "is_connected", lambda: True)
+    monkeypatch.setattr(deps, "MODELS_STORE", _DownStore(tmp_path))
+
+    resp = client.get("/dli/")
+
+    assert resp.status_code == 200
+    assert "Not trained" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_a_dli_fit_during_an_outage_is_held_not_lost(tmp_path, monkeypatch):
+    from wp6_data.red import deps
+    from wp6_data.red.dli import model as dli_model
+
+    monkeypatch.setattr(deps, "MODELS_STORE", _DownStore(tmp_path))
+    model = await dli_model.get_model()
+    assert not model.is_trained()
+
+    model.stage1_model, model.stage2_model = "m1", "m2"  # stands in for train()
+    await model.save()
+
+    assert await dli_model.get_model() is model
+
+
+@pytest.mark.asyncio
+async def test_a_climate_fit_during_an_outage_is_held_not_lost(tmp_path):
+    from wp6_data.red.climate.model import MODEL_VERSION, read_artifact, write_artifact
+
+    store = _DownStore(tmp_path)
+    payload = {"version": MODEL_VERSION, "fingerprint": "abc", "chain": "x"}
+    await write_artifact(payload, store, KEY)
+
+    assert await read_artifact(store, KEY) == payload
+
+
+@pytest.mark.asyncio
+async def test_boot_fits_both_models_when_the_store_is_down(client, tmp_path, monkeypatch):
+    """Regression: boot's load raised outside its `try`, killing the task silently."""
+    from wp6_data.red import dashboard, deps
+
+    monkeypatch.setattr(deps, "MODELS_STORE", _DownStore(tmp_path))
+    dli_fit = AsyncMock()
+    climate_fit = AsyncMock(return_value=None)
+    monkeypatch.setattr(dashboard, "train_model_from_db", dli_fit)
+    monkeypatch.setattr(dashboard, "_retrain_climate_model", climate_fit)
+
+    await dashboard._train_dli_model_if_missing()
+    await dashboard._train_climate_model_if_missing()
+
+    dli_fit.assert_awaited_once()
+    climate_fit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_climate_refit_does_not_skip_the_dli_one(client, monkeypatch):
+    from wp6_data.red import dashboard
+
+    monkeypatch.setattr(
+        dashboard, "_retrain_climate_model", AsyncMock(side_effect=ValueError("no weather")),
+    )
+    dli_fit = AsyncMock()
+    monkeypatch.setattr(dashboard, "train_model_from_db", dli_fit)
+
+    await dashboard._nightly_retrain()
+
+    dli_fit.assert_awaited_once()
+
+
 def test_dli_lamps_renders_not_connected_page(client):
     from wp6_data.red.routes.dli.lamps import PAGE_TITLE
 

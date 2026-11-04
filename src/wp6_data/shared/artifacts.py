@@ -35,12 +35,16 @@ import json
 import pickle
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 if TYPE_CHECKING:
     from wp6_data.shared.blob import BlobStore
 
 # Enough hex to make a collision irrelevant while staying readable in a log line
 # and on a status page.
 FINGERPRINT_LENGTH = 16
+
+log = structlog.get_logger()
 
 
 async def write_pickled(store: BlobStore, key: str, payload: dict) -> None:
@@ -52,6 +56,22 @@ async def write_pickled(store: BlobStore, key: str, payload: dict) -> None:
     :func:`read_pickled`'s broad ``except`` made survivable.
     """
     await store.put(key, pickle.dumps(payload), content_type="application/octet-stream")
+
+
+async def persist_held(store: BlobStore, key: str, payload: dict) -> bool:
+    """:func:`write_pickled` for a caller already serving ``payload`` from memory.
+
+    Returns whether it was persisted. An unreachable store is logged, not
+    raised: the write exists so the *next* process can skip a refit, not so this
+    one can serve, and failing a fresh fit over it would throw the model away to
+    protect a copy of it. So the caller holds first, then calls this.
+    """
+    try:
+        await write_pickled(store, key, payload)
+    except Exception as exc:  # noqa: BLE001 - an outage is someone else's, and transient
+        log.warning("artifact_not_persisted", key=key, error=str(exc))
+        return False
+    return True
 
 
 async def read_pickled(
@@ -82,8 +102,8 @@ async def read_pickled(
     answer.
 
     An unreachable store is *not* swallowed here. Absence and outage are
-    different things, and only the caller knows whether it is on a path that can
-    degrade (a status page) or one that should fail loudly (a deliberate refit).
+    different things, and only the caller knows what an outage means to it: a
+    status page says so, while boot fits a fresh model in memory instead.
     """
     raw = await store.try_get(key)
     if raw is None:

@@ -19,8 +19,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+import structlog
 
-from wp6_data.shared.artifacts import read_pickled, write_pickled
+from wp6_data.shared.artifacts import persist_held, read_pickled
 
 if TYPE_CHECKING:
     from wp6_data.shared.blob import BlobStore
@@ -615,7 +616,12 @@ class TwoStageLightModel:
         return round(par_integral / UMOL_TO_MOL, 2)
 
     async def save(self, store: BlobStore | None = None, key: str = "") -> str:
-        """Store the trained model, returning the key it was written to."""
+        """Hold this model as the process's model, then store it.
+
+        Held first, and the store write is best-effort: a fit during an
+        object-store outage still serves from this process instead of being
+        discarded. Returns the key it was (or would have been) written to.
+        """
         if not self.is_trained():
             raise RuntimeError("No model to save. Train first.")
 
@@ -637,7 +643,9 @@ class TwoStageLightModel:
         }
 
         store, key = _resolve(store, key)
-        await write_pickled(store, key, data)
+        global _model
+        _model = self
+        await persist_held(store, key, data)
         return key
 
     async def load(self, store: BlobStore | None = None, key: str = "") -> ModelStats | None:
@@ -696,6 +704,8 @@ LightCorrelationModel = TwoStageLightModel
 # Global model instance
 _model: TwoStageLightModel | None = None
 
+log = structlog.get_logger()
+
 
 async def get_model() -> TwoStageLightModel:
     """Get or create the global model instance, loading it back if one is stored.
@@ -703,12 +713,21 @@ async def get_model() -> TwoStageLightModel:
     Async because the artifact now lives in the object store rather than on a
     mounted volume, and a read is a network round trip — done synchronously it
     would block the event loop and every other in-flight request with it.
+
+    An unreachable store, with nothing held yet, gives an untrained model rather
+    than an error: every page already renders "not trained", and a fit (boot's,
+    or the admin's) holds itself through :meth:`TwoStageLightModel.save`. It is
+    not held here, so the next call tries the store again.
     """
     global _model
 
     if _model is None:
         model = TwoStageLightModel()
-        await model.load()
+        try:
+            await model.load()
+        except Exception as exc:  # noqa: BLE001 - an outage degrades to "not trained"
+            log.warning("dli_model_store_unavailable", error=str(exc))
+            return model
         # Assigned only once loaded, so a failed load does not leave an empty
         # model cached as if it were the real thing.
         _model = model

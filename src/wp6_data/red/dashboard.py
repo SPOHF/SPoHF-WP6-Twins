@@ -45,11 +45,11 @@ _retrain_task: asyncio.Task | None = None
 async def _train_dli_model_if_missing() -> None:
     from wp6_data.red.dli import get_model
 
-    model = await get_model()
-    if model.is_trained():
-        log.info("dli_model_loaded_from_disk")
-        return
     try:
+        model = await get_model()
+        if model.is_trained():
+            log.info("dli_model_loaded_from_disk")
+            return
         started = time.monotonic()
         stats = await train_model_from_db(deps.db, deps.get_weather_client())
         log.info(
@@ -80,8 +80,14 @@ async def _train_climate_model_if_missing() -> None:
     from wp6_data.red.climate.training import load_chain
 
     # Config-aware: a saved model fitted under a different metadata.yaml is not
-    # a model we can use, so it refits here rather than being served.
-    if await load_chain(load_climate_model(deps._METADATA_PATH)) is not None:
+    # a model we can use, so it refits here rather than being served. An
+    # unreachable store refits too: the fit is held in this process either way.
+    try:
+        stored = await load_chain(load_climate_model(deps._METADATA_PATH))
+    except Exception as exc:
+        log.warning("climate_model_store_unavailable", error=str(exc))
+        stored = None
+    if stored is not None:
         log.info("climate_model_loaded_from_disk")
         return
     try:
@@ -128,15 +134,19 @@ async def _nightly_retrain() -> None:
     # Timed, because the fits are CPU-bound and the pod's CPU limit is a
     # fraction of a core: the same work that takes ~1 min on a workstation takes
     # far longer here, and the only way to tell how much is to record it.
+    # Independent fits: a climate failure must not cost the DLI its refit too.
     started = time.monotonic()
-    chain = await _retrain_climate_model()
-    climate_seconds = time.monotonic() - started
-    log.info(
-        "climate_model_retrained",
-        skipped=chain is None,
-        span_days=chain.span_days if chain else 0,
-        seconds=round(climate_seconds, 1),
-    )
+    try:
+        chain = await _retrain_climate_model()
+    except Exception:
+        log.warning("climate_model_retrain_failed", exc_info=True)
+    else:
+        log.info(
+            "climate_model_retrained",
+            skipped=chain is None,
+            span_days=chain.span_days if chain else 0,
+            seconds=round(time.monotonic() - started, 1),
+        )
 
     started = time.monotonic()
     stats = await train_model_from_db(deps.db, deps.get_weather_client())

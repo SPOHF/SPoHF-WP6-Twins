@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd  # type: ignore[import-untyped]
 
-from wp6_data.shared.artifacts import read_pickled, write_pickled
+from wp6_data.shared.artifacts import persist_held, read_pickled
 
 if TYPE_CHECKING:
     from wp6_data.shared.blob import BlobStore
@@ -139,10 +139,14 @@ async def read_artifact(
 async def write_artifact(
     payload: dict, store: BlobStore | None = None, key: str = "",
 ) -> str:
-    """Store the chain artifact and hold it, so the next read needs no store."""
+    """Hold the chain artifact, then store it so the next process can read it.
+
+    Held first, and the store write is best-effort: a refit during an object-store
+    outage still serves its model from this process instead of being discarded.
+    """
     store, key = artifact_target(store, key)
-    await write_pickled(store, key, payload)
     _held[(store, key)] = payload
+    await persist_held(store, key, payload)
     return key
 
 
