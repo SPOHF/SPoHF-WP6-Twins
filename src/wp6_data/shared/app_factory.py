@@ -1,8 +1,11 @@
 """App factory: create a complete sensor dashboard from a TwinConfig."""
 
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +22,22 @@ from wp6_data.shared.twin import TwinConfig
 
 # Static files live at the project root (4 dirs up from shared/app_factory.py)
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+
+logger = structlog.get_logger()
+
+
+async def _warm_home_caches(config: TwinConfig) -> None:
+    """Load the home page's data once so its caches are hot before a visitor.
+
+    Without this, the first visitor after every deploy pays for the cold
+    summary queries. Best effort: a failure here is a slow first page, not a
+    reason to fail startup, so it is logged and dropped.
+    """
+    try:
+        await home.load_home_data(config, config.default_provider)
+        logger.info("home_caches_warmed")
+    except Exception as exc:
+        logger.warning("home_cache_warm_failed", error=str(exc))
 
 
 async def _set_user_context(request: Request, call_next):
@@ -61,7 +80,13 @@ def create_app(config: TwinConfig) -> FastAPI:
             await startup_oidc(OIDCSettings())
         if config.lifespan_startup:
             await config.lifespan_startup()
+        # Backgrounded so warming can't delay readiness; held so it isn't
+        # garbage-collected mid-run, and cancelled if still running at shutdown.
+        warm_task = asyncio.create_task(_warm_home_caches(config))
         yield
+        warm_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await warm_task
         if config.lifespan_shutdown:
             await config.lifespan_shutdown()
 
