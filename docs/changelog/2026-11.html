@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WP6 Digital Twins — Changelog (October / November 2026)</title>
+<style>
+  :root {
+    --red: #c0392b;   --red-bg: #fdecea;
+    --blue: #2471a3;  --blue-bg: #eaf2fa;
+    --grey: #566573;  --grey-bg: #eef1f3;
+    --shared:#7d3c98; --shared-bg:#f4ecf7;
+    --ink: #1c2833;   --muted: #5d6d7e;
+    --line:#d5dbdb;   --bg:#f7f9f9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink); background: var(--bg); margin: 0; line-height: 1.55;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 24px 80px; }
+  header.page { border-bottom: 3px solid var(--ink); padding-bottom: 18px; margin-bottom: 8px; }
+  header.page h1 { margin: 0 0 4px; font-size: 30px; letter-spacing: -0.5px; }
+  header.page .sub { color: var(--muted); font-size: 15px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 28px; }
+  .pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; }
+  .pill.red   { background: var(--red-bg);   color: var(--red);   border-color: var(--red); }
+  .pill.blue  { background: var(--blue-bg);  color: var(--blue);  border-color: var(--blue); }
+  .pill.grey  { background: var(--grey-bg);  color: var(--grey);  border-color: var(--grey); }
+  .pill.shared{ background: var(--shared-bg);color: var(--shared);border-color: var(--shared); }
+  .tldr { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin-bottom: 36px; }
+  .tldr h2 { margin: 0 0 10px; font-size: 16px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .tldr ul { margin: 0; padding-left: 20px; }
+  .tldr li { margin: 6px 0; }
+  section.theme { margin-bottom: 44px; }
+  section.theme > h2 { font-size: 22px; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+  section.theme > .theme-sub { color: var(--muted); margin: 0 0 20px; font-size: 15px; }
+  .hero { border-left: 5px solid var(--line); padding-left: 18px; }
+  .hero.blue { border-color: var(--blue); }
+  .hero.red  { border-color: var(--red); }
+  .hero.grey { border-color: var(--grey); }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin-bottom: 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 18px; }
+  .card .tags { margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .card p { margin: 0 0 12px; }
+  .card ul { margin: 0 0 12px; padding-left: 20px; }
+  .card ul li { margin: 3px 0; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 4px; }
+  a.btn { display: inline-block; text-decoration: none; font-weight: 600; font-size: 14px; padding: 8px 14px; border-radius: 8px; color: #fff; background: var(--ink); }
+  a.btn.blue { background: var(--blue); }
+  a.btn.red  { background: var(--red); }
+  a.btn.grey { background: var(--grey); }
+  a.btn.shared { background: var(--shared); }
+  a.btn::after { content: " ↗"; font-weight: 400; }
+  .route { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  details.more { margin-top: 6px; }
+  details.more summary { cursor: pointer; font-weight: 600; color: var(--muted); font-size: 14px; }
+  .commitlist { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .commitlist code { color: var(--ink); }
+  footer.page { border-top: 1px solid var(--line); margin-top: 40px; padding-top: 20px; color: var(--muted); font-size: 13.5px; }
+  footer.page code { background: #eef1f3; padding: 1px 5px; border-radius: 4px; }
+  @media print {
+    body { background: #fff; }
+    .card, .tldr { break-inside: avoid; }
+    a.btn { color: #000; background: none; border: 1px solid #999; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <p style="margin:0 0 8px;"><a href="./" style="color:var(--muted); text-decoration:none; font-size:14px;">← All changelogs</a></p>
+    <h1>WP6 Digital Twins — What shipped this month</h1>
+    <div class="sub">Changelog · <strong>update of 6 November 2026</strong> · covering 9 Oct – 6 Nov · branch <code>main</code> · 9 commits · 0 merged PRs · 1 contributor · <strong>1 open PR in review</strong></div>
+  </header>
+
+  <div class="legend">
+    <span class="pill blue">Blue — blueberry farm · wp6-blue.spohf.fontysvenlo.dev</span>
+    <span class="pill red">Red — tomato greenhouse · wp6-red.spohf.fontysvenlo.dev</span>
+    <span class="pill grey">Grey — public platform demo · wp6-grey.spohf.fontysvenlo.dev</span>
+    <span class="pill shared">Shared — twin-agnostic platform</span>
+  </div>
+
+  <div class="tldr">
+    <h2>Headlines</h2>
+    <ul>
+      <li><strong>In review: LetsGrow climate-computer data for Red.</strong> An open pull request brings in the greenhouse's own process-control data (heating pipes, vents, screens, lamps, irrigation and the weather station), which Red's own sensors can't see. It is synced the same way Blue syncs Yookr.</li>
+      <li><strong>Red's wires, set straight.</strong> Three sensor wires are now installed and behaving as they should. Red now reads its wire list from upstream's sensor map instead of a hand-kept list, and the climate model trains on every height of every installed wire. That also untangles July–October, when upstream filed one wire's sensors under a wire that wasn't up yet.</li>
+      <li><strong>The dashboards stay up when their storage doesn't.</strong> An outage of the object store or a database restart used to turn the DLI and climate pages into errors. Both twins now keep their fitted models in memory and drop dead database connections without the visitor noticing.</li>
+    </ul>
+  </div>
+
+  <p style="color:var(--muted); font-size:13.5px; margin:-18px 0 30px;">
+    🔗 The <strong>Open live</strong> buttons (↗) deep-link into the deployed dashboards. Blue and Red require a login on first open; Grey is a public demo (no login).
+  </p>
+
+  <section class="theme">
+    <h2>🔍 In review: LetsGrow climate-computer data for Red</h2>
+    <p class="theme-sub">Not merged yet, so it isn't live. Open pull request #31 by Tim Riebner, opened 16 October.</p>
+    <div class="hero red">
+      <div class="card">
+        <h3>Sync LetsGrow into Red, the way Blue syncs Yookr</h3>
+        <div class="tags"><span class="pill red">Red</span><span class="pill shared">Shared</span></div>
+        <p><strong>LetsGrow</strong> is Neurath's own climate computer, the system the grower uses to steer the greenhouse. It records climate, water, lighting and weather-station values. It also records the <em>actuators</em> and their setpoints: heating pipes, vents, screens, lamps and irrigation. Red's own sensors cannot see any of these. The SPoHF relay already serves this data as <code>letsgrow-data</code>. This PR passes it through the same client and sync orchestrator that Blue uses for <code>yookr-data</code>, and writes it into Red's database.</p>
+        <ul>
+          <li><strong>What comes in:</strong> five LetsGrow modules (Climate B4, Grow light B4, Plant balance B4, Water B4, Weather station) with 51 declared sensors. Each module becomes a device (e.g. <code>letsgrow-climate-b4</code>), and each column becomes an <code>lg_*</code> sensor. The prefix keeps the names apart from Red's existing MySQL sensors, because Red routes queries by sensor name.</li>
+          <li><strong>Nothing silently dropped:</strong> a column that hasn't been declared yet is still stored (as <code>lg_col_&lt;id&gt;</code>) and logged.</li>
+          <li><strong>Local time:</strong> LetsGrow exports greenhouse wall-clock time rather than UTC, so timestamps are converted from Europe/Amsterdam time when the data is loaded. One limitation: on the night the clocks go back, the hour that occurs twice is stored only once.</li>
+          <li><strong>Daily delivery:</strong> data arrives once a day, up to local midnight. The Sync Status page therefore marks LetsGrow <em>stale</em> only after 36&nbsp;h and an <em>upstream outage</em> after 60&nbsp;h, instead of Yookr's 2&nbsp;h/6&nbsp;h.</li>
+          <li><strong>Running totals</strong> (radiation, PAR sum, irrigation, drain, water uptake) climb through the day and reset at midnight, so charts aggregate them with <em>max</em>, never average.</li>
+          <li><strong>Architecture:</strong> the sync orchestrator now groups each endpoint (feed) by twin and opens one database pool per twin. If one twin's database is down, only that twin's feeds fail. LetsGrow always writes to Red's database, so it cannot end up in Blue's.</li>
+          <li><strong>Deployment:</strong> a new hourly <code>wp6-data-sync-letsgrow</code> CronJob. Loading the history is a one-off full sync going back to at least 1 January 2024 (about 14&nbsp;million rows).</li>
+        </ul>
+        <p><strong>Status:</strong> the CI check passed against its base (15 October). <code>main</code> has moved 7 commits since then, but the PR still merges without conflicts. It is waiting for review. <strong>Open question:</strong> where exactly Neurath's LetsGrow sensors hang has not been confirmed yet, so for now <code>lg_par</code> and <code>lg_temp_greenhouse</code> shouldn't be compared directly with Red's own s2100/s2101 sensors.</p>
+        <div class="actions">
+          <a class="btn" href="https://github.com/spohf/SPoHF-WP6-Twins/pull/31">PR #31 on GitHub</a>
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/status">Red sync status (after merge)</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>🟥 Red's wires, set straight</h2>
+    <p class="theme-sub">The per-height sensors are where Red's predictions are headed, so knowing which wire a reading came from matters.</p>
+    <div class="hero red">
+      <div class="card">
+        <h3>Wires come from upstream's sensor map</h3>
+        <div class="tags"><span class="pill red">Red</span></div>
+        <p>Three sensor wires are now installed in the greenhouse and behaving as they should. Getting there meant untangling a mix-up: from 13 July to 2 October, upstream's <em>wire sensor map</em> filed wire WS_01_03's climate sensors and its top PAR sensor under WS_01_01, which wasn't up at that time. Over that period Red showed three wires with gaps instead of two complete ones.</p>
+        <ul>
+          <li>Red now takes the list of installed wires from upstream's map (refreshed every 5 minutes) instead of a list kept by hand, which had drifted. A newly installed wire therefore shows up without a code change.</li>
+          <li>The climate model no longer keeps its own list of which heights are available. It trains on every height of every installed wire, and the forecast shows exactly the heights that were fitted.</li>
+          <li>A new coverage document records the mix-up and keeps a snapshot of the old map. That snapshot is the only way left to decode the misfiled July–October rows.</li>
+        </ul>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/multi_height/uniformity">Wire uniformity</a>
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/multi_height">Multi height</a>
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/climate/forecast">Climate forecast</a>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>96864be</code> feat(red): wires come from upstream's wire_sensor_map — WS_01_01 never existed<br></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>🛡️ Pages that stay up through an outage</h2>
+    <p class="theme-sub">Last month the models moved to object storage so deploys need no disks. This month the dashboards learned to keep working when that storage, or the database, goes down.</p>
+    <div class="hero red">
+      <div class="card">
+        <h3>Fitted models stay in memory when the object store is down</h3>
+        <div class="tags"><span class="pill red">Red</span><span class="pill shared">Shared</span></div>
+        <p>When the educloud storage bucket refused connections, <span class="route">/dli</span> returned an error on every request: the page went back to storage each time and failed. Startup could not recover either, and the nightly refit trained the climate model and then lost it.</p>
+        <ul>
+          <li>A model is held in memory as soon as it is trained. Saving it to storage is now a best-effort extra, because storage exists so the <em>next</em> process can skip a refit, not so this one can serve pages.</li>
+          <li>If storage can't be reached at startup, the dashboard treats it as "nothing stored" and fits the models in memory.</li>
+          <li>The nightly DLI refit now runs even when the climate refit fails.</li>
+          <li>This also covers the multi-height predictions, which are the climate chain's third link.</li>
+        </ul>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/dli/">DLI</a>
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/dli/model/">DLI model status</a>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>205d355</code> fix(red): keep fitted models in memory when the object store is down<br></div>
+        </details>
+      </div>
+      <div class="card">
+        <h3>A faster climate forecast that survives a storage outage</h3>
+        <div class="tags"><span class="pill red">Red</span></div>
+        <p>Every climate forecast used to download the trained model chain from storage again, which took about 600&nbsp;ms per request, and a storage outage made the page fail. The model is now read once per process and kept. A retrain, the nightly refit and startup all update that copy directly. If storage is unreachable before any model has loaded, both climate pages say so instead of crashing.</p>
+        <div class="actions">
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/climate/forecast">Climate forecast</a>
+          <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/climate/model/">Climate model status</a>
+        </div>
+        <details class="more"><summary>Commits</summary>
+          <div class="commitlist"><code>e648828</code> feat(red): hold the climate artifact in the process that reads it<br></div>
+        </details>
+      </div>
+    </div>
+    <div class="card">
+      <h3>A TimescaleDB restart no longer causes errors</h3>
+      <div class="tags"><span class="pill shared">Shared</span></div>
+      <p>Restarting the database closed every connection, but the dashboards' connection pool kept the dead ones and handed the next one to a visitor, who got an error. Each connection is now checked before use and quietly replaced if it has died.</p>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist"><code>1a92043</code> fix(db): check pooled connections on checkout so a TimescaleDB restart isn't a 500<br></div>
+      </details>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>⚡ Faster home pages</h2>
+    <p class="theme-sub">Most noticeable on Blue, whose readings table holds the full datalake history.</p>
+    <div class="card">
+      <h3>Home page: indexed manual readings, cached export info, loading in parallel</h3>
+      <div class="tags"><span class="pill blue">Blue</span><span class="pill red">Red</span><span class="pill grey">Grey</span><span class="pill shared">Shared</span></div>
+      <p>On every visit, the home page looked up the latest manual reading per sensor by scanning the whole readings table. A small index of only the manual rows makes this lookup fast. Export information is now cached for a few minutes (including the answer "storage unreachable", so an outage no longer slows every visit). The three home-page lookups now run at the same time and are warmed up at startup.</p>
+      <div class="actions">
+        <a class="btn blue" href="https://wp6-blue.spohf.fontysvenlo.dev/">Blue home</a>
+        <a class="btn grey" href="https://wp6-grey.spohf.fontysvenlo.dev/">Grey home</a>
+      </div>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist"><code>b52e78c</code> perf(home): index manual readings, cache export metadata, load in parallel<br></div>
+      </details>
+    </div>
+    <div class="card">
+      <h3>Small fix: one back link on Crop cycles</h3>
+      <div class="tags"><span class="pill red">Red</span></div>
+      <p>The crop-cycles page showed two back links that both went to the home page. It now has one, the same as every other page.</p>
+      <div class="actions">
+        <a class="btn red" href="https://wp6-red.spohf.fontysvenlo.dev/crop-cycles/">Crop cycles</a>
+      </div>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist"><code>e88d59b</code> fix(red): one back link on crop-cycles, not two<br></div>
+      </details>
+    </div>
+  </section>
+
+  <section class="theme">
+    <h2>⚙️ Platform &amp; architecture (under the hood)</h2>
+    <p class="theme-sub">Less visible, but it keeps the twins observable and makes the pre-push check something people actually run.</p>
+    <div class="card">
+      <h3>End-to-end tests get their own databases, and one check runs before every push</h3>
+      <div class="tags"><span class="pill shared">Shared</span></div>
+      <ul>
+        <li>The end-to-end tests used to share the dashboards' local databases and dropped Red's schema on each test, wiping a developer's working data. They now use their own databases (<code>wp6_blue_e2e</code>, <code>wp6_red_e2e</code>), which are created automatically on an existing setup.</li>
+        <li><code>./scripts/check.sh</code> runs lint, unit tests and end-to-end tests in one go (about 75&nbsp;s) and starts the services it needs. It is the same gate CI uses before building the app image.</li>
+      </ul>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist"><code>b30c4d5</code> test(e2e): give the suite its own databases, not the dashboards'<br><code>d700e36</code> build(scripts): one gate to run before a push, e2e included<br></div>
+      </details>
+    </div>
+    <div class="card">
+      <h3>Dash0 auto-instrumentation</h3>
+      <div class="tags"><span class="pill shared">Shared</span></div>
+      <p>All three dashboards are now enrolled in the cluster's Dash0 auto-instrumentation. This builds on the OpenTelemetry tracing that shipped in the summer.</p>
+      <details class="more"><summary>Commits</summary>
+        <div class="commitlist"><code>727861a</code> feat(helm): opt the dashboards into Dash0 auto-instrumentation<br></div>
+      </details>
+    </div>
+  </section>
+
+  <footer class="page">
+    <p>Live dashboards: <code>wp6-blue.spohf.fontysvenlo.dev</code> · <code>wp6-red.spohf.fontysvenlo.dev</code> (login required) · <code>wp6-grey.spohf.fontysvenlo.dev</code> (public demo, synthetic data).</p>
+    <p>Generated from <code>git log --since=2026-10-08</code> on <code>main</code> (excluding the previous changelog commit), plus open PR #31 and <code>src/wp6_data/red/CONTEXT.md</code>. All deep links verified against the live environment.</p>
+  </footer>
+
+</div>
+</body>
+</html>
