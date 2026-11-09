@@ -111,7 +111,6 @@ class TestMetadata:
         assert letsgrow.SOURCE not in MANUAL_SOURCE_VALUES
         assert SIJIA.categorical_value in MANUAL_SOURCE_VALUES
 
-
     def test_device_sensors_are_declared_tags(self, red_metadata):
         tags = set(letsgrow.COLUMNS.values())
         devices = {
@@ -178,9 +177,14 @@ class TestFeedRouting:
         assert LETSGROW.twin == "red"
         assert LETSGROW.source == "letsgrow"
 
-    def test_unknown_endpoint_falls_back_to_blue_yookr(self):
+    def test_yookr_feed_belongs_to_blue(self):
         assert feed_for("yookr-data") is YOOKR
-        assert feed_for("something-new") is YOOKR
+        assert YOOKR.twin == "blue"
+
+    def test_unknown_endpoint_is_refused_not_guessed(self):
+        """A typo in WP6_ENDPOINTS must fail the run, not write into blue."""
+        with pytest.raises(ValueError, match="letsgrow_data"):
+            feed_for("letsgrow_data")
 
     def test_letsgrow_reads_red_dsn_not_blue(self, monkeypatch, mock_settings):
         monkeypatch.setenv("WP6_RED_TSDB_URL", "postgresql://red/wp6_red")

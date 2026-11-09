@@ -91,8 +91,7 @@ def _yookr_measured_at(reading: SensorReading) -> datetime:
     return ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
 
 
-# Blue's yookr shape. Also the fallback for any endpoint not registered below,
-# which is how every endpoint was treated before red had a feed.
+# Blue's yookr shape.
 YOOKR: Feed[SensorReading] = Feed(
     twin="blue",
     response_model=ApiResponse,
@@ -121,6 +120,17 @@ FEEDS: dict[str, AnyFeed] = {
 
 
 def feed_for(endpoint: str) -> AnyFeed:
-    """The feed for an endpoint; unregistered endpoints are yookr-shaped blue."""
-    return FEEDS.get(endpoint, YOOKR)
+    """The feed for an endpoint. Raises for one not registered in `FEEDS`.
+
+    No fallback: an unknown endpoint is a typo or a feed nobody has mapped yet,
+    and guessing a twin for it would write its rows into some database that
+    did not ask for them. Failing the run is how that gets noticed.
+    """
+    try:
+        return FEEDS[endpoint]
+    except KeyError:
+        raise ValueError(
+            f"no feed registered for endpoint {endpoint!r} "
+            f"(known: {', '.join(sorted(FEEDS))}) — see wp6_data.sync.feeds"
+        ) from None
 
