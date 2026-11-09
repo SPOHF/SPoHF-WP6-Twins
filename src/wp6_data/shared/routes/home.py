@@ -53,6 +53,7 @@ async def home(
     explore_tabs = build_explore_tabs(
         config.metadata, device_data, available_exports,
         manual_metadata=manual_metadata,
+        manual_sources=config.manual_sources,
     )
 
     # Render hero cards (can be sync or async callables)

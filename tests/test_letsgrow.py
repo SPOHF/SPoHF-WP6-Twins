@@ -103,9 +103,14 @@ class TestMetadata:
         unsourced = {t for t, m in red_metadata.sensor_defaults.items() if not m.source}
         assert not unsourced & set(letsgrow.COLUMNS.values())
 
-    def test_letsgrow_is_automated_not_manual(self, red_metadata):
-        assert not red_metadata.is_manual_source(letsgrow.SOURCE)
-        assert red_metadata.is_manual_source("sijia")
+    def test_letsgrow_is_automated_not_manual(self):
+        """Red's one list of manual sources drives both /status and the explorer."""
+        from wp6_data.red.manual_sources import MANUAL_SOURCE_VALUES
+        from wp6_data.red.sijia.source import SIJIA
+
+        assert letsgrow.SOURCE not in MANUAL_SOURCE_VALUES
+        assert SIJIA.categorical_value in MANUAL_SOURCE_VALUES
+
 
     def test_device_sensors_are_declared_tags(self, red_metadata):
         tags = set(letsgrow.COLUMNS.values())

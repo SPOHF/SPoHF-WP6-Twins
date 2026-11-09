@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -295,14 +296,15 @@ def build_explore_tabs(
     devices: dict[str, dict],
     available_exports: dict[str, str],
     manual_metadata: dict[str, Any] | None = None,
+    manual_sources: Collection[str] = (),
 ) -> dict[str, str]:
     """Build the three explore tables (devices, sensors, manual measurements).
 
     Sensors are split by ``sensor_default(key).source``: empty source = auto-
-    logged, non-empty = manual upload unless the twin declares that source
-    automated (``MetadataRegistry.is_manual_source``). Devices are similarly
-    filtered by ``device(id).source`` so that manual-measurement plants do not
-    appear in the Devices tab.
+    logged, a source in ``manual_sources`` = manual upload, any other
+    source = an automated sync (``TwinConfig.manual_sources``). Devices are
+    filtered the same way by ``device(id).source``, so that manual-measurement
+    plants do not appear in the Devices tab.
 
     Args:
         metadata: The twin's metadata registry.
@@ -345,7 +347,7 @@ def build_explore_tabs(
             "Readings": f"{sensor_readings[key]:,}",
             "Source": sm.source,
         }
-        if metadata.is_manual_source(sm.source):
+        if sm.source in manual_sources:
             entry["Last upload"] = _format_timestamp_cell(
                 manual_uploads.get(sm.source),
             )
@@ -373,7 +375,7 @@ def build_explore_tabs(
     auto_devices = {
         device_id: info
         for device_id, info in devices.items()
-        if not metadata.is_manual_source(metadata.device(device_id).source)
+        if metadata.device(device_id).source not in manual_sources
     }
 
     position_series: dict[str, list[str]] = {}
@@ -412,7 +414,7 @@ def build_explore_tabs(
         # tell measurement plants apart from sensor stations at a glance.
         source_badge = (
             f' <small><mark>manual: {dm.source}</mark></small>'
-            if metadata.is_manual_source(dm.source) else ""
+            if dm.source in manual_sources else ""
         )
         device_entries.append({
             "name": (

@@ -194,11 +194,6 @@ climate_model:
         cycle, so an empty house during changeover is the likely cause — UNCONFIRMED,
         awaiting Neurath/WP1.
 
-# Sources a sync job ingests (rather than a person uploading a file). They
-# route to TimescaleDB like any sourced sensor but are shown as automated.
-automated_sources:
-  - "letsgrow"
-
 sensor_defaults:
   temp:
     type: "temperature"

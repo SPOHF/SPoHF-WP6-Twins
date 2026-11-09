@@ -110,6 +110,7 @@ config = TwinConfig(
     ],
     metadata=deps.metadata,
     export_store=deps.EXPORT_STORE,
+    manual_sources=frozenset(deps.MANUAL_SOURCES),
     theme=ThemeColors(
         primary="#2563eb", primary_light="#3b82f6", primary_dark="#1d4ed8",
         accent="#0ea5e9", surface_rgb="37, 99, 235",

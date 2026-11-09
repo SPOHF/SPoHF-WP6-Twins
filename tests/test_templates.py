@@ -288,6 +288,11 @@ class TestRenderUnifiedChartPage:
         assert "Hide controls" in html
 
 
+# The twin's upload sources (`TwinConfig.manual_sources`); "letsgrow" is
+# deliberately absent — a sourced sensor that is synced, not uploaded.
+MANUAL_SOURCES = frozenset({"sijia"})
+
+
 class TestBuildExploreTabs:
     def test_returns_three_tabs(self):
         tabs = build_explore_tabs(_registry(), {}, {})
@@ -313,7 +318,7 @@ class TestBuildExploreTabs:
                 "sensors": ["chlorophyll"], "readings": 50,
             },
         }
-        tabs = build_explore_tabs(registry, device_data, {})
+        tabs = build_explore_tabs(registry, device_data, {}, manual_sources=MANUAL_SOURCES)
 
         # Auto sensor only on Sensors tab
         assert "PAR" in tabs["sensors"]
@@ -330,10 +335,9 @@ class TestBuildExploreTabs:
             },
             devices={"letsgrow-climate-b4": DeviceMetadata(source="letsgrow")},
         )
-        registry._meta.automated_sources = ["letsgrow"]
         device_data = {"letsgrow-climate-b4": {"sensors": ["lg_vpd"], "readings": 7}}
 
-        tabs = build_explore_tabs(registry, device_data, {})
+        tabs = build_explore_tabs(registry, device_data, {}, manual_sources=MANUAL_SOURCES)
 
         assert "LG VPD" in tabs["sensors"]
         assert "LG VPD" not in tabs["manual"]
@@ -356,7 +360,7 @@ class TestBuildExploreTabs:
                 "sensors": ["chlorophyll"], "readings": 50,
             },
         }
-        tabs = build_explore_tabs(registry, device_data, {})
+        tabs = build_explore_tabs(registry, device_data, {}, manual_sources=MANUAL_SOURCES)
 
         assert "s2100-01-par" in tabs["devices"]
         assert "neurath-B-2034-strabelina" not in tabs["devices"]
@@ -367,7 +371,7 @@ class TestBuildExploreTabs:
             devices={"s2100-01-par": DeviceMetadata()},
         )
         device_data = {"s2100-01-par": {"sensors": ["par"], "readings": 1}}
-        tabs = build_explore_tabs(registry, device_data, {})
+        tabs = build_explore_tabs(registry, device_data, {}, manual_sources=MANUAL_SOURCES)
         assert "No manual measurements" in tabs["manual"]
 
 
@@ -389,7 +393,7 @@ class TestManualMeasurementTab:
                 "sensors": ["chlorophyll"], "readings": 12, "last_seen": None,
             },
         }
-        tabs = build_explore_tabs(registry, device_data, {})
+        tabs = build_explore_tabs(registry, device_data, {}, manual_sources=MANUAL_SOURCES)
         manual_html = tabs["manual"]
         # Headers include Source first, plus Type/Measurement/Unit/Readings
         # /Last upload/Last measure
@@ -411,7 +415,7 @@ class TestManualMeasurementTab:
         device_data = {"s2100-01-par": {
             "sensors": ["par"], "readings": 1, "last_seen": None,
         }}
-        tabs = build_explore_tabs(registry, device_data, {})
+        tabs = build_explore_tabs(registry, device_data, {}, manual_sources=MANUAL_SOURCES)
         assert "No manual measurements" in tabs["manual"]
         # Empty state is a paragraph, not a table
         assert "<table" not in tabs["manual"]
