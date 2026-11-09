@@ -49,10 +49,13 @@ SOURCE = "letsgrow"
 # so the repeated hour upserts onto one set of rows — one hour a year is lost.
 GREENHOUSE_TZ = ZoneInfo("Europe/Amsterdam")
 
-# LetsGrow delivers once a day: the relay holds data up to local midnight,
-# synced the next morning (~08:30). So a healthy feed is up to ~33 h behind,
-# and the 2 h/6 h budget yookr uses would flag it permanently stale.
-FRESHNESS_BUDGET_HOURS: tuple[float, float] = (36.0, 60.0)
+# LetsGrow delivers once a day, and late: day D reaches the relay at about
+# 23:45 on D+1 (its `synced_at`, every day of October 2026). Just before that
+# delivery the newest reading is D's local midnight, so a healthy feed peaks
+# around 50 h behind, plus up to an hour for this CronJob to collect it.
+# Stale past that with a few hours' slack; critical once a whole delivery is
+# missed. Yookr's 2 h/6 h would flag it permanently stale.
+FRESHNESS_BUDGET_HOURS: tuple[float, float] = (54.0, 78.0)
 
 # col_id -> sensor tag. One tag per *quantity*: the same quantity measured by
 # two modules (greenhouse temperature in Climate and Plant balance, radiation

@@ -108,7 +108,8 @@ Episodes are **persisted in a rebuildable cache**, maintained by two admin actio
 **LetsGrow**:
 Neurath's own climate computer — the system the grower steers the greenhouse with. Read through the SPoHF relay (`letsgrow-data`), never directly, and stored in red's `readings` as `source = 'letsgrow'`. It sees what red's own sensors cannot: the **actuators** (heating pipes, vents, screens, lamps, irrigation) and their setpoints, alongside its own climate and weather-station readings. A LetsGrow *module* (one screen, e.g. "Climate B4") is a device, `letsgrow-climate-b4`; a *column* in it is an `lg_*` sensor. Automated, not a manual upload, even though it routes by `source` like Sijia.
 _Local time_: LetsGrow exports the greenhouse wall clock, not UTC — outdoor radiation peaks at ~13:15 in October. It is localised to Europe/Amsterdam on ingest; the autumn DST night's repeated hour collapses onto one set of rows.
-_Daily delivery_: data arrives once a day, up to local midnight, so a healthy feed is up to ~33 h behind. Its freshness budget is 36 h/60 h, not yookr's 2 h/6 h.
+_Daily delivery_: data arrives once a day — day D reaches the relay late on D+1 — so a healthy feed is up to ~51 h behind. Its freshness budget is 54 h/78 h, not yookr's 2 h/6 h.
+_History_: the relay holds LetsGrow from 2023-02-11 — earlier than the sync's default full-sync start, so a backfill must set `WP6_SYNC_START` explicitly.
 _Running totals_: sums (radiation, PAR, irrigation, drain, water uptake, irrigation starts) climb through the day and reset at midnight, so they aggregate with `max`, never `avg`.
 _Avoid_: comparing `lg_par` / `lg_temp_greenhouse` with the s2100/s2101 readings as if they were one instrument — LetsGrow's sensors hang wherever Neurath put them, which WP1 has yet to say.
 

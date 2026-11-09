@@ -34,9 +34,11 @@ sync:
       memory: 1Gi
 
 # LetsGrow sync CronJob → red's database (wp6_red). LetsGrow is delivered once
-# a day (data up to local midnight, relayed the next morning), so hourly is
-# plenty. Incremental mode re-reads the last days each run; a historical
-# backfill is a one-off Job with mode "full" (and WP6_SYNC_START/END).
+# a day (day D reaches the relay late on D+1), so hourly is plenty.
+# Incremental mode re-reads the last days each run. A historical backfill is a
+# one-off Job with mode "full" and WP6_SYNC_START=2023-02-11 — the relay's
+# first LetsGrow day, earlier than the sync's default start — and a deadline
+# of hours, not this CronJob's 15 minutes.
 letsgrowSync:
   enabled: true
   schedule: "40 * * * *"
