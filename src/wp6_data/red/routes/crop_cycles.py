@@ -213,7 +213,6 @@ async def crop_cycles_page(
     )
 
     content = f"""
-    <a href="/" class="back-link">← Dashboard</a>
     <h1>{PAGE_TITLE}</h1>
     <p>A new truss sets each week and ripens over about eight weeks, so several
     cohorts are always in flight. Each lane is one cohort, coloured by the

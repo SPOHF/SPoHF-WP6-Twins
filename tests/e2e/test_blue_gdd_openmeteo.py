@@ -12,10 +12,9 @@ import pytest
 from httpx import ASGITransport
 
 import wp6_data.blue.routes.gdd as gdd_route
+from tests.e2e.conftest import TSDB_DSN
 
 pytestmark = pytest.mark.e2e
-
-TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
 
 
 def _fake_actual_df():

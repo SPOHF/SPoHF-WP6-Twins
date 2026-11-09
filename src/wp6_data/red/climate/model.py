@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd  # type: ignore[import-untyped]
 
-from wp6_data.shared.artifacts import read_pickled, write_pickled
+from wp6_data.shared.artifacts import persist_held, read_pickled
 
 if TYPE_CHECKING:
     from wp6_data.shared.blob import BlobStore
@@ -98,6 +98,15 @@ OUTDOOR_PREFIX = "out_"
 PREDICTED_OUTDOOR_PREFIX = "outhat_"
 
 
+# The artifact as last read from, or written to, each (store, key) — held so a
+# forecast neither re-downloads it per request (~600ms) nor fails when the
+# object store is down. Safe to treat as authoritative because every writer
+# runs in this process and goes through `write_artifact`: boot, the admin
+# retrain and the nightly refit. A writer elsewhere would go unseen until the
+# next restart.
+_held: dict[tuple[BlobStore, str], dict] = {}
+
+
 async def read_artifact(
     store: BlobStore | None = None,
     key: str = "",
@@ -109,11 +118,36 @@ async def read_artifact(
     A thin wrapper over :func:`shared.artifacts.read_pickled` that supplies this
     model's version and defaults to red's models prefix. The reasoning behind
     each gate lives there.
+
+    Reads the store once per process; after that, the held copy. What is held
+    has passed the readability and version gates; the fingerprint gate is
+    applied per call, since callers differ in whether they state a config.
+    Raises if the store is unreachable *and* nothing is held yet.
     """
     store, key = artifact_target(store, key)
-    return await read_pickled(
-        store, key, version=MODEL_VERSION, expect_fingerprint=expect_fingerprint,
-    )
+    data = _held.get((store, key))
+    if data is None:
+        data = await read_pickled(store, key, version=MODEL_VERSION)
+        if data is None:
+            return None
+        _held[(store, key)] = data
+    if expect_fingerprint is not None and data.get("fingerprint") != expect_fingerprint:
+        return None
+    return data
+
+
+async def write_artifact(
+    payload: dict, store: BlobStore | None = None, key: str = "",
+) -> str:
+    """Hold the chain artifact, then store it so the next process can read it.
+
+    Held first, and the store write is best-effort: a refit during an object-store
+    outage still serves its model from this process instead of being discarded.
+    """
+    store, key = artifact_target(store, key)
+    _held[(store, key)] = payload
+    await persist_held(store, key, payload)
+    return key
 
 
 def artifact_target(
@@ -493,10 +527,7 @@ class IndoorClimateModel:
         """Store the trained chain. Training is cheap; a stale model is not."""
         if not self.is_trained():
             raise RuntimeError("No model to save. Train first.")
-        store, key = artifact_target(store, key)
-        await write_pickled(
-            store,
-            key,
+        return await write_artifact(
             {
                 "version": MODEL_VERSION,
                 # What the config looked like when this was fitted. Checked
@@ -512,8 +543,9 @@ class IndoorClimateModel:
                 "link2_sources": self.link2_sources,
                 "stats": self.stats,
             },
+            store,
+            key,
         )
-        return key
 
     async def load(
         self, store: BlobStore | None = None, key: str = "",

@@ -14,6 +14,7 @@ bare names (``s2100-01-par.csv``) with no twin or directory component.
 import json
 
 import structlog
+from cachetools import TTLCache
 from fastapi import APIRouter, Depends, HTTPException, Response
 
 from wp6_data.shared.auth import verify_session_user
@@ -25,6 +26,17 @@ log = structlog.get_logger()
 METADATA_KEY = "metadata.json"
 
 CSV_SUFFIX = ".csv"
+
+# The home page reads the export metadata on every load, while the exports are
+# written once a night by a separate CronJob: a few minutes of staleness costs
+# nothing, a store round trip per page view costs every visitor. Keyed by store
+# instance (each twin holds one for the life of the process). "Unavailable" is
+# cached too, so an object-store outage costs one slow request per TTL rather
+# than slowing every page view.
+EXPORT_METADATA_TTL_SECONDS = 300
+_metadata_cache: TTLCache[BlobStore, dict | None] = TTLCache(
+    maxsize=8, ttl=EXPORT_METADATA_TTL_SECONDS,
+)
 
 
 def csv_key(name: str) -> str:
@@ -51,6 +63,7 @@ async def clear_exports(store: BlobStore) -> int:
     """
     keys = await store.list("")
     doomed = [k for k in keys if k.endswith(CSV_SUFFIX) or k == METADATA_KEY]
+    _metadata_cache.pop(store, None)
     if not doomed:
         return 0
     return await store.delete(*doomed)
@@ -63,6 +76,7 @@ async def write_export_metadata(store: BlobStore, metadata: dict) -> None:
         json.dumps(metadata, indent=2).encode("utf-8"),
         content_type="application/json",
     )
+    _metadata_cache.pop(store, None)
 
 
 async def get_export_metadata(store: BlobStore) -> dict | None:
@@ -79,7 +93,18 @@ async def get_export_metadata(store: BlobStore) -> dict | None:
     same failure shape as issue 033, where an unreachable identity provider
     crash-looped both twins because startup pre-cached URLs it did not yet
     need. Fail fast on configuration, fail soft on dependencies.
+
+    Cached per store (see ``EXPORT_METADATA_TTL_SECONDS``); writes made through
+    this module in the same process drop the entry.
     """
+    if store in _metadata_cache:
+        return _metadata_cache[store]
+    result = await _read_export_metadata(store)
+    _metadata_cache[store] = result
+    return result
+
+
+async def _read_export_metadata(store: BlobStore) -> dict | None:
     try:
         raw = await store.try_get(METADATA_KEY)
     except Exception as exc:

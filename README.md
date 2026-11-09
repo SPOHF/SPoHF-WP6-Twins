@@ -62,10 +62,19 @@ uv run python -m wp6_data.red.dashboard   # Red dashboard (port 8000)
 
 ```bash
 # Dev commands
+./scripts/check.sh             # The gate: lint + unit + e2e. Run before any push.
+./scripts/check.sh --fast      # Stop after the unit tests, for the inner loop
+
 uv run ruff check src/ --fix   # Lint
-uv run pytest                  # Run tests
-uv run pytest tests/e2e/ -v    # E2E tests (requires running blue dashboard + TimescaleDB)
+uv run pytest                  # Unit tests (pyproject's addopts skips tests/e2e)
+uv run pytest tests/e2e/ -v    # E2E tests (starts from docker-compose.tsdb.yml)
 ```
+
+Run `./scripts/check.sh` before pushing. CI's `build` job has `needs: check`
+and `check` runs e2e, so an e2e failure blocks the image push — and `uv run
+pytest` alone does not cover it. The e2e suite uses its own `wp6_blue_e2e` /
+`wp6_red_e2e` databases, created on first run, so it leaves local dev data
+alone and needs no dashboard running.
 
 ## Configuration
 

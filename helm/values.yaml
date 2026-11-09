@@ -122,7 +122,9 @@ red:
   resources:
     requests:
       cpu: 200m
-      memory: 768Mi
+      # What the pod actually sits at between refits, so the scheduler places
+      # it against real usage rather than an optimistic floor.
+      memory: 1Gi
     limits:
       # A ceiling, not a reservation: the pod is guaranteed `requests.cpu` and
       # may burst to this when the node has CPU spare, so raising it costs
@@ -133,7 +135,11 @@ red:
       # The nightly refit is the only thing that wants this headroom; serving
       # requests does not come close to it.
       cpu: 2000m
-      memory: 2Gi
+      # Raised from 2Gi: the nightly refit was OOMKilled at 03:00 every ~4
+      # days. Each refit spikes ~0.5Gi and keeps ~0.25Gi of it afterwards, so
+      # the baseline climbs night by night until baseline + spike crosses the
+      # limit. Headroom buys time; it does not stop the climb.
+      memory: 3Gi
   ingress:
     enabled: true
     host: ""  # Required if enabled: e.g., wp6-red.example.com

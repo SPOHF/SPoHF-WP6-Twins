@@ -1,7 +1,8 @@
 """Shared dashboard home page with pluggable hero cards."""
 
+import asyncio
 import inspect
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
@@ -20,6 +21,24 @@ from wp6_data.shared.twin import SensorDataProvider, TwinConfig
 router = APIRouter(dependencies=[Depends(verify_session_user)])
 
 
+async def load_home_data(
+    config: TwinConfig, provider: SensorDataProvider,
+) -> tuple[dict[str, dict], dict[str, Any], dict[str, str]]:
+    """Everything the home page reads: devices, manual freshness, exports.
+
+    The three are independent, so they run concurrently and the page waits for
+    the slowest one rather than their sum. Also called at startup to warm the
+    caches behind them (see ``app_factory``).
+    """
+    device_data, manual_metadata, export_meta = await asyncio.gather(
+        provider.fetch_device_data(),
+        provider.fetch_manual_metadata(),
+        get_export_metadata(config.export_store),
+    )
+    available_exports = export_meta.get("devices", {}) if export_meta else {}
+    return device_data, manual_metadata, available_exports
+
+
 @router.get("/", response_class=HTMLResponse)
 async def home(
     config: Annotated[TwinConfig, Depends(get_twin_config)],
@@ -27,11 +46,9 @@ async def home(
     tab: str = "devices",
 ) -> str:
     """Dashboard home page — sensor explorer with pluggable hero cards."""
-    device_data = await provider.fetch_device_data()
-    manual_metadata = await provider.fetch_manual_metadata()
-
-    export_meta = await get_export_metadata(config.export_store)
-    available_exports = export_meta.get("devices", {}) if export_meta else {}
+    device_data, manual_metadata, available_exports = await load_home_data(
+        config, provider,
+    )
 
     explore_tabs = build_explore_tabs(
         config.metadata, device_data, available_exports,

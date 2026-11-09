@@ -167,12 +167,20 @@ class TestHonestyOnWeakSignal:
 KEY = "climate.pkl"
 
 
+def _as_a_fresh_process() -> None:
+    """Forget what `save` left held, so the next load really reads the store."""
+    from wp6_data.red.climate import model as climate_model
+
+    climate_model._held.clear()
+
+
 @pytest.mark.asyncio
 class TestPersistence:
     async def test_round_trip_preserves_the_chain_and_its_stats(self, trained, tmp_path):
         model, stats = trained
         store = LocalBlobStore(tmp_path)
         await model.save(store, KEY)
+        _as_a_fresh_process()
 
         restored = IndoorClimateModel(model.config, "unknown")
         loaded = await restored.load(store, KEY)
@@ -199,6 +207,7 @@ class TestPersistence:
         data = pickle.loads(await store.get(KEY))
         data["version"] = MODEL_VERSION - 1
         await store.put(KEY, pickle.dumps(data))
+        _as_a_fresh_process()
 
         assert await IndoorClimateModel(model.config, "s2103").load(store, KEY) is None
 

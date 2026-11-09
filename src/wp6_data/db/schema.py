@@ -9,9 +9,11 @@ module owns the twin-agnostic parts:
 * `AUX_SCHEMA_SQL` — the `sync_metadata` table, identical between twins.
 * `CAGG_SQL` — the `sensors_daily_summary` continuous aggregate. Both twins
   key `readings` on a single `source` categorical, so it is not parameterised.
+* `MANUAL_READINGS_INDEX_SQL` — the index behind `fetch_manual_summary`. Both
+  twins' `readings` carry `upload_id`, so it is the same index for each.
 
 Twin code calls `ensure_aggregates(pool)` after creating
-its own `readings` hypertable.
+its own `readings` hypertable (including its `upload_id` column).
 """
 
 import structlog
@@ -102,13 +104,27 @@ WITH NO DATA;
 """
 
 
-async def ensure_aggregates(pool: AsyncConnectionPool) -> None:
-    """Create twin-agnostic aux tables + the sensors_daily_summary cagg.
+# `fetch_manual_summary` asks for the latest manual reading per sensor, and the
+# home page asks on every load. Manual rows are a sliver of `readings` (the
+# automated history is the bulk of it), so without this the query scans every
+# chunk to find almost nothing. A partial index holds only the manual rows and
+# stays small however long the automated history grows.
+MANUAL_READINGS_INDEX = "idx_readings_manual_upload"
+MANUAL_READINGS_INDEX_SQL = f"""
+CREATE INDEX IF NOT EXISTS {MANUAL_READINGS_INDEX}
+    ON readings (sensor_tag, time DESC) WHERE upload_id IS NOT NULL;
+"""
 
-    Idempotent. Must be called after the twin's `readings` hypertable exists.
+
+async def ensure_aggregates(pool: AsyncConnectionPool) -> None:
+    """Create twin-agnostic aux tables, indexes + the sensors_daily_summary cagg.
+
+    Idempotent. Must be called after the twin's `readings` hypertable exists,
+    with its `upload_id` column.
     """
     async with pool.connection() as conn:
         await conn.execute(AUX_SCHEMA_SQL)
+        await conn.execute(MANUAL_READINGS_INDEX_SQL)
         await conn.commit()
     async with pool.connection() as conn:
         await conn.execute(CAGG_SQL)

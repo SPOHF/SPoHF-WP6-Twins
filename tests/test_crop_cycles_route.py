@@ -187,3 +187,11 @@ class TestSpecInvariants:
 
     def test_cohorts_from_every_cycle_are_generated(self):
         assert {c.cycle_label for c in COHORTS} == {c.label for c in CYCLES}
+
+
+def test_page_has_a_single_link_back_home():
+    """One back link: render_page's, not a second one drawn by the page itself."""
+    html = _page(provider=StubProvider())
+
+    back_arrows = html.count("←") + html.count("&larr;")
+    assert back_arrows == 1

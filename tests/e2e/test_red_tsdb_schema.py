@@ -8,6 +8,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from tests.e2e.conftest import RED_TSDB_DSN, remove_cagg_refresh_policy
+from wp6_data.db.schema import MANUAL_READINGS_INDEX
 from wp6_data.red.tsdb import ensure_schema_red
 
 pytestmark = pytest.mark.e2e
@@ -343,7 +344,10 @@ async def test_cagg_is_backfilled_when_readings_already_exist(
             "CREATE TABLE readings ("
             "  time TIMESTAMPTZ NOT NULL, device_name TEXT NOT NULL,"
             "  sensor_tag TEXT NOT NULL, value DOUBLE PRECISION,"
-            "  source TEXT NOT NULL DEFAULT 'unknown')"
+            "  source TEXT NOT NULL DEFAULT 'unknown',"
+            # Red's readings has carried upload_id since it was first created,
+            # and the bootstrap indexes it.
+            "  upload_id BIGINT)"
         )
         await cur.execute(
             "SELECT create_hypertable('readings', 'time', if_not_exists => TRUE)"
@@ -378,3 +382,18 @@ async def test_cagg_backfill_skipped_when_no_readings(clean_red_db, red_pool):
     async with clean_red_db.cursor(row_factory=dict_row) as cur:
         await cur.execute("SELECT count(*) AS n FROM sensors_daily_summary")
         assert (await cur.fetchone())["n"] == 0
+
+
+async def test_bootstrap_indexes_manual_readings(clean_red_db, red_pool):
+    """The home page's manual-freshness query must not scan every chunk."""
+    await ensure_schema_red(red_pool)
+
+    async with clean_red_db.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT indexdef FROM pg_indexes "
+            "WHERE tablename = 'readings' AND indexname = %s",
+            (MANUAL_READINGS_INDEX,),
+        )
+        row = await cur.fetchone()
+    assert row is not None
+    assert "upload_id IS NOT NULL" in row["indexdef"]

@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
+from tests.e2e.conftest import TSDB_DSN
 from wp6_data.blue.deps import MANUAL_SOURCES, fetch_daily_coverage
 from wp6_data.db import (
     close_pool,
@@ -19,8 +20,6 @@ from wp6_data.db import (
 )
 
 pytestmark = pytest.mark.e2e
-
-TSDB_DSN = "postgresql://wp6:wp6dev@localhost:5433/wp6_blue"
 
 DEVICE = "e2e-cov-device"
 SENSOR = "e2e-cov-temp"
