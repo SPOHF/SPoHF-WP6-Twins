@@ -153,6 +153,10 @@ class TwinConfig:
     export_sanitise_names: bool = False
     lifespan_startup: Callable[..., Awaitable[None]] | None = None
     lifespan_shutdown: Callable[..., Awaitable[None]] | None = None
+    #: `readings.source` values that come from a person uploading a file, as
+    #: opposed to a sync. The explorer lists their sensors under manual
+    #: measurements; a sourced sensor not in here is shown as automated.
+    manual_sources: frozenset[str] = frozenset()
 
     @property
     def default_provider(self) -> SensorDataProvider:

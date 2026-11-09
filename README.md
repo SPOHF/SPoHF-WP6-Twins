@@ -26,6 +26,20 @@ table and are distinguished by the `source` column, matching the Red twin.
 > The relay caps a single query at 10,000 records. `SpoHFClient.fetch_window`
 > bisects any window that overflows — offset paging silently stops at the cap.
 
+### Red Data Source: LetsGrow
+
+Neurath's climate computer, **LetsGrow**, reaches red through the same relay
+(endpoint `letsgrow-data`) and the same sync code. The orchestrator routes each
+endpoint to its twin's database (`wp6_data.sync.feeds`): `letsgrow-data` writes
+to red's `readings` with `source = 'letsgrow'`, via `WP6_RED_TSDB_URL`. Each
+LetsGrow module becomes a device (`letsgrow-climate-b4`, …) and each column an
+`lg_*` sensor; the mapping is `src/wp6_data/red/letsgrow.py`. LetsGrow exports
+greenhouse local time, which is converted to UTC on ingest. It runs as its own
+hourly CronJob (`wp6-data-sync-letsgrow`), since LetsGrow delivers once a day.
+Its history on the relay starts **2023-02-11**, before the default
+`WP6_SYNC_START`, so a LetsGrow backfill sets it explicitly
+(`WP6_SYNC_MODE=full WP6_SYNC_START=2023-02-11 WP6_ENDPOINTS=letsgrow-data`).
+
 ## Quick Start
 
 ```bash
@@ -75,9 +89,9 @@ All via `WP6_*` environment variables — see `.env.example` for the full list.
 |----------|---------|-------------|
 | `WP6_TSDB_URL` | `postgresql://wp6:wp6dev@localhost:5433/wp6_blue` | TimescaleDB connection string |
 | `WP6_SYNC_MODE` | `incremental` | `full` (bounded by `WP6_SYNC_START`/`END`) or `incremental` (recent data) |
-| `WP6_SYNC_START` | `2024-01-01` | First day of a full sync |
+| `WP6_SYNC_START` | `2024-01-01` | First day of a full sync (LetsGrow: `2023-02-11`) |
 | `WP6_SYNC_END` | — | Last day of a full sync (default: tomorrow). Ignored when incremental |
-| `WP6_ENDPOINTS` | `yookr-data` | SPoHF API endpoints to sync |
+| `WP6_ENDPOINTS` | `yookr-data` | SPoHF API endpoints to sync (`letsgrow-data` goes to red's DB) |
 
 ## TimescaleDB Schema
 

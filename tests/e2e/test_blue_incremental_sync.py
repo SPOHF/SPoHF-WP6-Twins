@@ -12,6 +12,7 @@ from psycopg.rows import dict_row
 
 from tests.e2e.conftest import TSDB_DSN
 from wp6_data.config import Settings
+from wp6_data.sync import feeds
 from wp6_data.sync.orchestrator import SyncOrchestrator
 
 pytestmark = pytest.mark.e2e
@@ -113,8 +114,12 @@ def _api_handler(request: httpx.Request) -> httpx.Response:
 
 
 @pytest.mark.e2e
-async def test_incremental_sync_and_dashboard_display(tsdb_conn):
+async def test_incremental_sync_and_dashboard_display(tsdb_conn, monkeypatch):
     """Full pipeline: mock API → sync → TimescaleDB state → dashboard HTTP."""
+
+    # An e2e-only endpoint name keeps this run's rows identifiable; it is
+    # yookr-shaped blue, which the orchestrator must be told rather than guess.
+    monkeypatch.setitem(feeds.FEEDS, ENDPOINT, feeds.YOOKR)
 
     # Reset handler state
     _api_handler._windows_served = 0

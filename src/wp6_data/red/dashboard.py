@@ -8,6 +8,7 @@ import structlog
 from wp6_data.db.pool import close_pool, init_pool
 from wp6_data.red import deps
 from wp6_data.red.db import MySQLConnection
+from wp6_data.red.manual_sources import MANUAL_SOURCE_VALUES
 from wp6_data.red.provider import RedSensorProvider
 from wp6_data.red.routes import (
     browse,
@@ -232,6 +233,7 @@ config = TwinConfig(
     ],
     metadata=deps.metadata,
     export_store=deps.EXPORT_STORE,
+    manual_sources=MANUAL_SOURCE_VALUES,
     theme=ThemeColors(
         primary="#dc2626", primary_light="#ef4444", primary_dark="#b91c1c",
         accent="#f97316", surface_rgb="220, 38, 38",
