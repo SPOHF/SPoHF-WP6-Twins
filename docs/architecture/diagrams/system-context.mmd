@@ -11,8 +11,8 @@ graph TB
     grower["Grower / Researcher
     [Person]
     Views sensor data, DLI/GDD analytics
-    and growth forecasts; uploads manual
-    lab/measurement files"]:::person
+    and growth/climate forecasts; uploads
+    manual lab/measurement files"]:::person
 
     visitor["Public Visitor
     [Person]
@@ -27,8 +27,9 @@ graph TB
 
     spohf["SPoHF Backoffice
     [External System]
-    AppComm DataLake — aggregates
-    sensor data from field devices"]:::external
+    AppComm DataLake relay — serves
+    yookr-data (Blue) and
+    letsgrow-data (Red)"]:::external
 
     yookr["Yookr
     [External System]
@@ -36,25 +37,41 @@ graph TB
     field devices; readings reach WP6
     only via the SPoHF datalake relay"]:::external
 
+    letsgrow["LetsGrow
+    [External System]
+    Neurath's greenhouse climate computer:
+    climate, actuators, setpoints; reaches
+    WP6 only via the SPoHF relay"]:::external
+
     openmeteo["Open-Meteo
     [External System]
     Weather forecast and history;
-    powers Red DLI and Blue GDD"]:::external
+    powers Red DLI/climate and Blue GDD"]:::external
 
     oidc["OIDC Provider
     [External System]
     Identity provider for
     authenticated dashboards"]:::external
 
+    objstore["Fontys EduCloud Object Storage
+    [External System: S3-compatible]
+    One bucket: CSV exports, trained
+    models, raw manual uploads"]:::external
+
+    dash0["Dash0
+    [External System]
+    Observability backend
+    (OpenTelemetry traces + logs)"]:::external
+
     greentechlab["Fontys GreenTechLab
     [External System]
-    LoRaWAN platform storing
-    greenhouse sensor tables (Red)"]:::external
+    LoRaWAN platform storing greenhouse
+    + multi-height wire sensor tables (Red)"]:::external
 
     greenhouse["Greenhouse Sensors
     [External System]
-    PAR, temperature, humidity
-    sensors at Vitarom"]:::external
+    PAR, temperature, humidity, CO2
+    sensors + multi-height wires"]:::external
 
     field["Field Sensors
     [External System]
@@ -65,10 +82,12 @@ graph TB
     grower -->|"Uploads manual files\n(CSV/XLSX, admin-gated)"| wp6
     visitor -->|"Views Grey demo\n(HTTPS, public)"| wp6
     wp6 -->|"Authenticates user\n(OIDC)"| oidc
-    wp6 -->|"Fetches sensor readings\n(REST API)"| spohf
+    wp6 -->|"Fetches field + LetsGrow readings\n(REST API)"| spohf
     wp6 -->|"Fetches greenhouse readings\n(MySQL)"| greentechlab
     wp6 -->|"Fetches weather data\n(REST API)"| openmeteo
+    wp6 -->|"Stores exports, models, uploads\n(S3 API)"| objstore
+    wp6 -.->|"Exports telemetry\n(OTLP)"| dash0
     greenhouse -->|"Publishes readings"| greentechlab
-    field -->|"Publishes readings"| spohf
     field -->|"Publishes readings"| yookr
     yookr -->|"Relays readings"| spohf
+    letsgrow -->|"Relays daily export"| spohf

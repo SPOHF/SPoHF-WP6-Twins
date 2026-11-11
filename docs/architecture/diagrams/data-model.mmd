@@ -17,7 +17,7 @@ erDiagram
         text        source "upload slug (not readings.source)"
         text        filename
         text        file_hash "sha256, content-addressed"
-        text        file_path "nulled when pruned"
+        text        file_path "object key; nulled when pruned"
         boolean     file_pruned
         timestamptz uploaded_at
         integer     row_count
@@ -30,33 +30,38 @@ erDiagram
         text        sensor_tag
         double      value
         text        raw_value
-        text        source "categorical / provenance"
+        text        source "provenance: unknown | letsgrow | sijia | ..."
         timestamptz synced_at
         bigint      upload_id FK "manual rows only; NULL when automated"
     }
 
     sync_metadata {
-        text        endpoint PK
-        timestamptz last_timestamp
+        text        endpoint PK "yookr-data | letsgrow-data"
+        timestamptz last_timestamp "watermark"
         timestamptz last_run_at
         boolean     last_run_success
         integer     last_run_records
+        text        last_error
+        timestamptz failing_since
+        integer     consecutive_failures
         integer     total_runs
         integer     total_failures
     }
 
-    daily_coverage {
-        text device_name PK
-        text sensor_tag PK
-        date day PK
-        text source "mirrors readings.source"
+    sync_run_history {
+        text        endpoint
+        timestamptz run_at
+        boolean     success
+        integer     records
+        double      duration_sec
+        integer     api_status
     }
 
     sensors_daily_summary {
         timestamptz bucket "time_bucket 1 day"
         text        device_name
         text        sensor_tag
-        text        project "aliased categorical column"
+        text        source
         integer     reading_count
         timestamptz first_reading
         timestamptz last_reading
@@ -90,8 +95,14 @@ erDiagram
         timestamptz built_at
     }
 
+    wire_sensor_map {
+        text    device_id "wire, e.g. WS_01_03"
+        text    sensor_and_position "per Modbus sensor (upstream-owned)"
+        boolean active "no active sensor = wire not installed"
+    }
+
     wire_sensors {
-        text        device_id "physical wire, e.g. WS_01_01"
+        text        device_id "physical wire, labelled via wire_sensor_map"
         timestamptz received_at "relay INSERT time, not measurement time"
         text        gateway_id
         decimal     par1_to_co25 "20 wide cols par1..co25 (measure x height)"
@@ -106,8 +117,10 @@ erDiagram
     }
 
     manual_uploads ||--o{ readings : "id to upload_id (FK, manual rows)"
-    readings ||--o{ daily_coverage : "derived (rebuild_daily_coverage)"
-    readings ||--o{ sensors_daily_summary : "derived (continuous aggregate)"
+    readings ||--o{ sensors_daily_summary : "derived (continuous aggregate; also coverage)"
+    sync_metadata ||--o{ sync_run_history : "same endpoint (one row per run, 30d)"
+    sync_metadata ||--o{ readings : "watermark of automated rows"
+    wire_sensor_map ||--o{ wire_sensors : "labels which wire a row belongs to"
     wire_sensors ||--o{ readings : "unpivot wide-to-long (read-time, not persisted)"
     gtl_sensor_table ||--o{ readings : "table:device_id (read-time, not persisted)"
     wire_sensors ||--o{ risk_episodes : "evaluated by Red risk engine"

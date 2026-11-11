@@ -4,9 +4,8 @@ title: "WP6 Digital Twins - Deployment Diagram"
 graph TB
     %% SSOT — also embedded in docs/architecture/index.md.
     %% Edit this file first, then mirror into index.md.
-    %% Current state: everything runs in the Fontys K8s cluster.
-    %% (The desired-state split with ProcEvolution is described in
-    %% the "Operations" section of architecture/index.md.)
+    %% Current state: the v2 Venlo developer platform, deployed by ArgoCD from
+    %% ~/dev/platform/k8s/gitops/spohf (wp6-data-{blue,red,grey,shared}).
     classDef k8s fill:#326ce5,color:#fff,stroke:none
     classDef pod fill:#438dd5,color:#fff,stroke:none
     classDef storage fill:#1168bd,color:#fff,stroke:none
@@ -20,53 +19,68 @@ graph TB
     [Browser]"]:::external
     visitor["Public Visitor
     [Browser]"]:::external
-    spohf_ext["backoffice.spohf.com"]:::external
+    spohf_ext["backoffice.spohf.com
+    yookr-data | letsgrow-data"]:::external
     openmeteo_ext["api.open-meteo.com"]:::external
     oidc_ext["OIDC Provider"]:::external
+    dash0_ext["Dash0
+    [OTLP backend, via platform
+    OTel collector]"]:::external
     mysql_ext[("Fontys GTL MySQL 8
     [External Managed DB]
-    Greenhouse + wire sensor tables
-    (85.215.61.145:3306)")]:::external
+    Greenhouse + wire sensor tables")]:::external
+    s3_ext[("Fontys EduCloud Object Storage
+    buckets.educloud.fontysict.nl
+    [S3, bucket: spohf]
+    red/… + blue/… prefixes")]:::external
+    harbor_ext["harbor.inf.fontysvenlo.dev
+    [Image registry]
+    wp6-data-{blue,red,grey}"]:::external
 
-    %% ── Fontys IDP cluster, namespace spohf-system ──
-    subgraph fontys["Fontys IDP K8s Cluster — namespace: spohf-system"]
+    %% ── v2 cluster, namespace spohf-system ──
+    subgraph cluster["Venlo Developer Platform (v2) K8s — namespace: spohf-system"]
         direction TB
 
-        blue_ingress["Ingress
+        blue_ingress["Ingress (Traefik)
         wp6-blue.spohf.fontysvenlo.dev"]:::ingress
-        red_ingress["Ingress
+        red_ingress["Ingress (Traefik)
         wp6-red.spohf.fontysvenlo.dev"]:::ingress
-        grey_ingress["Ingress
+        grey_ingress["Ingress (Traefik)
         wp6-grey.spohf.fontysvenlo.dev"]:::ingress
 
         blue_deploy["Blue Dashboard
-        [Deployment: 1 replica]
-        FastAPI + Uvicorn"]:::pod
+        [Deployment: 1 replica, RollingUpdate]
+        FastAPI + Uvicorn;
+        soil refit 03:30 UTC in-process"]:::pod
         red_deploy["Red Dashboard
-        [Deployment: 1 replica]
-        FastAPI + Uvicorn"]:::pod
+        [Deployment: 1 replica, RollingUpdate]
+        FastAPI + Uvicorn;
+        light + climate refit 03:00 UTC"]:::pod
         grey_deploy["Grey Dashboard
         [Deployment: 1 replica]
         FastAPI + Uvicorn
         (no DB, no auth)"]:::pod
 
-        sync_cron["wp6-data Sync
+        sync_cron["wp6-data-sync
         [CronJob: */15 * * * *]
-        python -m wp6_data:
-        SPoHF datalake ingest
+        yookr-data → wp6_blue
         (uses wp6-data-blue image)"]:::cronjob
+        letsgrow_cron["wp6-data-sync-letsgrow
+        [CronJob: 40 * * * *]
+        letsgrow-data → wp6_red"]:::cronjob
 
         blue_export_cron["Blue CSV Export
         [CronJob: 0 2 * * *]
         Nightly Blue export"]:::cronjob
         red_export_cron["Red CSV Export
         [CronJob: 0 2 * * *]
-        Nightly Red sensor export"]:::cronjob
+        Nightly Red export +
+        cagg refresh"]:::cronjob
 
-        red_bootstrap["Red TSDB Bootstrap
-        [Job: Helm post-install/upgrade hook]
-        Creates wp6_red role + database
-        in the shared TimescaleDB"]:::job
+        bootstrap["TSDB Bootstrap (blue + red)
+        [Jobs: Helm pre-install/upgrade hook]
+        Create wp6_blue / wp6_red role +
+        database in the shared TimescaleDB"]:::job
 
         subgraph tsdb_sts["TimescaleDB [StatefulSet: 1 replica] — PostgreSQL 17 + TimescaleDB"]
             db_blue[("wp6_blue
@@ -76,28 +90,28 @@ graph TB
         end
 
         tsdb_pvc[("PersistentVolumeClaim
-        timescaledb-data")]:::storage
-
-        blue_uploads_pvc[("PVC
-        blue-manual-uploads")]:::storage
-        red_uploads_pvc[("PVC
-        red-manual-uploads")]:::storage
+        timescaledb-data
+        (the only PVC left)")]:::storage
 
         secret_main["wp6-data-secrets
-        [Secret, externally provisioned]
+        [Secret, kubectl-provisioned]
         OIDC client/session,
         TSDB superuser password,
         SPoHF API token"]:::k8s
 
         secret_blue["wp6-data-blue-secrets
-        [Secret, externally provisioned]
+        [Secret]
         tsdb-url (wp6_blue)"]:::k8s
 
         secret_red["wp6-data-red-secrets
-        [Secret, externally provisioned]
+        [Secret]
         MySQL password,
         tsdb-url (wp6_red),
         tsdb-red-password"]:::k8s
+
+        secret_s3["wp6-data-object-store
+        [Secret]
+        S3 access key id + secret"]:::k8s
     end
 
     %% ── User → Ingress → Deployment ──
@@ -116,37 +130,56 @@ graph TB
     blue_deploy -->|"psycopg3\nport 5432"| db_blue
     blue_deploy -->|"HTTPS (GDD)"| openmeteo_ext
     red_deploy -->|"aiomysql\nport 3306 (live feed)"| mysql_ext
-    red_deploy -->|"psycopg3\nport 5432 (manual + risk)"| db_red
-    red_deploy -->|"HTTPS (DLI)"| openmeteo_ext
+    red_deploy -->|"psycopg3\nport 5432"| db_red
+    red_deploy -->|"HTTPS (DLI, climate)"| openmeteo_ext
+
+    %% ── Object storage (exports, models, uploads) ──
+    blue_deploy -->|"HTTPS (S3)"| s3_ext
+    red_deploy -->|"HTTPS (S3)"| s3_ext
+    blue_export_cron -->|"HTTPS (S3)"| s3_ext
+    red_export_cron -->|"HTTPS (S3)"| s3_ext
 
     %% ── Storage ──
     tsdb_sts --- tsdb_pvc
-    blue_deploy --- blue_uploads_pvc
-    red_deploy --- red_uploads_pvc
 
-    %% ── Bootstrap hook provisions the red database ──
-    red_bootstrap -->|"psql\nport 5432"| tsdb_sts
+    %% ── Bootstrap hook provisions the per-twin databases ──
+    bootstrap -->|"psql\nport 5432"| tsdb_sts
 
-    %% ── Sync job (datalake only) ──
+    %% ── Sync jobs ──
     sync_cron -->|"HTTPS"| spohf_ext
     sync_cron -->|"port 5432"| db_blue
+    letsgrow_cron -->|"HTTPS"| spohf_ext
+    letsgrow_cron -->|"port 5432"| db_red
 
     %% ── Export jobs ──
     blue_export_cron -->|"port 5432"| db_blue
     red_export_cron -->|"port 3306"| mysql_ext
+    red_export_cron -->|"port 5432"| db_red
+
+    %% ── Observability: Dash0 operator auto-instruments the dashboards ──
+    blue_deploy -.->|"OTLP"| dash0_ext
+    red_deploy -.->|"OTLP"| dash0_ext
+    grey_deploy -.->|"OTLP"| dash0_ext
+
+    %% ── Images ──
+    harbor_ext -.->|"pulled by"| cluster
 
     %% ── Secret mounts ──
-    %% Shared secret: OIDC + API tokens + TSDB superuser (bootstrap)
     secret_main -.->|"mounted"| blue_deploy
     secret_main -.->|"mounted"| red_deploy
     secret_main -.->|"mounted"| sync_cron
-    secret_main -.->|"mounted"| red_bootstrap
-    %% Blue secret: wp6_blue connection URL (dashboard, sync, export)
+    secret_main -.->|"mounted"| letsgrow_cron
+    secret_main -.->|"mounted"| bootstrap
     secret_blue -.->|"mounted"| blue_deploy
     secret_blue -.->|"mounted"| sync_cron
     secret_blue -.->|"mounted"| blue_export_cron
-    %% Red secret: MySQL password + wp6_red URL + role password
+    secret_blue -.->|"mounted"| bootstrap
     secret_red -.->|"mounted"| red_deploy
+    secret_red -.->|"mounted"| letsgrow_cron
     secret_red -.->|"mounted"| red_export_cron
-    secret_red -.->|"mounted"| red_bootstrap
+    secret_red -.->|"mounted"| bootstrap
+    secret_s3 -.->|"mounted"| blue_deploy
+    secret_s3 -.->|"mounted"| red_deploy
+    secret_s3 -.->|"mounted"| blue_export_cron
+    secret_s3 -.->|"mounted"| red_export_cron
     %% grey_deploy needs no secrets — it's stateless and public

@@ -10,7 +10,6 @@ graph TB
     classDef external fill:#999,color:#fff,stroke:none
     classDef cronjob fill:#438dd5,color:#fff,stroke:none
     classDef shared fill:#0a3d62,color:#fff,stroke:none
-    classDef storage fill:#3c6382,color:#fff,stroke:none
 
     grower["Grower / Researcher
     [Person]"]:::person
@@ -24,33 +23,25 @@ graph TB
             app_factory["App Factory
             [Library: FastAPI + Jinja2]
             Builds a dashboard from a
-            TwinConfig (provider, theme,
-            metadata, extra routers); hosts
-            the generic manual-ingest pipeline"]:::shared
+            TwinConfig; hosts the generic
+            manual-ingest pipeline, blob
+            store and nightly scheduler"]:::shared
         end
 
         subgraph blue_twin["Blue Twin (Blueberries)"]
             blue_dash["Blue Dashboard
             [Container: FastAPI]
             Chart compare, GDD tracker,
-            soil forecast, manual uploads
-            (single SPoHF datalake source)"]:::container
-            blue_uploads[("Blue Manual Uploads
-            [PVC]
-            Raw insect / long-data /
-            fertigation files")]:::storage
+            soil forecast (nightly refit),
+            harvest, manual uploads"]:::container
         end
 
         subgraph red_twin["Red Twin (Tomatoes)"]
             red_dash["Red Dashboard
             [Container: FastAPI]
-            DLI analysis + ML forecast
-            (trained on startup), wire
-            risk views, Sijia uploads"]:::container
-            red_uploads[("Red Manual Uploads
-            [PVC]
-            Raw Sijia measurement
-            files")]:::storage
+            DLI light + climate models
+            (nightly refit), multi-height
+            wires, risk, crop cycles, Sijia"]:::container
         end
 
         subgraph grey_twin["Grey Twin (Demo)"]
@@ -62,11 +53,15 @@ graph TB
         end
 
         subgraph data_engine["Data Engine"]
-            sync_job["wp6-data Sync Job
+            sync_job["Datalake Sync Job
             [Container: Python CronJob]
-            python -m wp6_data:
-            SPoHF datalake ingest
+            yookr-data → wp6_blue
             (every 15 min)"]:::cronjob
+
+            letsgrow_sync["LetsGrow Sync Job
+            [Container: Python CronJob]
+            letsgrow-data → wp6_red
+            (hourly)"]:::cronjob
 
             blue_export["Blue CSV Export Job
             [Container: Python CronJob]
@@ -76,36 +71,42 @@ graph TB
             red_export["Red CSV Export Job
             [Container: Python CronJob]
             Nightly export of Red
-            sensor tables to CSV"]:::cronjob
+            sensor + wire data to CSV"]:::cronjob
         end
 
         subgraph tsdb_inst["Shared TimescaleDB [PostgreSQL 17]"]
             tsdb_blue[("wp6_blue
             [Database]
-            readings, sync_metadata,
-            daily_coverage, manual_uploads")]:::database
+            readings, manual_uploads,
+            sync_metadata, sync_run_history")]:::database
             tsdb_red[("wp6_red
             [Database]
-            readings, risk_episodes,
-            risk_state, manual_uploads")]:::database
+            readings (LetsGrow + Sijia),
+            manual_uploads, sync_*,
+            risk_episodes, risk_state")]:::database
         end
     end
 
+    objstore[("Object Storage
+    [External: S3-compatible bucket]
+    red/ + blue/ prefixes:
+    exports | models | manual-uploads")]:::external
+
     mysqldb[("MySQL
     [External Database: MySQL 8]
-    Fontys GreenTechLab —
-    greenhouse sensor tables
-    (Red live feed)")]:::external
+    Fontys GreenTechLab — greenhouse
+    tables, wire_sensors,
+    wire_sensor_map (Red live feed)")]:::external
 
     spohf["SPoHF Backoffice
-    [External: REST API]"]:::external
-    yookr["Yookr
     [External: REST API]
-    upstream of the datalake"]:::external
+    yookr-data | letsgrow-data"]:::external
     openmeteo["Open-Meteo
     [External: REST API]"]:::external
     oidc["OIDC Provider
     [External: HTTPS]"]:::external
+    dash0["Dash0
+    [External: OTLP]"]:::external
 
     %% User flows
     grower -->|"HTTPS\n(OIDC)"| blue_dash
@@ -124,20 +125,29 @@ graph TB
     %% Blue data access
     blue_dash -->|"Async queries\n(psycopg3 pool)"| tsdb_blue
     blue_dash -->|"Daily weather\n(HTTPS, GDD)"| openmeteo
-    blue_dash -->|"Stores uploads"| blue_uploads
+    blue_dash -->|"Models, uploads,\nreads exports (S3)"| objstore
 
-    %% Red data access (live feed from MySQL, manual + risk in TSDB)
+    %% Red data access (live feed from MySQL; LetsGrow, manual + risk in TSDB)
     red_dash -->|"Async queries\n(aiomysql, live feed)"| mysqldb
-    red_dash -->|"Manual + risk\n(psycopg3 pool)"| tsdb_red
-    red_dash -->|"Daily forecast\n(HTTPS, DLI)"| openmeteo
-    red_dash -->|"Stores uploads"| red_uploads
+    red_dash -->|"LetsGrow, manual, risk\n(psycopg3 pool)"| tsdb_red
+    red_dash -->|"Forecast + archive\n(HTTPS, DLI/climate)"| openmeteo
+    red_dash -->|"Models, uploads,\nreads exports (S3)"| objstore
     %% grey_dash has no datastore (in-memory)
 
-    %% Sync job (datalake only; bisects windows past the relay's 10k result cap)
+    %% Sync jobs (one Feed per relay endpoint; bisects windows past the 10k cap)
     sync_job -->|"Paginated fetch\n(httpx)"| spohf
     sync_job -->|"Batch upsert"| tsdb_blue
-    yookr -->|"Relays readings"| spohf
+    letsgrow_sync -->|"Paginated fetch\n(httpx)"| spohf
+    letsgrow_sync -->|"Batch upsert\n(source=letsgrow)"| tsdb_red
 
     %% Export jobs
     blue_export -->|"Read readings"| tsdb_blue
-    red_export -->|"Read sensor tables"| mysqldb
+    blue_export -->|"Write CSVs"| objstore
+    red_export -->|"Read sensor + wire tables"| mysqldb
+    red_export -->|"Read readings"| tsdb_red
+    red_export -->|"Write CSVs"| objstore
+
+    %% Observability (Dash0 operator auto-instruments the dashboards)
+    blue_dash -.->|"traces"| dash0
+    red_dash -.->|"traces"| dash0
+    grey_dash -.->|"traces"| dash0
