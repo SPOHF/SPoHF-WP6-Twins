@@ -18,6 +18,9 @@ spec:
     - port: http
       path: /metrics
       interval: 60s
+      # Our series carry their own `endpoint` (the sync feed); without this the
+      # operator's `endpoint` target label (the port name, "http") overwrites it.
+      honorLabels: true
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
