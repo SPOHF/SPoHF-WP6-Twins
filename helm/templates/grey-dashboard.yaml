@@ -47,6 +47,8 @@ metadata:
   name: {{ .Chart.Name }}-grey-dashboard
   labels:
     app.kubernetes.io/name: {{ .Chart.Name }}-grey-dashboard
+    # Selected by the shared chart's ServiceMonitor (alerting.yaml).
+    app.kubernetes.io/component: dashboard
 spec:
   type: ClusterIP
   ports:

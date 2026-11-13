@@ -137,7 +137,12 @@ _SOURCE_TYPES = {
 }
 
 
-def _classify(m: dict, now: datetime) -> tuple[str, str, str]:
+# Every state `classify_sync` can return. /metrics emits one 0/1 series per
+# state, so a state is never missing from a scrape just because it isn't current.
+SYNC_STATES = ("never", "failing", "ok", "healthy", "stale", "outage")
+
+
+def classify_sync(m: dict, now: datetime) -> tuple[str, str, str]:
     """Return (state, label, tone) for a sync-metric row.
 
     `tone` is a CSS class (success / warning / danger / muted). A **synced**
@@ -264,7 +269,7 @@ def _build_sync_endpoint(m: dict, now: datetime) -> str:
     """Render one source's health card, shaped by its `source_type`."""
     endpoint = html.escape(str(m.get("endpoint", "unknown")))
     stype = m.get("source_type", "synced")
-    state, label, tone = _classify(m, now)
+    state, label, tone = classify_sync(m, now)
 
     if stype == "manual":
         metrics, reason, detail_rows = _render_manual(m)

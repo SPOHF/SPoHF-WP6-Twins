@@ -4,9 +4,9 @@ from datetime import UTC, datetime, timedelta
 
 from wp6_data.shared.routes.status import (
     _build_sync_endpoint,
-    _classify,
     _lag_phrase,
     _sparkline,
+    classify_sync,
 )
 
 NOW = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
@@ -34,23 +34,23 @@ def _row(**over):
 
 class TestClassify:
     def test_healthy_when_fresh(self):
-        assert _classify(_row(), NOW)[0] == "healthy"
+        assert classify_sync(_row(), NOW)[0] == "healthy"
 
     def test_stale_between_budgets(self):
         row = _row(last_data_timestamp=NOW - timedelta(hours=3))
-        assert _classify(row, NOW) == ("stale", "Data stale", "warning")
+        assert classify_sync(row, NOW) == ("stale", "Data stale", "warning")
 
     def test_outage_past_budget(self):
         row = _row(last_data_timestamp=NOW - timedelta(hours=10))
-        assert _classify(row, NOW) == ("outage", "Likely outage", "danger")
+        assert classify_sync(row, NOW) == ("outage", "Likely outage", "danger")
 
     def test_failing_beats_freshness(self):
         # A failed run is 'failing' regardless of data lag.
         row = _row(last_run_success=False, last_data_timestamp=NOW - timedelta(hours=10))
-        assert _classify(row, NOW)[0] == "failing"
+        assert classify_sync(row, NOW)[0] == "failing"
 
     def test_never_run(self):
-        assert _classify(_row(last_run_at=None), NOW)[0] == "never"
+        assert classify_sync(_row(last_run_at=None), NOW)[0] == "never"
 
     def test_manual_never_goes_stale(self):
         # Event-driven: an old manual upload is still 'ok', not stale/outage.
@@ -59,12 +59,12 @@ class TestClassify:
             last_data_timestamp=NOW - timedelta(days=180),
             last_run_at=NOW - timedelta(days=180),
         )
-        assert _classify(row, NOW) == ("ok", "Up to date", "success")
+        assert classify_sync(row, NOW) == ("ok", "Up to date", "success")
 
     def test_synced_without_budget_is_healthy_not_stale(self):
         # A scheduled job (no freshness budget) never reports stale/outage.
         row = _row(freshness_budget=None, last_data_timestamp=NOW - timedelta(days=2))
-        assert _classify(row, NOW)[0] == "healthy"
+        assert classify_sync(row, NOW)[0] == "healthy"
 
 
 class TestLagPhrase:

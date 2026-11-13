@@ -129,6 +129,8 @@ metadata:
   name: {{ .Chart.Name }}-red-dashboard
   labels:
     app.kubernetes.io/name: {{ .Chart.Name }}-red-dashboard
+    # Selected by the shared chart's ServiceMonitor (alerting.yaml).
+    app.kubernetes.io/component: dashboard
 spec:
   type: ClusterIP
   ports:

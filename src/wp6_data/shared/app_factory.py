@@ -15,7 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from wp6_data.shared.auth import NotAuthenticated, verify_session_user
 from wp6_data.shared.export import make_download_router
 from wp6_data.shared.observability import setup_observability
-from wp6_data.shared.routes import api, charts, dashboard_page, health, home, status
+from wp6_data.shared.routes import api, charts, dashboard_page, health, home, metrics, status
 from wp6_data.shared.telemetry import instrument_fastapi
 from wp6_data.shared.templates import _current_user, configure_dashboard
 from wp6_data.shared.twin import TwinConfig
@@ -135,6 +135,7 @@ def create_app(config: TwinConfig) -> FastAPI:
 
     # Shared routes
     app.include_router(health.router)
+    app.include_router(metrics.router)
     app.include_router(api.router)
     app.include_router(home.router)
     app.include_router(charts.router)

@@ -1,0 +1,154 @@
+{{- if .Values.alerting.enabled }}
+{{- $r := .Values.alerting.rules }}
+{{- $ns := .Release.Namespace }}
+# Scrapes /metrics on every dashboard Service (sync health per twin). Replaces
+# the static `wp6-blue` scrape job that used to live in the platform's
+# Prometheus values.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: wp6-data-dashboards
+  labels:
+    app.kubernetes.io/name: wp6-data-dashboards
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: dashboard
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 60s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: wp6-data-alerts
+  labels:
+    # Prometheus' ruleSelector.
+    release: monitoring
+    # Keep it out of Dash0's check-rule sync: Dash0 has no kube_* series and no
+    # route to this Discord channel.
+    dash0.com/enable: "false"
+spec:
+  groups:
+    - name: wp6-data-workloads
+      rules:
+        - alert: Wp6ContainerOOMKilled
+          expr: |
+            (increase(kube_pod_container_status_restarts_total{namespace="{{ $ns }}"}[15m]) > 0)
+            and on (namespace, pod, container)
+            (kube_pod_container_status_last_terminated_reason{namespace="{{ $ns }}", reason="OOMKilled"} == 1)
+          labels:
+            severity: warning
+            namespace: {{ $ns }}
+          annotations:
+            summary: {{`"{{ $labels.pod }} ({{ $labels.container }}) was OOM-killed"`}}
+            description: "The container hit its memory limit and was restarted. Check its memory limit in the chart values against the usage graph before raising it."
+        - alert: Wp6DeploymentUnavailable
+          expr: |
+            (kube_deployment_status_replicas_available{namespace="{{ $ns }}"} == 0)
+            and on (namespace, deployment) (kube_deployment_spec_replicas > 0)
+          for: {{ $r.unavailableFor }}
+          labels:
+            severity: critical
+            namespace: {{ $ns }}
+          annotations:
+            summary: {{`"{{ $labels.deployment }} has no available replicas"`}}
+            description: "Rollouts are surge-first, so this is not a deploy in progress: the dashboard is down."
+        - alert: Wp6StatefulSetUnavailable
+          expr: |
+            (kube_statefulset_status_replicas_ready{namespace="{{ $ns }}"} == 0)
+            and on (namespace, statefulset) (kube_statefulset_replicas > 0)
+          for: {{ $r.unavailableFor }}
+          labels:
+            severity: critical
+            namespace: {{ $ns }}
+          annotations:
+            summary: {{`"{{ $labels.statefulset }} has no ready replicas"`}}
+            description: "TimescaleDB is down: every twin's dashboard and sync depend on it."
+    - name: wp6-data-sync
+      rules:
+        - alert: Wp6SyncOutage
+          expr: wp6_sync_state{state="outage"} == 1
+          for: {{ $r.syncOutageFor }}
+          labels:
+            severity: critical
+            namespace: {{ $ns }}
+          annotations:
+            summary: {{`"{{ $labels.twin }}/{{ $labels.endpoint }}: likely upstream outage"`}}
+            description: "Sync runs succeed but the data lags past the endpoint's outage budget (the /status page's 'Likely outage'): the upstream feed has stopped delivering."
+        - alert: Wp6SyncStale
+          expr: wp6_sync_state{state="stale"} == 1
+          for: {{ $r.syncStaleFor }}
+          labels:
+            severity: warning
+            namespace: {{ $ns }}
+          annotations:
+            summary: {{`"{{ $labels.twin }}/{{ $labels.endpoint }}: data is stale"`}}
+            description: "Data lags past the endpoint's stale budget (the /status page's 'Data stale'). Escalates to Wp6SyncOutage past the outage budget."
+        - alert: Wp6SyncFailing
+          expr: wp6_sync_consecutive_failures{source_type="synced"} >= {{ $r.syncFailingRuns }}
+          labels:
+            severity: critical
+            namespace: {{ $ns }}
+          annotations:
+            summary: {{`"{{ $labels.twin }}/{{ $labels.endpoint }}: {{ $value }} sync runs failed in a row"`}}
+            description: "The sync job itself errors (e.g. the datalake is unreachable or rejecting the token). The last error is on the twin's /status page and in the wp6-data-sync job logs."
+        - alert: Wp6SyncMetadataUnreadable
+          expr: wp6_sync_up == 0
+          for: {{ $r.syncMetadataUnreadableFor }}
+          labels:
+            severity: critical
+            namespace: {{ $ns }}
+          annotations:
+            summary: {{`"{{ $labels.twin }} dashboard cannot read its sync metadata"`}}
+            description: "The dashboard is up but its database query fails, so sync health is unknown. Check TimescaleDB and the twin's tsdb-url secret."
+        # Guard: if the scrape breaks, every rule in this group goes quiet
+        # instead of firing (how the old static scrape failed unnoticed).
+        - alert: Wp6SyncMetricsAbsent
+          expr: absent(wp6_sync_up)
+          for: {{ $r.metricsAbsentFor }}
+          labels:
+            severity: warning
+            namespace: {{ $ns }}
+          annotations:
+            summary: "No wp6 sync metrics scraped — sync alerting is blind"
+            description: "Check the wp6-data-dashboards ServiceMonitor and the dashboards' /metrics endpoint."
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: spohf-discord
+  labels:
+    app.kubernetes.io/name: spohf-discord
+spec:
+  route:
+    receiver: discord
+    groupBy: ["alertname", "twin", "endpoint", "pod"]
+    groupWait: {{ .Values.alerting.route.groupWait }}
+    groupInterval: {{ .Values.alerting.route.groupInterval }}
+    repeatInterval: {{ .Values.alerting.route.repeatInterval }}
+    routes:
+      - receiver: discard
+        matchers:
+          - name: severity
+            value: info
+            matchType: "="
+      - receiver: discard
+        matchers:
+          - name: alertname
+            value: KubeJobFailed
+            matchType: "="
+          - name: job_name
+            value: {{ .Values.alerting.quietJobFailures | quote }}
+            matchType: "=~"
+  receivers:
+    - name: discord
+      discordConfigs:
+        - sendResolved: true
+          apiURL:
+            name: {{ .Values.alerting.discord.secretName }}
+            key: {{ .Values.alerting.discord.secretKey }}
+    # No integrations: alerts routed here are dropped.
+    - name: discard
+{{- end }}

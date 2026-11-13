@@ -66,3 +66,36 @@ secrets:
   # Red-twin secret holding tsdb-url for the wp6_red database (LetsGrow sync).
   # The same secret the red dashboard reads.
   redSecret: ""  # Name of red secret (default: wp6-data-red-secrets)
+
+# Alerting → the spohf Discord channel (Alertmanager in the monitoring stack).
+# The AlertmanagerConfig lives in this namespace, so prometheus-operator scopes
+# its route to namespace=<release namespace>: only this namespace's alerts reach
+# the channel, including the stock kube-prometheus-stack ones (crash loops,
+# failed jobs, PVCs filling up).
+alerting:
+  enabled: true
+  # Created by hand (kubectl), never in git: anyone holding the URL can post.
+  discord:
+    secretName: spohf-alertmanager-discord
+    secretKey: url
+  route:
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 12h
+  # A single failed sync run is routine (upstream blips, retried 15 min later),
+  # so the stock KubeJobFailed is dropped for these Jobs; Wp6SyncFailing and
+  # the freshness states judge the sync instead. Matched against job_name.
+  quietJobFailures: "wp6-data-sync-.*"
+  rules:
+    # A workload with zero ready replicas. Dashboards roll out surge-first, so a
+    # deploy never reaches zero: this only fires on a real outage.
+    unavailableFor: 5m
+    # Same verdict as the /status page (`wp6_sync_state`), budgets per endpoint.
+    syncStaleFor: 30m
+    syncOutageFor: 15m
+    # Failed runs in a row before alerting (scheduled feeds only).
+    syncFailingRuns: 3
+    # The dashboard can't read its own sync_metadata (DB unreachable).
+    syncMetadataUnreadableFor: 10m
+    # No wp6_sync_up scraped at all: every sync alert above is blind.
+    metricsAbsentFor: 30m

@@ -672,3 +672,11 @@ def test_no_stored_month_residuals_yields_no_claim(client):
     _, stats = _stub_chain(months=[])
 
     assert _seasonal_spread_note(stats) == ""
+
+
+def test_metrics_is_scrapeable_without_a_session_and_reports_db_down(client):
+    """Prometheus carries no session cookie; with no TSDB pool the scrape says down."""
+    with TestClient(client.app) as anonymous:
+        resp = anonymous.get("/metrics", follow_redirects=False)
+    assert resp.status_code == 200
+    assert 'wp6_sync_up{twin="red"} 0' in resp.text
