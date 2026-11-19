@@ -54,8 +54,20 @@ from ..multi_height.data import (
     latest_wire_date,
     load_wire_readings,
 )
-from ..multi_height.plan_view import latest_node_readings, place_nodes, render_plan_svg
-from ..multi_height.svg import PLAN_LAYOUT_PATH, SVG_LAYOUT_PATH, parse_plan_layout, parse_svg
+from ..multi_height.plan_view import (
+    PlacedNode,
+    latest_node_readings,
+    place_nodes,
+    render_plan_svg,
+    render_side_svg,
+)
+from ..multi_height.svg import (
+    PLAN_LAYOUT_PATH,
+    SVG_LAYOUT_PATH,
+    PlanLayout,
+    parse_plan_layout,
+    parse_svg,
+)
 from ..multi_height.uniformity import build_uniformity_day
 from ..multi_height.uniformity_cells import (
     aggregate_phrase,
@@ -76,7 +88,7 @@ router = APIRouter(dependencies=[Depends(verify_session_user)])
 # Temperature leads the uniformity view: it is the metric most likely to differ
 # with where a wire hangs, so it is the one that shows the page working.
 DEFAULT_UNIFORMITY_METRIC = "temp"
-PLAN_MEASUREMENT = "temp"
+DEFAULT_PLAN_MEASUREMENT = "temp"
 
 MULTI_HEIGHT_VIEWS = [
     {
@@ -85,6 +97,13 @@ MULTI_HEIGHT_VIEWS = [
         "label": "Open view",
         "description": "Latest PAR and Daily Light Integral mapped onto the "
         "greenhouse layout at each sensor height.",
+    },
+    {
+        "href": "/multi_height/side-section",
+        "title": "Side Section of Wires",
+        "label": "Open view",
+        "description": "Visualization: side view. Latest greenhouse parameters "
+        "as heatmap from above",
     },
     {
         "href": "/multi_height/wire-trends",
@@ -112,8 +131,8 @@ MULTI_HEIGHT_VIEWS = [
         "href": "/multi_height/plan-view",
         "title": "Plan View of Wires",
         "label": "Open view",
-        "description": "Latest temperature on every wire, drawn on a plan of the "
-        "greenhouse with the space between wires interpolated.",
+        "description": "Visualization: above view. Latest greenhouse parameters "
+        "as heatmap from above",
     },
     {
         "href": "/multi_height/uniformity",
@@ -332,18 +351,10 @@ def _wire_range_form(start_day: date, end_day: date, wire: str) -> str:
     """
 
 
-@router.get("/multi_height/plan-view", response_class=HTMLResponse)
-async def plan_view_page(
-    config: Annotated[TwinConfig, Depends(get_twin_config)],
-    height: Annotated[
-        int,
-        Query(description="Height (1-5) whose values fill the space between wires"),
-    ] = WIRE_SENSOR_HEIGHTS[0],
-):
-    """Latest temperature on every wire, interpolated across the greenhouse plan."""
-    if height not in WIRE_SENSOR_HEIGHTS:
-        height = WIRE_SENSOR_HEIGHTS[0]
-
+async def _latest_plan_nodes(
+    measurement: str,
+) -> tuple[list[PlacedNode], PlanLayout, str]:
+    """Each wire's latest ``measurement`` readings, placed in one line."""
     timezone = deps.base_settings.display_timezone
     wires = await wire_ids()
 
@@ -355,45 +366,121 @@ async def plan_view_page(
         start, end = day_window_utc(target_date, timezone, 0)
         df = await load_wire_readings(start, end)
 
-    readings = latest_node_readings(df, wires, PLAN_MEASUREMENT) if df is not None else {}
-    meta = deps.metadata.sensor_default(PLAN_MEASUREMENT)
-    unit = meta.unit or ""
+    readings = latest_node_readings(df, wires, measurement) if df is not None else {}
     layout = parse_plan_layout(PLAN_LAYOUT_PATH)
-    nodes = place_nodes(readings, layout)
+    return place_nodes(readings, layout), layout, timezone
 
-    height_pills = pill_row(
-        "/multi_height/plan-view", "height",
-        [(str(h), f"H{h}") for h in WIRE_SENSOR_HEIGHTS], str(height),
-        {}, label="Field height",
+
+def _plan_measurement_pills(base: str, measurement: str, extra: dict) -> str:
+    return pill_row(
+        base, "measurement",
+        [(m, WIRE_MEASUREMENT_LABELS[m][0]) for m in WIRE_SENSOR_MEASUREMENTS],
+        measurement, extra, label="Measurement",
     )
 
+
+def _plan_card(
+    nodes: list[PlacedNode], timezone: str, label: str, title: str, render, blurb: str,
+) -> str:
     if not any(n.readings for n in nodes):
-        body = '<p style="color:#6b7280;margin:0;">No wire has reported a temperature yet.</p>'
+        body = (
+            f'<p style="color:#6b7280;margin:0;">No wire has reported '
+            f"{html.escape(label.lower())} yet.</p>"
+        )
         stamp = ""
     else:
-        body = render_plan_svg(nodes, layout, height, unit)
+        body = render()
         latest = max(r.time for n in nodes for r in n.readings.values())
         stamp = (
             " Latest reading: "
             f"{pd.Timestamp(latest).tz_convert(timezone):%Y-%m-%d %H:%M}."
         )
+    return render_card(
+        f"{html.escape(label)} {title}", body,
+        description=blurb + " Wire positions are schematic; the real layout is not known."
+        + stamp,
+        card_class="card",
+    )
+
+
+@router.get("/multi_height/plan-view", response_class=HTMLResponse)
+async def plan_view_page(
+    config: Annotated[TwinConfig, Depends(get_twin_config)],
+    measurement: Annotated[str, Query(description="par, temp, hum or co2")] = (
+        DEFAULT_PLAN_MEASUREMENT
+    ),
+    height: Annotated[
+        int,
+        Query(description="Height (1-5) whose values fill the space between wires"),
+    ] = WIRE_SENSOR_HEIGHTS[0],
+):
+    """Latest values on every wire, interpolated across the greenhouse plan."""
+    if measurement not in WIRE_SENSOR_MEASUREMENTS:
+        measurement = DEFAULT_PLAN_MEASUREMENT
+    if height not in WIRE_SENSOR_HEIGHTS:
+        height = WIRE_SENSOR_HEIGHTS[0]
+
+    nodes, layout, timezone = await _latest_plan_nodes(measurement)
+    label, unit = WIRE_MEASUREMENT_LABELS[measurement]
+    base = "/multi_height/plan-view"
+    measurement_pills = _plan_measurement_pills(base, measurement, {"height": str(height)})
+    height_pills = pill_row(
+        base, "height",
+        [(str(h), f"H{h}") for h in WIRE_SENSOR_HEIGHTS], str(height),
+        {"measurement": measurement}, label="Field height",
+    )
+    card = _plan_card(
+        nodes, timezone, label, "across the greenhouse",
+        lambda: render_plan_svg(nodes, layout, height, measurement, label, unit),
+        f"Each box is one wire with its latest {label.lower()} at H1–H5. "
+        "The colour between wires is interpolated for the selected height.",
+    )
 
     content = f"""
     <a href="/multi_height" class="back-link">← Multi Height</a>
     <h1>Plan View of Wires</h1>
 
     <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center;">
+        {measurement_pills}
         {height_pills}
     </div>
 
-    {render_card(
-        "Temperature across the greenhouse",
-        body,
-        description="Each box is one wire with its latest temperature at H1–H5. "
-        "The colour between wires is interpolated for the selected height. "
-        "Wire positions are schematic; the real layout is not known." + stamp,
-        card_class="card",
-    )}
+    {card}
+    """
+
+    return render_page(config.title, content)
+
+
+@router.get("/multi_height/side-section", response_class=HTMLResponse)
+async def side_section_page(
+    config: Annotated[TwinConfig, Depends(get_twin_config)],
+    measurement: Annotated[str, Query(description="par, temp, hum or co2")] = (
+        DEFAULT_PLAN_MEASUREMENT
+    ),
+):
+    """Latest values on every wire as a side section, heights top to bottom."""
+    if measurement not in WIRE_SENSOR_MEASUREMENTS:
+        measurement = DEFAULT_PLAN_MEASUREMENT
+
+    nodes, layout, timezone = await _latest_plan_nodes(measurement)
+    label, unit = WIRE_MEASUREMENT_LABELS[measurement]
+    measurement_pills = _plan_measurement_pills("/multi_height/side-section", measurement, {})
+    card = _plan_card(
+        nodes, timezone, label, "side section",
+        lambda: render_side_svg(nodes, layout, measurement, label, unit),
+        f"Each column is one wire with its latest {label.lower()}, H1 at the top "
+        "to H5 at the bottom. The colour between wires and heights is interpolated.",
+    )
+
+    content = f"""
+    <a href="/multi_height" class="back-link">← Multi Height</a>
+    <h1>Side Section of Wires</h1>
+
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center;">
+        {measurement_pills}
+    </div>
+
+    {card}
     """
 
     return render_page(config.title, content)

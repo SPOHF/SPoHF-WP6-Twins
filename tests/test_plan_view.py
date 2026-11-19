@@ -24,18 +24,21 @@ from fastapi.testclient import TestClient
 from wp6_data.red import deps
 from wp6_data.red.db import wire_device_id, wire_readings_frame
 from wp6_data.red.multi_height.plan_view import (
-    MIN_SCALE_SPAN,
+    MEASUREMENT_STYLES,
     colour_range,
     interpolate_field,
+    interpolate_section,
     latest_node_readings,
     place_nodes,
     render_plan_svg,
+    render_side_svg,
 )
 from wp6_data.red.multi_height.svg import PLAN_LAYOUT_PATH, parse_plan_layout
 from wp6_data.red.routes.multi_height import MULTI_HEIGHT_VIEWS
 from wp6_data.red.wires import invalidate_wire_cache
 
 PLAN_PATH = "/multi_height/plan-view"
+SIDE_PATH = "/multi_height/side-section"
 DAY = datetime(2026, 8, 12, 12, tzinfo=UTC)
 WIRES = ["WS_01_02", "WS_01_03"]
 LAYOUT = parse_plan_layout(PLAN_LAYOUT_PATH)
@@ -94,9 +97,31 @@ class TestInterpolation:
         assert interpolate_field(self._nodes({}), 1, LAYOUT) is None
 
     def test_scale_never_collapses_to_a_hairline(self):
-        lo, hi = colour_range(self._nodes({"WS_01_02": [25.0] * 5, "WS_01_03": [25.1] * 5}))
+        style = MEASUREMENT_STYLES["temp"]
+        lo, hi = colour_range(
+            self._nodes({"WS_01_02": [25.0] * 5, "WS_01_03": [25.1] * 5}), style,
+        )
 
-        assert hi - lo >= MIN_SCALE_SPAN
+        assert hi - lo >= style.min_span
+
+    def test_section_stays_between_the_readings_and_runs_down_the_heights(self):
+        nodes = self._nodes({
+            "WS_01_02": [20, 21, 22, 23, 24], "WS_01_03": [30, 31, 32, 33, 34],
+        })
+        field = interpolate_section(nodes, LAYOUT)
+
+        assert field.min() >= 20 and field.max() <= 34
+        assert field[0, 0] < field[-1, 0]  # H1 (top) is cooler than H5 here
+        assert field[0, 0] < field[0, -1]  # first wire is cooler than the last
+
+    def test_section_without_readings_has_no_field(self):
+        assert interpolate_section(self._nodes({}), LAYOUT) is None
+
+
+def test_nodes_share_one_line():
+    nodes = place_nodes({f"WS_01_{i:02d}": {} for i in range(len(LAYOUT.slots) + 2)}, LAYOUT)
+
+    assert len({n.y for n in nodes}) == 1
 
 
 def test_svg_shows_each_wire_and_its_values():
@@ -104,11 +129,21 @@ def test_svg_shows_each_wire_and_its_values():
         latest_node_readings(_frame({"WS_01_02": [20.5, 21, 22, 23, 24]}), WIRES, "temp"),
         LAYOUT,
     )
-    svg = render_plan_svg(nodes, LAYOUT, 1, "°C")
+    svg = render_plan_svg(nodes, LAYOUT, 1, "temp", "Temperature", "°C")
 
     assert "WS_01_02" in svg and "WS_01_03" in svg
     assert ">20.5<" in svg
     assert "—" in svg  # WS_01_03 has nothing yet
+
+
+def test_side_svg_shows_each_wire_and_its_values():
+    nodes = place_nodes(
+        latest_node_readings(_frame({"WS_01_02": [20.5, 21, 22, 23, 24]}), WIRES, "temp"),
+        LAYOUT,
+    )
+    svg = render_side_svg(nodes, LAYOUT, "temp", "Temperature", "°C")
+
+    assert "WS_01_02" in svg and ">20.5<" in svg and ">H5<" in svg
 
 
 class _StubDb:
@@ -192,3 +227,36 @@ class TestPlanPage:
         resp = client(_frame({"WS_01_02": [20] * 5})).get(PLAN_PATH, params={"height": 9})
 
         assert resp.status_code == 200
+
+
+class TestSideSectionPage:
+    def test_card_is_second_after_the_simple_view_with_the_requested_text(self):
+        hrefs = [v["href"] for v in MULTI_HEIGHT_VIEWS]
+
+        assert hrefs[:2] == ["/multi_height/single-simple", SIDE_PATH]
+        by_href = {v["href"]: v for v in MULTI_HEIGHT_VIEWS}
+        assert by_href[PLAN_PATH]["description"].startswith("Visualization: above view.")
+        assert by_href[SIDE_PATH]["description"].startswith("Visualization: side view.")
+
+    @pytest.mark.parametrize("path", [PLAN_PATH, SIDE_PATH])
+    @pytest.mark.parametrize(
+        ("measurement", "label", "value"),
+        [("par", "PAR", ">310<"), ("hum", "Humidity", ">61.5<"), ("co2", "CO₂", ">805<")],
+    )
+    def test_each_measurement_renders_with_a_selector(
+        self, client, path, measurement, label, value,
+    ):
+        nums = {"par": 310, "hum": 61.5, "co2": 805}[measurement]
+        resp = client(_frame({"WS_01_02": [nums] * 5}, measurement)).get(
+            path, params={"measurement": measurement},
+        )
+
+        assert resp.status_code == 200
+        assert value in resp.text and label in resp.text
+        assert "measurement=co2" in resp.text  # the radio pills
+
+    def test_bad_measurement_falls_back_and_empty_names_it(self, client):
+        resp = client(_frame({})).get(SIDE_PATH, params={"measurement": "x"})
+
+        assert resp.status_code == 200
+        assert "No wire has reported temperature" in resp.text
