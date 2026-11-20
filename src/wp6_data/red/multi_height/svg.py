@@ -2,6 +2,7 @@
 
 import re
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 
 _RED_STATIC = Path(__file__).parent.parent / "static"
@@ -60,3 +61,38 @@ def parse_svg(svg_path: Path):
     }
 
     return canvas_w, canvas_h, sensor_boxes, sensor_bands
+
+
+### Plan-view layout ###
+PLAN_LAYOUT_PATH = _RED_STATIC / "multi_height_plan.svg"
+
+
+@dataclass(frozen=True)
+class PlanLayout:
+    """Geometry of the plan view: canvas, the field's area, and the node slots.
+
+    ``slots`` are in slot-number order, so the nth wire (sorted) takes the nth.
+    """
+
+    width: float
+    height: float
+    area: dict[str, float]
+    legend: dict[str, float]
+    slots: list[dict[str, float]]
+
+
+def parse_plan_layout(svg_path: Path) -> PlanLayout:
+    _, _, width, height = parse_viewbox(svg_path)
+    rects = parse_svg_rects(svg_path)
+    slot_ids = sorted(
+        (k for k in rects if re.fullmatch(r"node_\d+", k)),
+        key=lambda k: int(k.split("_")[1]),
+    )
+    return PlanLayout(
+        width=width,
+        height=height,
+        area=rects["plan"],
+        legend=rects["legend"],
+        slots=[rects[k] for k in slot_ids],
+    )
+
