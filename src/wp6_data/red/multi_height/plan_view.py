@@ -14,6 +14,7 @@ readings it was given, which a smoother scheme would, between so few points.
 
 from __future__ import annotations
 
+import dataclasses
 import html
 from dataclasses import dataclass
 
@@ -49,6 +50,7 @@ CELL_PX = 12
 SCALE_PAD_SHARE = 0.05
 BOX_H_PX = 18
 
+PLAN_NODE_SIDE_PX = 96
 NODE_HEADER_PX = 20
 NODE_ROW_PAD_PX = 6
 
@@ -214,7 +216,7 @@ def render_plan_svg(
     field = interpolate_field(nodes, height, layout)
     parts = _canvas_open(layout, f"Interpolated {label} between multi-height wires")
     parts.extend(_field_svg(field, scale, style, layout))
-    parts.extend(_node_svg(n, height, style.decimals, layout) for n in nodes)
+    parts.extend(_node_svg(n, height, style.decimals) for n in nodes)
     if scale is not None:
         parts.append(_legend_svg(layout, scale, style, unit, f"field at H{height}"))
     parts.append("</svg>")
@@ -322,11 +324,13 @@ def _section_node_svg(node: PlacedNode, layout: PlanLayout, decimals: int) -> st
     return "".join(out)
 
 
-def _node_svg(node: PlacedNode, selected: int, decimals: int, layout: PlanLayout) -> str:
-    x0, y0 = node.x - node.width / 2, node.y - node.height / 2
+def _node_svg(node: PlacedNode, selected: int, decimals: int) -> str:
+    """Square box: seen from above, a wire is a point, not a tall strip."""
+    side = PLAN_NODE_SIDE_PX
+    x0, y0 = node.x - side / 2, node.y - side / 2
+    node = dataclasses.replace(node, width=side, height=side)
     row_h = (node.height - NODE_HEADER_PX - NODE_ROW_PAD_PX) / len(WIRE_SENSOR_HEIGHTS)
     out = [
-        _wire_line(node, layout),
         f'<rect x="{x0:g}" y="{y0:g}" width="{node.width:g}" height="{node.height:g}" '
         'rx="6" fill="white" fill-opacity="0.95" stroke="#111827" stroke-width="1.5"/>',
         f'<text x="{node.x:g}" y="{y0 + 14:g}" text-anchor="middle" font-size="11" '
