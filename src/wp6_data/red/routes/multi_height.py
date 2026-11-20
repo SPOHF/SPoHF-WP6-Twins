@@ -100,9 +100,16 @@ MULTI_HEIGHT_VIEWS = [
     },
     {
         "href": "/multi_height/side-section",
-        "title": "Side Section of Wires",
+        "title": "Heatmap. Side Section",
         "label": "Open view",
         "description": "Visualization: side view. Latest greenhouse parameters "
+        "as heatmap from side",
+    },
+    {
+        "href": "/multi_height/plan-view",
+        "title": "Heatmap. Plan View",
+        "label": "Open view",
+        "description": "Visualization: above view. Latest greenhouse parameters "
         "as heatmap from above",
     },
     {
@@ -126,13 +133,6 @@ MULTI_HEIGHT_VIEWS = [
         "description": "The same growth sections 48 hours ahead: predicted "
         "temperature, humidity and CO₂ against the outdoor conditions, with "
         "the held-out error the prediction was measured at.",
-    },
-    {
-        "href": "/multi_height/plan-view",
-        "title": "Plan View of Wires",
-        "label": "Open view",
-        "description": "Visualization: above view. Latest greenhouse parameters "
-        "as heatmap from above",
     },
     {
         "href": "/multi_height/uniformity",
