@@ -124,6 +124,46 @@ def test_nodes_share_one_line():
     assert len({n.y for n in nodes}) == 1
 
 
+def test_nodes_are_spread_evenly_across_the_rectangle():
+    nodes = place_nodes({f"WS_01_{i:02d}": {} for i in range(3)}, LAYOUT)
+    gaps = {round(b.x - a.x, 6) for a, b in zip(nodes, nodes[1:], strict=False)}
+    area = LAYOUT.area
+
+    assert len(gaps) == 1
+    assert nodes[0].x - area["x"] == pytest.approx(area["x"] + area["width"] - nodes[-1].x)
+
+
+class TestDeadSensors:
+    def _nodes(self, temps):
+        return place_nodes(latest_node_readings(_frame(temps), WIRES, "temp"), LAYOUT)
+
+    def test_zero_is_shown_but_not_interpolated(self):
+        nodes = self._nodes({"WS_01_02": [0, 20, 20, 20, 20], "WS_01_03": [30] * 5})
+        field = interpolate_field(nodes, 1, LAYOUT)
+
+        assert field.min() == 30  # the dead H1 sensor does not pull toward 0
+        assert ">0.0<" in render_plan_svg(nodes, LAYOUT, 1, "temp", "Temperature", "°C")
+        assert colour_range(nodes, MEASUREMENT_STYLES["temp"])[0] > 15
+
+    def test_section_bridges_a_dead_height(self):
+        nodes = self._nodes({"WS_01_02": [20, 0, 30, 40, 50], "WS_01_03": [20, 0, 30, 40, 50]})
+        field = interpolate_section(nodes, LAYOUT)
+
+        assert field.min() >= 20
+
+    def test_all_dead_gives_no_field(self):
+        nodes = self._nodes({"WS_01_02": [0] * 5})
+
+        assert interpolate_field(nodes, 1, LAYOUT) is None
+        assert interpolate_section(nodes, LAYOUT) is None
+
+    def test_each_height_has_its_own_field(self):
+        nodes = self._nodes({"WS_01_02": [10, 20, 20, 20, 20], "WS_01_03": [12, 30, 30, 30, 30]})
+
+        assert interpolate_field(nodes, 1, LAYOUT).max() <= 12
+        assert interpolate_field(nodes, 2, LAYOUT).min() >= 20
+
+
 def test_svg_shows_each_wire_and_its_values():
     nodes = place_nodes(
         latest_node_readings(_frame({"WS_01_02": [20.5, 21, 22, 23, 24]}), WIRES, "temp"),

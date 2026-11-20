@@ -46,7 +46,6 @@ MEASUREMENT_STYLES = {
 }
 DEFAULT_STYLE = MEASUREMENT_STYLES["temp"]
 CELL_PX = 12
-IDW_POWER = 2.0
 SCALE_PAD_SHARE = 0.05
 BOX_H_PX = 18
 
@@ -103,23 +102,18 @@ def _wire_of(device: str) -> str:
 def place_nodes(
     readings: dict[str, dict[int, NodeReading]], layout: PlanLayout,
 ) -> list[PlacedNode]:
-    """Give each wire (sorted) the next declared slot, all in one line.
+    """Spread the wires (sorted) evenly across the greenhouse rectangle.
 
-    With more wires than slots none is dropped (every installed wire must be
-    seen): they are all spread evenly along the line instead.
+    Positions are unknown, so equal spacing is the neutral choice. The first
+    slot only supplies the node size and its vertical position.
     """
     wires = sorted(readings)
-    if len(wires) <= len(layout.slots):
-        return [
-            _node(w, readings[w], s["x"], s["y"], s["width"], s["height"])
-            for w, s in zip(wires, layout.slots, strict=False)
-        ]
-    template = layout.slots[0]
+    slot = layout.slots[0]
     area = layout.area
-    step = area["width"] / len(wires)
+    step = area["width"] / max(len(wires), 1)
     return [
-        _node(w, readings[w], area["x"] + step * (i + 0.5) - template["width"] / 2,
-              template["y"], template["width"], template["height"])
+        _node(w, readings[w], area["x"] + step * (i + 0.5) - slot["width"] / 2,
+              slot["y"], slot["width"], slot["height"])
         for i, w in enumerate(wires)
     ]
 
@@ -129,35 +123,42 @@ def _node(wire, readings, x, y, width, height) -> PlacedNode:
 
 
 ### Interpolation ###
-def interpolate_field(
-    nodes: list[PlacedNode], height: int, layout: PlanLayout,
-) -> np.ndarray | None:
-    """Inverse-distance-weighted values on a grid of ``CELL_PX`` cells.
+def usable(reading: NodeReading | None) -> bool:
+    """A reading of exactly 0 is a dead sensor: shown, but never interpolated."""
+    return reading is not None and reading.value != 0
 
-    ``None`` when no node reported at ``height``. One node gives a flat field:
-    one point says nothing about direction.
-    """
-    pts = [(n.x, n.y, n.readings[height].value) for n in nodes if height in n.readings]
-    if not pts:
-        return None
+
+def _grid(layout: PlanLayout) -> tuple[np.ndarray, np.ndarray]:
     area = layout.area
     cols = int(np.ceil(area["width"] / CELL_PX))
     rows = int(np.ceil(area["height"] / CELL_PX))
     xs = area["x"] + (np.arange(cols) + 0.5) * CELL_PX
     ys = area["y"] + (np.arange(rows) + 0.5) * CELL_PX
-    gx, gy = np.meshgrid(xs, ys)
-    px = np.array([p[0] for p in pts])
-    py = np.array([p[1] for p in pts])
-    pv = np.array([p[2] for p in pts])
-    dist = np.hypot(gx[..., None] - px, gy[..., None] - py)
-    dist = np.maximum(dist, 1e-6)
-    weights = dist ** -IDW_POWER
-    return (weights * pv).sum(axis=-1) / weights.sum(axis=-1)
+    return xs, ys
+
+
+def interpolate_field(
+    nodes: list[PlacedNode], height: int, layout: PlanLayout,
+) -> np.ndarray | None:
+    """Field of one height: linear between the wires that report it.
+
+    Each height is interpolated on its own; wires with no usable reading there
+    are skipped. ``None`` when no wire has one. Outside the outer wires the
+    nearest value holds.
+    """
+    pts = sorted(
+        (n.x, n.readings[height].value) for n in nodes if usable(n.readings.get(height))
+    )
+    if not pts:
+        return None
+    xs, ys = _grid(layout)
+    row = np.interp(xs, [p[0] for p in pts], [p[1] for p in pts])
+    return np.tile(row, (len(ys), 1))
 
 
 def colour_range(nodes: list[PlacedNode], style: MeasurementStyle) -> tuple[float, float] | None:
     """One scale across every height, so switching height shows real change."""
-    values = [r.value for n in nodes for r in n.readings.values()]
+    values = [r.value for n in nodes for r in n.readings.values() if usable(r)]
     if not values:
         return None
     lo, hi = min(values), max(values)
@@ -170,30 +171,26 @@ def colour_range(nodes: list[PlacedNode], style: MeasurementStyle) -> tuple[floa
 
 
 def interpolate_section(nodes: list[PlacedNode], layout: PlanLayout) -> np.ndarray | None:
-    """Side-section field: linear along the line of wires, linear down the heights.
+    """Side-section field: linear along the wires, linear down the heights.
 
-    Each wire's own heights are interpolated to every grid row first (a missing
-    height is bridged, not zero-filled); columns beyond the outer wires take the
-    nearest wire's profile. ``None`` when no wire reported anything.
+    Each wire's usable heights are interpolated to every grid row first (a dead
+    or missing height is bridged); columns beyond the outer wires take the
+    nearest wire's profile. ``None`` when no wire has a usable reading.
     """
-    area = layout.area
-    cols = int(np.ceil(area["width"] / CELL_PX))
-    rows = int(np.ceil(area["height"] / CELL_PX))
-    ys = area["y"] + (np.arange(rows) + 0.5) * CELL_PX
-    xs = area["x"] + (np.arange(cols) + 0.5) * CELL_PX
+    xs, ys = _grid(layout)
     profiles = []
-    for node in sorted((n for n in nodes if n.readings), key=lambda n: n.x):
-        heights = sorted(node.readings)
-        at = [section_y(h, layout) for h in heights]
-        profiles.append((node.x, np.interp(ys, at, [node.readings[h].value for h in heights])))
+    for node in sorted(nodes, key=lambda n: n.x):
+        heights = [h for h in sorted(node.readings) if usable(node.readings[h])]
+        if heights:
+            at = [section_y(h, layout) for h in heights]
+            profiles.append((node.x, np.interp(ys, at, [node.readings[h].value for h in heights])))
     if not profiles:
         return None
     px = [p[0] for p in profiles]
-    field = np.empty((rows, cols))
-    for r in range(rows):
+    field = np.empty((len(ys), len(xs)))
+    for r in range(len(ys)):
         field[r] = np.interp(xs, px, [p[1][r] for p in profiles])
     return field
-
 
 def section_y(height: int, layout: PlanLayout) -> float:
     """Vertical centre of a height's band: H1 at the top, H5 at the bottom."""
@@ -217,7 +214,7 @@ def render_plan_svg(
     field = interpolate_field(nodes, height, layout)
     parts = _canvas_open(layout, f"Interpolated {label} between multi-height wires")
     parts.extend(_field_svg(field, scale, style, layout))
-    parts.extend(_node_svg(n, height, style.decimals) for n in nodes)
+    parts.extend(_node_svg(n, height, style.decimals, layout) for n in nodes)
     if scale is not None:
         parts.append(_legend_svg(layout, scale, style, unit, f"field at H{height}"))
     parts.append("</svg>")
@@ -294,10 +291,20 @@ def _field_svg(
     return parts
 
 
+def _wire_line(node: PlacedNode, layout: PlanLayout) -> str:
+    """The wire itself: one vertical line joining all sensors of a node."""
+    area = layout.area
+    return (
+        f'<line x1="{node.x:g}" y1="{area["y"]:g}" x2="{node.x:g}" '
+        f'y2="{area["y"] + area["height"]:g}" stroke="#111827" stroke-width="2"/>'
+    )
+
+
 def _section_node_svg(node: PlacedNode, layout: PlanLayout, decimals: int) -> str:
     x0 = node.x - node.width / 2
     area = layout.area
     out = [
+        _wire_line(node, layout),
         f'<text x="{node.x:g}" y="{area["y"] + area["height"] - 3:g}" text-anchor="middle" '
         f'font-size="10" font-weight="700" fill="#111827">{html.escape(node.wire)}</text>'
     ]
@@ -315,10 +322,11 @@ def _section_node_svg(node: PlacedNode, layout: PlanLayout, decimals: int) -> st
     return "".join(out)
 
 
-def _node_svg(node: PlacedNode, selected: int, decimals: int) -> str:
+def _node_svg(node: PlacedNode, selected: int, decimals: int, layout: PlanLayout) -> str:
     x0, y0 = node.x - node.width / 2, node.y - node.height / 2
     row_h = (node.height - NODE_HEADER_PX - NODE_ROW_PAD_PX) / len(WIRE_SENSOR_HEIGHTS)
     out = [
+        _wire_line(node, layout),
         f'<rect x="{x0:g}" y="{y0:g}" width="{node.width:g}" height="{node.height:g}" '
         'rx="6" fill="white" fill-opacity="0.95" stroke="#111827" stroke-width="1.5"/>',
         f'<text x="{node.x:g}" y="{y0 + 14:g}" text-anchor="middle" font-size="11" '
