@@ -175,7 +175,21 @@ async def single_simple_page(
     label = meta.alias or measurement
     value_label = f"{label} ({meta.unit})" if meta.unit else label
 
-    df = await load_wire_readings()
+
+    # Default to the latest day this wire actually reported, not "today" —
+    # the wire feed can lag, which would otherwise show empty boxes.
+    # Cheap GROUP BY aggregate, exactly as crop-climate does; no table scan.
+
+    if day is not None:
+        target_date = day
+    else:
+        target_date = await latest_wire_date(wire, timezone)
+
+    # Bound the fetch to the shown day's UTC window, the way crop-climate
+    # does. Single-simple has no cross-night metric, so 0 lookback is enough.
+    fetch_start, fetch_end = day_window_utc(target_date or date.today(), timezone, 0)
+    df = await load_wire_readings(fetch_start, fetch_end)
+    
     wire_devices = [wire_device_id(wire, h) for h in WIRE_SENSOR_HEIGHTS]
 
     # Default to the latest day this wire+measurement actually reported, not
