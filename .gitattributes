@@ -1,0 +1,5 @@
+# Shell scripts run inside Linux containers (init-tsdb.sh is mounted into
+# TimescaleDB as an initdb hook). With core.autocrlf on Windows they would be
+# checked out as CRLF, and bash then fails with "/bin/bash^M: bad interpreter".
+*.sh text eol=lf
+Dockerfile text eol=lf
