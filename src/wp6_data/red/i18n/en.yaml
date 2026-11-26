@@ -225,7 +225,7 @@ greenhouse:
       read: >-
         One measuring point for the whole block: near the walls, under open vents or
         above the pipe rail the air can differ — dense sensor grids in commercial
-        greenhouses find warm, cold and humid spots.[^rezvani2020][^wur_wireless]
+        greenhouses find warm, cold and humid spots.[^rezvani2020][^balendonck2014]
     rh_in:
       title: Greenhouse humidity
       how: >-
@@ -543,7 +543,7 @@ greenhouse:
         mean of the readings in it. Between the sensors the colour is interpolated in
         straight lines, along the row and up the canopy separately: in greenhouses, the
         temperature difference between two places grows about linearly with their
-        distance[^balendonck2014], and for that a straight line is the best guess. In the
+        distance[^balendonck2014_slides], and for that a straight line is the best guess. In the
         house the result is a fog around the crop rows on either side of the sensors;
         here it is shown flat. Nothing is drawn beyond the outer sensors, and next to a
         missing reading there is no fog and the section is hatched.
@@ -572,10 +572,10 @@ greenhouse:
         Everything the twin says about air and crop rests on that one spot, while the
         actuators act everywhere. Near walls and gables, under open vents, above the pipe
         rail or in a corner the climate can differ — dense sensor grids in commercial
-        greenhouses find warm, cold and humid spots[^rezvani2020][^wur_wireless] —
+        greenhouses find warm, cold and humid spots[^rezvani2020][^balendonck2014] —
         microclimates this data cannot see.
-        The ring in the view only illustrates this; how far one box represents the block
-        is not known.
+        The coloured area in the view only illustrates this; how far one box represents
+        the block is not known.
 
   advice:
     light_sum:
@@ -689,6 +689,7 @@ greenhouse:
       series: LetsGrow data series
       series_note: logged every 5 minutes
       module: LetsGrow module
+      open_source: Open the source ({host})
     term:
       calibrated: >-
         Fitted to red's own LetsGrow data (2023–26) by the twin's team, rather than taken
@@ -722,6 +723,7 @@ greenhouse:
       substrate: Rockwool slabs in hanging gutters. One gutter section hangs on the scale.
       weather: LetsGrow's weather station on the roof.
       cover: "The glass roof and walls: what of the sun gets in, and what heat leaks out."
+      sensors: One measuring box and one scale stand for the whole block, while lamps, pipes, vents and screen act everywhere. Click a value for where it is measured.
     flow:
       sun: Sun kept inside
       lamps: Lamps
@@ -741,7 +743,6 @@ greenhouse:
       how: How it is calculated
       source: Where the data comes from
       read: How to read it
-      sources: Sources
     legend:
       sun: sun
       lamps_on: lamps on
@@ -848,9 +849,9 @@ greenhouse:
       hover: Hover the section for values between the sensors.
       measured_at: Measured at {time}
     sensors:
-      legend_spot: "stands for the place in the ring: the twin assumes the whole block behaves like it."
+      legend_spot: "stands for the area around it, which stays solid while it is selected: the twin assumes the whole block behaves like it."
       legend_block: settings act everywhere at once.
-      fade: "While this is open, the crop beyond the ring fades: the box speaks only for its surroundings."
+      fade: "While this is open, the crop further away fades: the box speaks only for its surroundings."
       link: Where each sensor is, and what that means →
     chart:
       lamps_on: lamps on, %

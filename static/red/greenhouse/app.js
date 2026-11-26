@@ -58,36 +58,29 @@ const code = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
 // popup behind it: the configured values, a LetsGrow series or module, a term.
 const terms = (html) => html.replace(/\[([^\]]+)\]\((cfg|tag|mod|term):([a-z0-9_]+)\)/g,
   (m, text, kind, id) => `<button type="button" class="gh-term" data-kind="${kind}" data-id="${id}">${text}</button>`);
-// Catalogue prose as the page shows it: terms, numbered citations, sources under it.
-const prose = (text, heading = '') => {
-  const c = citer();
-  const html = c.mark(terms(code(text)));
-  return { html, sources: c.list(heading) };
-};
+// Catalogue prose as the page shows it: terms and numbered citations.
+const prose = (text) => citer().mark(terms(code(text)));
 
 // ------------------------------------------------------------------ notes
-// Literature markers [^id] become numbered superscripts, numbered in order of
-// first use within one balloon or card; the sources are listed under it.
+// Literature markers [^id] become small numbers, in order of first use within
+// one balloon or card; each opens a tip with the reference (see tipHtml), so
+// the text stays short and no source list trails it.
 function citer() {
   const order = [];
   const mark = (html) => html.replace(/\[\^([a-z0-9_]+)\]/g, (m, id) => {
-    const r = REFS[id];
-    if (!r) return '';
+    if (!REFS[id]) return '';
     if (!order.includes(id)) order.push(id);
-    return `<sup class="gh-fn"><a href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(r.cite)}">${order.indexOf(id) + 1}</a></sup>`;
+    return `<sup class="gh-fn"><button type="button" class="gh-term gh-fn-btn" data-kind="ref" data-id="${id}"`
+      + ` aria-label="${esc(REFS[id].label)}">${order.indexOf(id) + 1}</button></sup>`;
   });
-  const list = (heading) => (order.length
-    ? `${heading}<ol class="gh-refs">${order.map((id) => `<li><a href="${esc(REFS[id].url)}" target="_blank" rel="noopener">${esc(REFS[id].label)}</a> — ${esc(REFS[id].cite)}</li>`).join('')}</ol>`
-    : '');
-  return { mark, list };
+  return { mark };
 }
 
 // An explanation's three parts, with its citations listed under them.
 function noteHtml(n, heading = 'h5') {
   const c = citer();
   const part = (field) => `<${heading}>${T(`balloon.${field}`)}</${heading}><p class="gh-note">${c.mark(terms(code(n[field])))}</p>`;
-  const body = part('how') + part('source') + part('read');
-  return body + c.list(`<${heading}>${T('balloon.sources')}</${heading}>`);
+  return part('how') + part('source') + part('read');
 }
 
 // ------------------------------------------------------------------ balloon
@@ -154,6 +147,13 @@ function tipHtml(kind, id, text) {
   if (kind === 'tag') {
     const mod = CONFIG.modules[CONFIG.tags[id]];
     return `<strong>${text}</strong><p>${esc(T('tip.series'))}${mod ? ` · ${esc(mod.name)}` : ''}, ${esc(T('tip.series_note'))}</p><code>${esc(id)}</code>`;
+  }
+  if (kind === 'ref') {
+    const r = REFS[id];
+    if (!r) return '';
+    const host = r.url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, '');
+    return `<strong>${esc(r.label)}</strong><p>${esc(r.cite)}</p>`
+      + `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(T('tip.open_source', { host }))} ↗</a>`;
   }
   if (kind === 'mod') {
     const mod = CONFIG.modules[id];
@@ -424,7 +424,6 @@ const COMPONENT = {
     ],
   },
   sensors: {
-    blurb: () => NOTES.sensors.read,
     values: (s) => [
       [R('box_air'), T('row.air_value', { t: num(s.t_in, 1), rh: num(s.rh_in) }), 't_in'],
       [R('box_co2'), `${num(s.co2)} ppm`, 'co2'],
@@ -856,7 +855,7 @@ function renderPanel() {
   const charts = def.charts().map((c) => lineChart({ ...c, t: times(), marker: ui.i, bands })).join('');
   $('gh-panel').innerHTML = `
     <div class="gh-panel-head"><h3>${esc(NAMES[name])}</h3>${close}</div>
-    ${(({ html, sources }) => `<p class="gh-muted">${html}</p>${sources}`)(prose(blurb(name)))}
+    <p class="gh-muted">${prose(blurb(name))}</p>
     ${kv(def.values(s, f, d, step))}
     ${def.extra ? def.extra() : ''}
     ${charts}
@@ -954,8 +953,7 @@ function adviceCard(a) {
     <header><span class="gh-level">${esc(T(`level.${a.level}`))}</span>
       <button type="button" class="gh-comp" data-component="${a.component}">${esc(NAMES[a.component] || a.component)}</button></header>
     <strong>${esc(a.title)}</strong>
-    <p>${detail.html}</p>
-    ${detail.sources}
+    <p>${detail}</p>
     ${impactText(a.impact) ? `<p class="gh-impact">${esc(impactText(a.impact))}</p>` : ''}
     ${win ? `<div class="gh-wins">${win}</div>` : ''}
   </article>`;

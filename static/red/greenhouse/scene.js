@@ -20,8 +20,8 @@ const ROW_PITCH = 1.6, NROW = 20, PLANT_PITCH = 0.62;
 const X0 = -W / 2, Z0 = -L / 2;
 // Where the climate computer measures: its box hangs in a path, the scale
 // carries one gutter section next to it. LetsGrow does not log the spot, so
-// it is drawn mid-house; the ring's radius is an illustration, not a measured
-// representativeness.
+// it is drawn mid-house; the radius beyond which the crop fades while the box
+// is selected is an illustration, not a measured representativeness.
 const ZONE = { x: 1.6, z: 0, r: 4.5 };
 // Where the row of multi-height sensors is drawn: centred in a path four rows
 // from the measuring box (along the rows), or across the rows at MICRO.z. Like
@@ -44,10 +44,11 @@ function seeded(seed) {
 }
 
 // Pipe colour: cool steel at air temperature, glowing orange-red when hot.
+const STEEL = new THREE.Color(0x8c96a0), HOT = new THREE.Color(0xff5a1f);
 function pipeColour(tempC, airC) {
+  // steel at air temperature, through to a glowing orange ~55 °C above it
   const t = Math.max(0, Math.min(1, ((tempC ?? airC ?? 20) - (airC ?? 20)) / 55));
-  const c = new THREE.Color().setHSL(0.6 - 0.6 * t, 0.15 + 0.75 * t, 0.42 + 0.1 * t);
-  return { colour: c, glow: t };
+  return { colour: STEEL.clone().lerp(HOT, Math.sqrt(t)), glow: t };
 }
 
 export class GreenhouseScene {
@@ -68,6 +69,8 @@ export class GreenhouseScene {
       uGhZone: { value: new THREE.Vector4(ZONE.x, ZONE.z, ZONE.r, 0) },
       uGhMicro: { value: new THREE.Vector4(0, 0, 0, MICRO.band) },
     };
+    // the box's fade eases in and out (see _frame) rather than snapping
+    this._zoneWanted = false;
     this.selected = null;
     this.clock = new THREE.Clock();
     this.state = { vent: 0, ventWindSide: 1, ventLee: 0, ventWind: 0, lamps: 0, screen: 0,
@@ -113,8 +116,10 @@ export class GreenhouseScene {
     this.controls = new OrbitControls(this.camera, r.domElement);
     this.controls.target.set(0, 2.6, 3);
     this.controls.enableDamping = true;
+    // the overview keeps the camera above the horizon; close-ups may look up
+    // (lamps, screen) and come within a metre of a truss
     this.controls.maxPolarAngle = Math.PI * 0.49;
-    this.controls.minDistance = 6;
+    this.controls.minDistance = 1;
     this.controls.maxDistance = 120;
 
     const pmrem = new THREE.PMREMGenerator(r);
@@ -520,10 +525,15 @@ export class GreenhouseScene {
   _buildVents() {
     // one vent window per 3 m on every ridge, alternately on either slope;
     // hinged at the ridge, the lower edge lifts, pushed up by a rack arm
-    const mat = new THREE.MeshPhysicalMaterial({ color: 0xeaf4ff, roughness: 0.05, transparent: true,
-      opacity: 0.22, clearcoat: 0.4, side: THREE.DoubleSide, depthWrite: false, emissive: 0x000000 });
-    const frame = new THREE.MeshStandardMaterial({ color: 0xd9dee4, metalness: 0.8, roughness: 0.3,
+    // glass on glass hides an open vent, so each side's panes and frames take
+    // the ventilation colour as they open (lee and windward move separately)
+    const paneMat = () => new THREE.MeshPhysicalMaterial({ color: 0xeaf4ff, roughness: 0.05,
+      transparent: true, opacity: 0.22, clearcoat: 0.4, side: THREE.DoubleSide, depthWrite: false,
       emissive: 0x000000 });
+    const frameMat = () => new THREE.MeshStandardMaterial({ color: 0xd9dee4, metalness: 0.8,
+      roughness: 0.3, emissive: 0x000000 });
+    this.ventLook = { lee: { pane: paneMat(), frame: frameMat() }, wind: { pane: paneMat(), frame: frameMat() } };
+    const mat = this.ventLook.lee.pane, frame = this.ventLook.lee.frame;
     const slope = Math.atan2(RIDGE - GUTTER, SPAN / 2);
     const wv = 1.05, lv = 1.7;
     const armGeo = new THREE.CylinderGeometry(0.016, 0.016, 1, 6);
@@ -551,13 +561,18 @@ export class GreenhouseScene {
         const arm = new THREE.Mesh(armGeo, frame);
         const anchor = new THREE.Vector3(xm + side * (wv - 0.05) * Math.cos(slope),
           RIDGE + 0.02 - (wv - 0.05) * Math.sin(slope) - 0.06, z);
-        hinge.userData = { side, slope, wv, arm, anchor };
+        hinge.userData = { side, slope, wv, arm, anchor, parts };
         for (const o of [...parts, arm]) this._pickable(o, 'vents');
         this.vents.push(hinge);
         this.scene.add(hinge, arm);
       }
     }
     this.ventMat = mat;
+    for (const look of Object.values(this.ventLook)) {
+      for (const m of [look.pane, look.frame]) {
+        if (!this._part('vents').materials.includes(m)) this._part('vents').materials.push(m);
+      }
+    }
     this._setVent(this.vents, 0, 0, true);
   }
 
@@ -565,10 +580,22 @@ export class GreenhouseScene {
   _setVent(vents, lee, wind, fromEast) {
     const maxAngle = THREE.MathUtils.degToRad(42);
     const up = new THREE.Vector3(0, 1, 0), tip = new THREE.Vector3(), d = new THREE.Vector3();
+    const glass = new THREE.Color(0xeaf4ff), alu = new THREE.Color(0xd9dee4), aqua = new THREE.Color(0x00b894);
+    for (const [key, pct] of [['lee', lee ?? 0], ['wind', wind ?? 0]]) {
+      const open = THREE.MathUtils.clamp(pct / 100, 0, 1), k = open > 0.01 ? 0.35 + 0.65 * open : 0;
+      const look = this.ventLook[key];
+      look.pane.color.copy(glass).lerp(aqua, k);
+      look.pane.opacity = 0.22 + 0.4 * k;
+      look.frame.color.copy(alu).lerp(aqua, k);
+    }
     for (const h of vents) {
-      const { side, slope, wv, arm, anchor } = h.userData;
+      const { side, slope, wv, arm, anchor, parts } = h.userData;
       const windward = (side > 0) === fromEast;
       const pct = (windward ? wind : lee) ?? 0;
+      const look = this.ventLook[windward ? 'wind' : 'lee'];
+      parts[0].material = look.pane;
+      for (const b of parts.slice(1)) b.material = look.frame;
+      arm.material = look.frame;
       const rot = -side * (slope - (pct / 100) * maxAngle);
       h.rotation.z = rot;
       tip.set(h.position.x + side * (wv - 0.05) * Math.cos(rot),
@@ -606,16 +633,6 @@ export class GreenhouseScene {
     tray.position.set(rowX, 0.675, ZONE.z);
     g.add(box, fan, stripe, wire, cell, post, tray);
     for (const o of [box, fan, stripe, cell, post, tray]) this._pickable(o, 'sensors');
-    // the ring: how far one spot is taken to speak for (an illustration)
-    const ring = new THREE.Mesh(new THREE.RingGeometry(ZONE.r - 0.12, ZONE.r, 120),
-      new THREE.MeshBasicMaterial({ color: 0xf2a600, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
-    ring.rotation.x = -Math.PI / 2; ring.position.set(ZONE.x, 0.03, ZONE.z);
-    // and a halo just over the crop tops, so it reads from above
-    const halo = new THREE.Mesh(new THREE.TorusGeometry(ZONE.r, 0.11, 10, 180),
-      new THREE.MeshBasicMaterial({ color: 0xffb21a, transparent: true, opacity: 0.95, fog: false }));
-    halo.rotation.x = Math.PI / 2; halo.position.set(ZONE.x, 4.6, ZONE.z);
-    g.add(ring, halo);
-    this.zoneParts = [ring, halo];
     this.scene.add(g);
   }
 
@@ -716,11 +733,12 @@ export class GreenhouseScene {
   }
 
   _buildLabels() {
-    // on the side the default camera looks at (+x, +z), spread so they do not stack
+    // each on what its close-up in ``select`` looks at, so a pin opens a view
+    // of the thing it sits on (the cover's is the whole house)
     const spots = {
-      lamps: [X0 + 4.8, LAMP_Y + 0.2, 10], screen: [X0 + 21, SCREEN_Y + 0.25, 13],
-      vents: [X0 + 26, RIDGE + 0.8, 4], pipes: [X0 + 9.6, 0.45, 16.5],
-      crop: [X0 + 13.6, 3.9, 14], substrate: [X0 + 20, 1.0, 16.5],
+      lamps: [4.8, LAMP_Y + 0.2, -3.5], screen: [-4.8, SCREEN_Y + 0.25, -3],
+      vents: [5, RIDGE + 0.8, 3], pipes: [4.6, 0.45, 5],  // along the pipe its view follows
+      crop: [-6.1, 3.9, 1], substrate: [3.75, 1.0, 0.5],
       weather: this.weatherPos.toArray(), cover: [X0 + 8, RIDGE + 1.2, -2],
       sensors: [ZONE.x, 3.15, ZONE.z],
     };
@@ -776,7 +794,9 @@ export class GreenhouseScene {
 
   _highlight() {
     for (const [name, part] of Object.entries(this.parts)) {
-      const on = name === this.selected ? 0.32 : name === this.hovered ? 0.18 : 0;
+      // only hover tints: a selected part is flown to, and a blue cast would hide
+      // its own colours (pipe temperature, crop, vents opening)
+      const on = name === this.hovered && name !== this.selected ? 0.18 : 0;
       for (const m of part.materials) {
         if (!m.emissive || m === this.ledMat) continue;
         if (m.userData.baseEmissive === undefined) m.userData.baseEmissive = m.emissive.getHex();
@@ -803,28 +823,38 @@ export class GreenhouseScene {
   // ---------------------------------------------------------------- public
   select(name) {
     this.selected = name;
-    // the measuring box speaks for its surroundings only: the rest fades
-    this.focusU.uGhZone.value.w = name === 'sensors' ? 1 : 0;
     this._highlight();
     if (name) for (const a of Object.values(this.flowArrows)) a.visible = false;
     else if (this._last) this.update(this._last);
+    // [camera, target, may look up]. Close-ups stand in a path (x = row ± 0.8)
+    // away from the gutter posts, at the height of what they show.
     const views = {
-      lamps: [[14, 8.5, -6], [0, 5, -10]], pipes: [[-6, 2.2, -21], [-9, 0.5, -12]],
-      vents: [[10, 13, -28], [0, 6.8, -10]], screen: [[16, 9, -26], [0, 5.8, -6]],
-      crop: [[-4, 3.2, -22], [-8, 2.2, -12]], substrate: [[-5, 1.6, -21], [-9, 0.8, -14]],
-      weather: [[34, 8, -32], [22, 7, -22]], cover: [[44, 26, 40], [0, 4, 0]],
-      sensors: [[ZONE.x + 8, 8.5, ZONE.z + 10], [ZONE.x, 1.2, ZONE.z - 0.5]],
+      sensors: [[ZONE.x + 0.15, 1.95, ZONE.z + 4.3], [ZONE.x + 0.4, 1.75, ZONE.z - 0.5]],
+      crop: [[-6.4, 1.55, 7.5], [-6.1, 1.75, 1.0]],
+      pipes: [[4.8, 0.5, 7.0], [4.6, 0.3, -3.0]],
+      substrate: [[3.2, 1.25, 6.0], [3.75, 0.7, 0.5]],
+      lamps: [[4.8, 3.3, 9.5], [4.8, 5.3, -3.5], true],
+      screen: [[-4.8, 3.6, 10], [-4.8, 5.8, -3], true],
+      vents: [[15, 11.5, 15], [5, 6.9, 3]],
+      weather: [[31, 5.5, -11], [21.5, 6.5, -22.5]],
+      cover: [[38, 18, 34], [0, 4, 0]],
       ...(this.micro ? { microclimate: this.micro.view() } : {}),
     };
     if (name && views[name]) this._fly(...views[name]);
+    // the measuring box speaks for its surroundings only: while it is
+    // selected, the crop beyond its radius fades (eased in _frame)
+    this._zoneWanted = name === 'sensors';
   }
 
-  resetView() { this._fly([27, 10.5, 31], [0, 2.6, 3]); }
+  resetView() {
+    this._fly([27, 10.5, 31], [0, 2.6, 3]);
+  }
 
   // standing in the main path at the gable end, looking down the rows
-  insideView() { this._fly([1.6, 2.0, 16.4], [1.6, 2.3, 2]); }  // x = 1.6: a path with no gutter post
+  insideView() { this._fly([1.6, 2.0, 16.4], [1.6, 2.3, 2], true); }  // x = 1.6: a path with no gutter post
 
-  _fly(pos, target) {
+  _fly(pos, target, lookUp = false) {
+    this.controls.maxPolarAngle = Math.PI * (lookUp ? 0.9 : 0.49);
     this._flight = {
       p0: this.camera.position.clone(), p1: new THREE.Vector3(...pos),
       t0: this.controls.target.clone(), t1: new THREE.Vector3(...target), start: performance.now(),
@@ -938,7 +968,8 @@ export class GreenhouseScene {
     pinEl.innerHTML = `<span class="gh-pin-name">${this.names.microclimate ?? 'microclimate'}</span>`;
     pinEl.addEventListener('click', (ev) => { ev.stopPropagation(); this.onPick('microclimate'); });
     const pin = new CSS2DObject(pinEl);
-    pin.position.copy(at(x0 + span / 2, y1 + 0.55));
+    // over the string nearest the overview, clear of the crop's pin mid-row
+    pin.position.copy(at(x0 + span, y1 + 0.55));
     this.scene.add(pin);
     fog.visible = false;
     this.scene.add(group);
@@ -962,8 +993,6 @@ export class GreenhouseScene {
 
   setMicroclimate(on) {
     this.microOn = on;
-    // the measuring box's ring would compete with the row for the eye
-    for (const o of this.zoneParts) o.visible = !on;
     // the other parts' pins would sit on top of the row
     for (const l of Object.values(this.labels)) l.obj.visible = !on && this.layers.labels;
     if (!this.micro) return;
@@ -1109,6 +1138,9 @@ export class GreenhouseScene {
     }
     this.controls.update();
     this._driftFog(dt);
+    // the box's fade eases rather than snaps (alongside a flight)
+    const zw = this.focusU.uGhZone.value;
+    zw.w += ((this._zoneWanted ? 1 : 0) - zw.w) * Math.min(1, dt * 4);
     this.anemometer.rotation.y += dt * (0.5 + this.state.wind * 2.5);
 
     // vapour: rises with transpiration; leaves through the vents when open

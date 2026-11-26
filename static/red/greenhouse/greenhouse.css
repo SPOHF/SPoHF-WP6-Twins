@@ -245,13 +245,9 @@ main:has(#gh-app) { max-width: 1480px; }
 .gh-dial-sub i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 0.2rem; }
 @media (max-width: 700px) { .gh-dial-sub { display: none; } }
 
-/* literature: numbered superscripts and the list under a balloon or advice card */
+/* literature: numbered superscripts (each opens its reference in a tip) */
 .gh-fn { font-size: 0.65em; line-height: 0; margin-left: 0.05em; }
 .gh-fn a { text-decoration: none; padding: 0 0.1em; }
-.gh-refs { margin: 0.2rem 0 0.3rem; padding-left: 1.3rem; font-size: 0.72rem; line-height: 1.4;
-           color: var(--pico-muted-color); list-style: decimal outside; }
-.gh-refs li { margin: 0.1rem 0; list-style: inherit; padding-left: 0.1rem; }
-.gh-advice-card .gh-refs { margin-top: 0.35rem; }
 
 /* words with a popup behind them: "configured", a LetsGrow series or module, a term */
 .gh-term { display: inline; margin: 0; padding: 0; width: auto; border: none; background: none; box-shadow: none;
@@ -280,3 +276,8 @@ main:has(#gh-app) { max-width: 1480px; }
 .src-literature { background: #9887ef; color: #fff; }
 .src-assumed { background: #f2a600; color: #191919; }
 .src-grower { background: #257de0; color: #fff; }
+
+/* a citation: a small number that opens its reference in a tip */
+.gh-fn-btn { margin: 0; padding: 0 0.12em; width: auto; border: none; background: none; box-shadow: none;
+             font-size: 1em; line-height: 1; color: var(--pico-primary); cursor: pointer; }
+.gh-fn-btn:hover, .gh-fn-btn:focus-visible { text-decoration: underline; }

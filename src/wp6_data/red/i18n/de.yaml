@@ -223,7 +223,7 @@ greenhouse:
       read: >-
         Ein Messpunkt für den ganzen Block: An den Wänden, unter offenen Lüftungen oder
         über der Rohrschiene kann die Luft abweichen — dichte Sensornetze in
-        Praxisgewächshäusern finden warme, kalte und feuchte Stellen.[^rezvani2020][^wur_wireless]
+        Praxisgewächshäusern finden warme, kalte und feuchte Stellen.[^rezvani2020][^balendonck2014]
     rh_in:
       title: Gewächshausluftfeuchte
       how: >-
@@ -549,7 +549,7 @@ greenhouse:
         15-Minuten-Schritt ist der Mittelwert der Messungen darin. Zwischen den Sensoren
         wird die Farbe geradlinig interpoliert, entlang der Reihe und in der Höhe getrennt:
         In Gewächshäusern wächst der Temperaturunterschied zwischen zwei Orten etwa linear
-        mit ihrem Abstand[^balendonck2014], und dafür ist eine Gerade die beste Schätzung.
+        mit ihrem Abstand[^balendonck2014_slides], und dafür ist eine Gerade die beste Schätzung.
         Im Haus ist das Ergebnis ein Nebel um die Pflanzenreihen beiderseits der Sensoren;
         hier ist es flach dargestellt. Jenseits der äußeren Sensoren wird nichts
         gezeichnet, und neben einer fehlenden Messung gibt es keinen Nebel und der Schnitt
@@ -580,9 +580,9 @@ greenhouse:
         Alles, was der Zwilling über Luft und Bestand sagt, beruht auf diesem einen Ort,
         während die Aktoren überall wirken. An Wänden und Giebeln, unter offenen Lüftungen,
         über der Rohrschiene oder in einer Ecke kann das Klima abweichen — dichte Sensornetze
-        in Praxisgewächshäusern finden warme, kalte und feuchte Stellen[^rezvani2020][^wur_wireless]
-        — Mikroklimata, die diese Daten nicht sehen. Der Ring in der Ansicht veranschaulicht
-        das nur; wie weit eine Box für den Block steht, ist nicht bekannt.
+        in Praxisgewächshäusern finden warme, kalte und feuchte Stellen[^rezvani2020][^balendonck2014]
+        — Mikroklimata, die diese Daten nicht sehen. Der farbige Bereich in der Ansicht
+        veranschaulicht das nur; wie weit eine Box für den Block steht, ist nicht bekannt.
 
   advice:
     light_sum:
@@ -697,6 +697,7 @@ greenhouse:
       series: LetsGrow-Datenreihe
       series_note: alle 5 Minuten erfasst
       module: LetsGrow-Modul
+      open_source: Quelle öffnen ({host})
     term:
       calibrated: >-
         Vom Team des Zwillings an Reds eigene LetsGrow-Daten (2023–26) angepasst, statt aus
@@ -730,6 +731,7 @@ greenhouse:
       substrate: Steinwollmatten in Hängerinnen. Ein Rinnenabschnitt hängt an der Waage.
       weather: Die Wetterstation von LetsGrow auf dem Dach.
       cover: "Glasdach und Wände: was von der Sonne hereinkommt und welche Wärme entweicht."
+      sensors: Eine Messbox und eine Waage stehen für den ganzen Block, während Lampen, Rohre, Lüftungen und Schirm überall wirken. Klicken Sie auf einen Wert, um zu sehen, wo er gemessen wird.
     flow:
       sun: Im Haus gehaltene Sonne
       lamps: Lampen
@@ -749,7 +751,6 @@ greenhouse:
       how: So wird es berechnet
       source: Woher die Daten kommen
       read: So ist es zu lesen
-      sources: Quellen
     legend:
       sun: Sonne
       lamps_on: Lampen an
@@ -856,9 +857,9 @@ greenhouse:
       hover: Mit der Maus über den Schnitt fahren für Werte zwischen den Sensoren.
       measured_at: Gemessen um {time}
     sensors:
-      legend_spot: "steht für den Ort im Ring: Der Zwilling nimmt an, dass sich der ganze Block so verhält."
+      legend_spot: "steht für den Bereich um sie herum, der sichtbar bleibt, solange sie ausgewählt ist: Der Zwilling nimmt an, dass sich der ganze Block so verhält."
       legend_block: Einstellungen wirken überall zugleich.
-      fade: "Solange dies offen ist, verblasst der Bestand außerhalb des Rings: Die Box spricht nur für ihre Umgebung."
+      fade: "Solange dies offen ist, verblasst der Bestand weiter weg: Die Box spricht nur für ihre Umgebung."
       link: Wo jeder Sensor sitzt und was das bedeutet →
     chart:
       lamps_on: Lampen an, %
