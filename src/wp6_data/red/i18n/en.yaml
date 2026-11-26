@@ -68,6 +68,7 @@ greenhouse:
       J/cm².
 
   note:
+    not_delivered: "LetsGrow has not delivered this day yet: the house shows the sun, and the multi-height sensors their microclimate."
     short_day: LetsGrow has fewer than 12 hours of climate data for this day.
     no_curtain: "Energy curtain not logged by LetsGrow before 21 May 2026: drawn open."
     no_data: No LetsGrow data for this day.
@@ -894,6 +895,8 @@ greenhouse:
       as_ran: as ran
       what_if: what if
     panel:
+      latest_letsgrow: Latest LetsGrow day
+      open_micro: Show the multi-height sensors
       balance_at: Energy balance at {time}
       heat_in: Heat in, W/m²
       heat_out: Heat out, W/m²

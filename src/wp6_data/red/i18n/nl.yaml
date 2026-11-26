@@ -66,6 +66,7 @@ greenhouse:
       en J/cm².
 
   note:
+    not_delivered: "LetsGrow heeft deze dag nog niet geleverd: de kas toont de zon, en de meerhoogtesensoren hun microklimaat."
     short_day: LetsGrow heeft voor deze dag minder dan 12 uur klimaatgegevens.
     no_curtain: "Energiescherm vóór 21 mei 2026 niet door LetsGrow vastgelegd: open getekend."
     no_data: Geen LetsGrow-gegevens voor deze dag.
@@ -891,6 +892,8 @@ greenhouse:
       as_ran: zoals gedraaid
       what_if: wat als
     panel:
+      latest_letsgrow: Laatste LetsGrow-dag
+      open_micro: Meerhoogtesensoren tonen
       balance_at: Energiebalans om {time}
       heat_in: Warmte erin, W/m²
       heat_out: Warmte eruit, W/m²

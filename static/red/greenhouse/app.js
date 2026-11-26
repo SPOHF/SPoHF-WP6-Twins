@@ -48,6 +48,8 @@ const num = (x, d = 0) => {
   NF[d] ||= new Intl.NumberFormat(LANG, { minimumFractionDigits: d, maximumFractionDigits: d });
   return NF[d].format(Number(x));
 };
+// a value in other units, or none when it was not logged (never a made-up 0)
+const scaled = (x, k) => (x == null ? null : x * k);
 const pct = (x) => (x == null ? '–' : `${num(x * 100)}%`);
 const signed = (x, d = 0) => `${x > 0 ? '+' : ''}${num(x, d)}`;
 const DF = new Intl.DateTimeFormat(LANG, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -349,9 +351,9 @@ const COMPONENT = {
   vents: {
     values: (s, f) => [
       [R('lee_wind'), `${num(s.vent_lee)}% / ${num(s.vent_wind)}%`, 'vent_pos'],
-      [R('air_exchange'), `${num((f.air_exchange ?? 0) * 3600, 1)} m³/m²/h`, 'air_exchange'],
+      [R('air_exchange'), `${num(scaled(f.air_exchange, 3600), 1)} m³/m²/h`, 'air_exchange'],
       [R('heat_out_air'), `${num(f.ventilation)} W/m²`, 'ventilation'],
-      [R('vapour_out'), `${num((f.vapour_out ?? 0) * 1000)} ml/m²/h`, 'vapour_out'],
+      [R('vapour_out'), `${num(scaled(f.vapour_out, 1000))} ml/m²/h`, 'vapour_out'],
       [R('rh_inside'), `${num(s.rh_in)}%`, 'rh_in'],
     ],
     charts: () => [
@@ -366,7 +368,7 @@ const COMPONENT = {
     values: (s, f) => [
       [R('screen_closed'), s.screen == null ? R('not_logged') : pct(s.screen), 'screen_pos'],
       [R('cover_out'), `${num(f.cover)} W/m²`, 'cover'],
-      [R('delta_t'), `${num((s.t_in ?? 0) - (s.t_out ?? 0), 1)} °C`, 'delta_t'],
+      [R('delta_t'), `${num(s.t_in == null || s.t_out == null ? null : s.t_in - s.t_out, 1)} °C`, 'delta_t'],
     ],
     charts: () => [
       { unit: T('chart.screen'), fixed: [0, 100], series: [{ name: S('screen'), values: col((s) => (s.state.screen == null ? null : s.state.screen * 100)), colour: C.grey }] },
@@ -376,7 +378,7 @@ const COMPONENT = {
   },
   crop: {
     values: (s, f, d, st) => [
-      [R('transpiration'), `${num((s.transpiration ?? 0) * 1000)} ml/m²/h (${R(st.e_source === 'scale' ? 'measured' : 'modelled')})`, 'transpiration'],
+      [R('transpiration'), `${num(scaled(s.transpiration, 1000))} ml/m²/h (${R(st.e_source === 'scale' ? 'measured' : 'modelled')})`, 'transpiration'],
       [R('evap_heat'), `${num(f.evaporation)} W/m²`, 'evaporation'],
       [R('air'), T('row.air_value', { t: num(s.t_in, 1), rh: num(s.rh_in) }), 't_in'],
       [R('co2'), `${num(s.co2)} ppm`, 'co2'],
@@ -417,7 +419,7 @@ const COMPONENT = {
     values: (s, f) => [
       [R('sun_kept'), `${num(f.sun)} W/m²`, 'sun'],
       [R('cover_out'), `${num(f.cover)} W/m²`, 'cover'],
-      [R('delta_t'), `${num((s.t_in ?? 0) - (s.t_out ?? 0), 1)} °C`, 'delta_t'],
+      [R('delta_t'), `${num(s.t_in == null || s.t_out == null ? null : s.t_in - s.t_out, 1)} °C`, 'delta_t'],
     ],
     charts: () => [
       { unit: 'W/m²', series: [{ name: S('sun_in'), values: col((s) => s.flows.sun), colour: C.yellow }, { name: S('cover_loss'), values: col((s) => s.flows.cover), colour: C.blue }] },
@@ -428,7 +430,7 @@ const COMPONENT = {
       [R('box_air'), T('row.air_value', { t: num(s.t_in, 1), rh: num(s.rh_in) }), 't_in'],
       [R('box_co2'), `${num(s.co2)} ppm`, 'co2'],
       [R('scale_weight'), `${num(s.weight, 2)} kg`, 'weight'],
-      [R('scale_e'), `${num((s.transpiration ?? 0) * 1000)} ml/m²/h`, 'transpiration'],
+      [R('scale_e'), `${num(scaled(s.transpiration, 1000))} ml/m²/h`, 'transpiration'],
       [R('roof_out'), `${num(s.t_out, 1)} °C · ${num(s.radiation)} W/m²`, 't_out'],
       [R('block_lamps'), pct(s.lamps), 'lamps'],
       [R('block_pipes'), `${num(s.lg_pipe_lower)} / ${num(s.lg_pipe_growth)} °C`, 'pipe_temp'],
@@ -468,7 +470,7 @@ const METRIC = {
   co2: { now: (s) => `${num(s.co2)} ppm`, charts: () => [
     { unit: T('chart.co2'), series: [{ name: S('co2'), values: col('co2'), colour: C.grey }] },
     { unit: T('chart.lamps_on'), fixed: [0, 100], series: [{ name: S('lamps'), values: col((s) => (s.state.lamps ?? 0) * 100), colour: C.magenta }] }] },
-  transpiration: { now: (s) => `${num((s.transpiration ?? 0) * 1000)} ml/m²/h`, charts: () => COMPONENT.crop.charts().slice(0, 1) },
+  transpiration: { now: (s) => `${num(scaled(s.transpiration, 1000))} ml/m²/h`, charts: () => COMPONENT.crop.charts().slice(0, 1) },
 };
 
 // ------------------------------------------------------------------ microclimate
@@ -531,6 +533,8 @@ async function loadMicro(date) {
     const mc = await r.json();
     if (ui.day && mc.date !== ui.day.date) return;  // the day moved on while this loaded
     ui.micro = mc;
+    ui.wireLatest = mc.range.latest;
+    if (ui.day) $('gh-date').max = maxDay();
     if (!(ui.metric in mc.metrics)) [ui.metric] = Object.keys(mc.metrics);
     const key = microKey(mc);
     if (key !== ui.microKey) {
@@ -565,6 +569,7 @@ function setMode(on) {
   chip.classList.toggle('is-on', on); chip.setAttribute('aria-pressed', String(on));
   $('gh-micro').hidden = !on;
   scene.setMicroclimate(on);
+  if (ui.day) $('gh-date').max = maxDay();
   if (on && ui.day && ui.micro?.date !== ui.day.date) loadMicro(ui.day.date);
   else renderMicro();
   if (ui.day) updateUrl();
@@ -786,12 +791,12 @@ function renderHud(step) {
   $('gh-hud-in').innerHTML = `<div class="gh-hud-title">${H('inside')}</div>`
     + chip(H('air'), `${num(s.t_in, 1)} °C`, 't_in') + chip(H('rh'), `${num(s.rh_in)}%`, 'rh_in')
     + chip(H('co2'), `${num(s.co2)} ppm`, 'co2')
-    + chip(H('crop'), `${num((s.transpiration ?? 0) * 1000)} ml/h`, 'transpiration');
-  scene.setLabel('lamps', (s.lamps ?? 0) > 0.05 ? T('pin.on', { w: num(step.flows.lamps) }) : T('pin.off'));
+    + chip(H('crop'), `${num(scaled(s.transpiration, 1000))} ml/h`, 'transpiration');
+  scene.setLabel('lamps', s.lamps == null ? '–' : s.lamps > 0.05 ? T('pin.on', { w: num(step.flows.lamps) }) : T('pin.off'));
   scene.setLabel('pipes', `${num(s.lg_pipe_lower)}° / ${num(s.lg_pipe_growth)}°C`);
   scene.setLabel('vents', `${num(s.vent_lee)}% / ${num(s.vent_wind)}%`);
   scene.setLabel('screen', s.screen == null ? R('not_logged') : pct(s.screen));
-  scene.setLabel('crop', `${num((s.transpiration ?? 0) * 1000)} ml/m²/h`);
+  scene.setLabel('crop', `${num(scaled(s.transpiration, 1000))} ml/m²/h`);
   scene.setLabel('substrate', `${num(s.weight, 1)} kg`);
   scene.setLabel('weather', `${num(s.t_out, 1)} °C · ${num(s.radiation)} W/m²`);
   scene.setLabel('cover', T('pin.cover_out', { w: num(step.flows.cover) }));
@@ -819,6 +824,17 @@ function renderPanel() {
   const d = ui.day, step = d.steps[ui.i], s = step.state, f = step.flows;
   const name = ui.selected;
   const close = `<button type="button" class="gh-close" aria-label="${esc(T('close'))}">×</button>`;
+  if (!name && d.letsgrow === false) {
+    $('gh-panel').innerHTML = `
+      <h3>${esc(fmtDate(d.date))}</h3>
+      <p class="gh-muted">${esc(d.notes.join(' '))}</p>
+      <p class="gh-wi-row">
+        <button type="button" class="outline gh-wi-btn" id="gh-open-micro">${esc(T('panel.open_micro'))}</button>
+        <button type="button" class="outline gh-wi-btn" id="gh-latest-lg">${esc(T('panel.latest_letsgrow'))}</button></p>`;
+    $('gh-open-micro').addEventListener('click', () => select('microclimate'));
+    $('gh-latest-lg').addEventListener('click', () => loadDay(d.range.latest));
+    return;
+  }
   if (!name) {
     const t = d.summary.flows_mj;
     const share = num(100 * t.residual / Math.max(1e-6, t.sun + t.lamps + t.pipes));
@@ -968,6 +984,11 @@ function bindAdvice(el) {
 }
 
 function renderAdvice() {
+  if (ui.day.letsgrow === false) {
+    $('gh-advice-sub').textContent = ui.day.notes.join(' ');
+    $('gh-advice').innerHTML = '';
+    return;
+  }
   const items = [...ui.day.advice].sort((a, b) => ORDER[a.level] - ORDER[b.level]);
   const acts = items.filter((a) => a.level === 'act' || a.level === 'consider').length;
   $('gh-advice-sub').textContent = T(acts === 1 ? 'advice.sub_one' : 'advice.sub_many', { date: fmtDate(ui.day.date), n: num(acts) });
@@ -1065,12 +1086,34 @@ function updateUrl() {
   window.history.replaceState(null, '', u);
 }
 
+// The newest day the multi-height sensors reported: they run ahead of LetsGrow.
+async function wireLatest() {
+  if (!ui.wireLatest) {
+    const r = await fetch(`${API}/microclimate`);
+    if (r.ok) ui.wireLatest = (await r.json()).range.latest;
+  }
+  return ui.wireLatest;
+}
+
+// The last day the picker offers: LetsGrow's, or in the microclimate the
+// sensors' when they are ahead.
+function maxDay() {
+  const lg = ui.day?.range?.latest;
+  return ui.mode === 'micro' && ui.wireLatest && (!lg || ui.wireLatest > lg) ? ui.wireLatest : lg;
+}
+
 async function loadDay(date, t) {
   $('gh-loading').hidden = false;
   $('gh-loading').textContent = T('load.loading');
   closeNote();
   try {
-    const r = await fetch(`${API}/day${date ? `?date=${date}` : ''}`);
+    // in the microclimate the sensors lead: their newest day by default. A day
+    // LetsGrow has not delivered comes back with only the sun in it (bare), so
+    // the house, the multi-height sensors and the way back stay on the page.
+    if (ui.mode === 'micro' && !date) date = await wireLatest();
+    const q = new URLSearchParams({ bare: '1' });
+    if (date) q.set('date', date);
+    const r = await fetch(`${API}/day?${q}`);
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     const d = await r.json();
     if (d.empty) {
@@ -1084,7 +1127,7 @@ async function loadDay(date, t) {
     const input = $('gh-date');
     input.value = d.date;
     if (d.range.first) input.min = d.range.first;
-    input.max = d.range.latest;
+    input.max = maxDay();
     renderTimeline();
     renderAdvice();
     renderTiles();
@@ -1100,7 +1143,7 @@ function shiftDay(delta) {
   const dt = new Date(`${ui.day?.date || $('gh-date').value}T12:00:00`);
   dt.setDate(dt.getDate() + delta);
   const iso = dt.toISOString().slice(0, 10);
-  if (ui.day?.range?.latest && iso > ui.day.range.latest) return;
+  if (maxDay() && iso > maxDay()) return;
   loadDay(iso, ui.day?.steps[ui.i]?.t);
 }
 

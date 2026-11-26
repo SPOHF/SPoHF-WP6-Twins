@@ -252,6 +252,33 @@ def test_build_day_returns_every_step_flow_and_advice():
     assert all("eur" not in a["impact"] for a in out["advice"])
 
 
+def test_a_day_letsgrow_has_not_delivered_is_the_sun_alone():
+    """The multi-height sensors run ahead: such a day is the house with only the sun in it."""
+    out = D.bare_day(DAY, CFG, TZ, 51.0, 6.6)
+    assert out["letsgrow"] is False
+    assert len(out["steps"]) == int(pd.Timedelta(days=1) / pd.Timedelta(S.STEP))
+    for step in out["steps"]:
+        assert set(step["state"]) == set(D.STATE_FIELDS)
+        assert set(step["flows"]) == set(D.FLOW_FIELDS)
+        assert all(v is None for v in (*step["state"].values(), *step["flows"].values()))
+    elevations = [step["sun_el"] for step in out["steps"]]
+    assert min(elevations) < 0 < max(elevations)
+    assert out["summary"]["sunrise"] < out["summary"]["sunset"]
+    assert out["advice"] == []
+    assert out["notes"] == [i18n.t("greenhouse.note.not_delivered")]
+
+
+def test_a_bare_day_has_the_shape_of_a_delivered_one():
+    """So the page draws it with the same code: nothing it reads is missing."""
+    built = D.build_day(_synthetic_day(), DAY, CFG, TZ, 51.0, 6.6)
+    bare = D.bare_day(DAY, CFG, TZ, 51.0, 6.6)
+    assert set(built) <= set(bare)
+    assert set(built["summary"]) <= set(bare["summary"])
+    assert set(built["summary"]["flows_mj"]) == set(bare["summary"]["flows_mj"])
+    assert set(built["steps"][0]) == set(bare["steps"][0])
+    assert bare["params"] == built["params"]
+
+
 def test_what_if_day_closing_the_screen_saves_heat():
     f5 = _synthetic_day()
     w = D.what_if_day(f5, DAY, CFG, TZ, screen_dark=1.0)

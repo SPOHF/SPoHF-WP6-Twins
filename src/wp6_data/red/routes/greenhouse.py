@@ -200,15 +200,23 @@ async def greenhouse_page() -> str:
 
 
 @router.get("/greenhouse/api/day")
-async def greenhouse_day(date_: str | None = Query(None, alias="date")) -> JSONResponse:
-    """One day of the greenhouse (default: the newest day LetsGrow has delivered)."""
+async def greenhouse_day(
+    date_: str | None = Query(None, alias="date"),
+    bare: bool = Query(False),
+) -> JSONResponse:
+    """One day of the greenhouse (default: the newest day LetsGrow has delivered).
+
+    With ``bare``, a day LetsGrow has not (fully) delivered comes back as the
+    day with only the sun in it (``letsgrow`` false) instead of as empty: the
+    microclimate mode follows the multi-height sensors, which run ahead.
+    """
     if not is_initialised():
         raise HTTPException(status_code=503, detail="database not connected")
     tz = _tz()
     last, first = await _last_reading(), await _first_reading()
     latest = D.latest_day(datetime.now(ZoneInfo(tz)), last, tz)
     day = _parse_day(date_, latest)
-    key = (day, latest, i18n.current())
+    key = (day, latest, bare, i18n.current())
     if key not in _days:
         cfg = deps.greenhouse
         f5 = await D.fetch_five_minute(day, cfg, tz)
@@ -221,6 +229,8 @@ async def greenhouse_day(date_: str | None = Query(None, alias="date")) -> JSONR
             }
         else:
             payload = D.build_day(f5, day, cfg, tz, DEFAULT_LAT, DEFAULT_LON)
+        if bare and payload.get("empty"):
+            payload = D.bare_day(day, cfg, tz, DEFAULT_LAT, DEFAULT_LON)
         payload["range"] = {
             "first": first.tz_convert(tz).date().isoformat() if first is not None else None,
             "latest": latest.isoformat(),

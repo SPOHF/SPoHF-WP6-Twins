@@ -213,12 +213,69 @@ def build_day(
         "light": plan,
         "activity": act,
         "notes": notes,
-        "params": {
-            "lamp_w": cfg.lamps.power_w,
-            "lamp_jcm2_per_h": cfg.lamps.radiation_eq,
-            "pipes": [{"tag": p.tag, "label": pipe_label(p.tag, p.label)} for p in cfg.pipes],
-            "advice": cfg.advice.model_dump(),
+        "params": _params(cfg),
+    }
+
+
+def _params(cfg: GreenhouseConfig) -> dict:
+    """The configured values the page draws with, whether LetsGrow delivered or not."""
+    return {
+        "lamp_w": cfg.lamps.power_w,
+        "lamp_jcm2_per_h": cfg.lamps.radiation_eq,
+        "pipes": [{"tag": p.tag, "label": pipe_label(p.tag, p.label)} for p in cfg.pipes],
+        "advice": cfg.advice.model_dump(),
+    }
+
+
+#: What a day's summary carries (see :func:`build_day`), for days that have none.
+SUMMARY_FIELDS = (
+    "heat_mj", "lamp_h", "lamp_h_needed", "lamp_h_longest_day", "sun_jcm2", "light_jcm2",
+    "transpiration_l", "irrigation_l", "drain_l", "humid_h", "t_mean", "t_min", "t_out_mean",
+    "scale_share", "light_h", "sun_h", "lamp_only_h", "dark_h", "longest_dark_h", "longest_dark",
+)
+
+
+def bare_day(
+    day: date, cfg: GreenhouseConfig, tz: str, latitude: float, longitude: float
+) -> dict:
+    """A day LetsGrow has not delivered: the page's day with only the sun in it.
+
+    The multi-height sensors run ahead of LetsGrow, so their microclimate can be
+    shown for days the climate computer has not sent yet. This is the frame for
+    those days: every step, where the sun stands, sunrise and sunset, and every
+    LetsGrow value empty (``None``) rather than guessed. ``letsgrow`` is false so
+    the page can say so.
+    """
+    start = pd.Timestamp(day, tz=tz)
+    index = pd.date_range(start, start + pd.Timedelta(days=1), freq=S.STEP, inclusive="left")
+    pos = sun.position(index, latitude, longitude)
+    flows_mj = ("sun", "lamps", "pipes", "cover", "ventilation", "evaporation", "residual")
+    return {
+        "date": day.isoformat(),
+        "tz": tz,
+        "site": {"lat": latitude, "lon": longitude},
+        "letsgrow": False,
+        "steps": [
+            {
+                "t": when.strftime("%H:%M"),
+                "sun_el": _num(pos["elevation"].iloc[i]),
+                "sun_az": _num(pos["azimuth"].iloc[i]),
+                "state": dict.fromkeys(STATE_FIELDS),
+                "flows": dict.fromkeys(FLOW_FIELDS),
+                "e_source": None,
+            }
+            for i, when in enumerate(index)
+        ],
+        "summary": {
+            **dict.fromkeys(SUMMARY_FIELDS),
+            **sun.rise_and_set(start, latitude, longitude),
+            "flows_mj": dict.fromkeys(flows_mj),
         },
+        "advice": [],
+        "light": None,
+        "activity": {},
+        "notes": [t("greenhouse.note.not_delivered")],
+        "params": _params(cfg),
     }
 
 

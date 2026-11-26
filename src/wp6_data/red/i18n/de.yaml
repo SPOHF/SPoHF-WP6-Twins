@@ -66,6 +66,7 @@ greenhouse:
       und J/cm².
 
   note:
+    not_delivered: "LetsGrow hat diesen Tag noch nicht geliefert: Das Haus zeigt die Sonne und die Mehrhöhensensoren ihr Mikroklima."
     short_day: LetsGrow hat für diesen Tag weniger als 12 Stunden Klimadaten.
     no_curtain: "Energieschirm vor dem 21. Mai 2026 nicht von LetsGrow erfasst: offen dargestellt."
     no_data: Keine LetsGrow-Daten für diesen Tag.
@@ -902,6 +903,8 @@ greenhouse:
       as_ran: wie gelaufen
       what_if: was wäre, wenn
     panel:
+      latest_letsgrow: Letzter LetsGrow-Tag
+      open_micro: Mehrhöhensensoren zeigen
       balance_at: Energiebilanz um {time}
       heat_in: Wärme hinein, W/m²
       heat_out: Wärme hinaus, W/m²
