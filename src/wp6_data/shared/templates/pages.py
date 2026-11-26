@@ -48,9 +48,12 @@ def render_language_switch() -> str:
         + f">{lang.upper()}</a>"
         for lang in i18n.LANGS
     )
+    # The pill is an inner span: the group's ::before divider must stay
+    # outside it, otherwise the pill background paints over the divider and
+    # the group starts flush against the previous one.
     return (
         f'<div class="nav-group nav-lang" role="group" aria-label="{th("nav.language")}">'
-        f"{links}</div>"
+        f'<span class="lang-pill">{links}</span></div>'
     )
 
 
