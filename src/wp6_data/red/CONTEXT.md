@@ -76,7 +76,7 @@ The hours of light in a calendar day: natural light (outside radiation above 0 �
 _Lamp-hours the target needed_: the fewest whole lamp-hours that bring the day's sun to `light_target_jcm2` under the dark rule, the sun cut-off and the wake-up cost — the planner with every hour costing the same. Lamp-hours beyond it serve the longest-day rule.
 
 **Measuring spot**:
-Where LetsGrow measures the inside: one measuring box (air temperature, RH, CO₂) and one scale under one gutter section (weight, so transpiration). Lamps, pipes, vents and screen are set for the whole block. Everything the twin says about air and crop therefore rests on one spot while the actuators act everywhere; microclimates (walls, gables, under open vents, over the pipe rail) are invisible to it. The `/greenhouse` view greys the crop beyond a ring around the spot; the ring's radius is an illustration, not a measured representativeness. The box's real position is not logged.
+Where LetsGrow measures the inside: one measuring box (air temperature, RH, CO₂) and one scale under one gutter section (weight, so transpiration). Lamps, pipes, vents and screen are set for the whole block. Everything the twin says about air and crop therefore rests on one spot while the actuators act everywhere; microclimates (walls, gables, under open vents, over the pipe rail) are invisible to it. The `/greenhouse` view greys the crop beyond a radius around the spot (in the overview and the sensors' view); the radius is an illustration, not a measured representativeness. The box's real position is not logged.
 _Avoid_: reading a greenhouse temperature as the block's temperature.
 
 **Position**:

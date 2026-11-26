@@ -154,13 +154,15 @@ references:
       Sensors 20(22):6474.
     url: https://doi.org/10.3390/s20226474
     checked: abstract  # 20-node grid in a commercial tomato greenhouse: horizontal T/RH differences
-  wur_wireless:
-    label: WUR, wireless sensors
+  balendonck2014:
+    label: Balendonck et al. 2014
     cite: >-
-      Wageningen University & Research. A better greenhouse climate thanks to wireless sensors
-      (106 ventilated sensors at crop height to find warm, cold and humid spots).
-    url: https://www.wur.nl/en/research-results/show/a-better-greenhouse-climate-thanks-to-wireless-sensors.htm
-    checked: record
+      Balendonck J., Sapounas A.A., Kempkes F., van Os E.A., van der Schoor R., van Tuijl B.A.J.,
+      Keizer L.C.P. (2014). Using a wireless sensor network to determine climate heterogeneity of
+      a greenhouse environment. Acta Horticulturae 1037:539–546 (100 wireless sensors in six
+      commercial greenhouses: hot and cold spots, ±2 °C and ±12.5% RH over five days).
+    url: https://doi.org/10.17660/ActaHortic.2014.1037.67
+    checked: abstract
   fao56:
     label: Allen et al. 1998 (FAO-56)
     cite: >-
@@ -180,8 +182,8 @@ footnotes:
     humid_h: [korner2003]
     radiation: [vanhoogdalem2022]
     wind: [vanthoor2011a]
-    t_in: [rezvani2020, wur_wireless]
-    sensors: [rezvani2020, wur_wireless]
+    t_in: [rezvani2020, balendonck2014]
+    sensors: [rezvani2020, balendonck2014]
     lamp_power: [katzin2021, kusuma2020]
     light_sum: [flinterman2015, marcelis2006]
     day_length: [velezramirez2014, dueck2007]
