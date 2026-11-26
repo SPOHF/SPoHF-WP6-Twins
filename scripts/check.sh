@@ -2,8 +2,8 @@
 # The validation gate: lint, unit tests, then e2e against the local containers.
 #
 # A script rather than a sequence to remember, because the half most easily
-# forgotten is the half that matters most. CI's `build` job has `needs: check`
-# and `check` runs e2e, so an e2e failure blocks the image push outright --
+# forgotten is the half that matters most. CI's `build` job needs the `e2e`
+# job, so an e2e failure blocks the image push outright --
 # leaving it out locally trades ~50s for a blocked push and a round trip to
 # find out why.
 #

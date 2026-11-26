@@ -20,7 +20,10 @@ env:
   IMAGE_NAME: spohf/wp6-data
 
 jobs:
-  check:
+  # Lint + unit tests need no backing services (unit tests never touch the
+  # DB or object store), so they run in their own job in parallel with e2e
+  # instead of paying for service startup and waiting on it.
+  lint-unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -31,9 +34,6 @@ jobs:
       - name: Set up Python
         run: uv python install
 
-      - name: Start backing services (TimescaleDB + object store)
-        run: docker compose -f docker-compose.tsdb.yml up -d
-
       - name: Install dependencies
         run: uv sync --extra dev
 
@@ -43,37 +43,27 @@ jobs:
       - name: Run unit tests
         run: uv run pytest tests/
 
-      - name: Wait for TimescaleDB ready
-        run: |
-          for i in {1..30}; do
-            if docker compose -f docker-compose.tsdb.yml exec -T timescaledb \
-                 psql -U wp6_red -d wp6_red -c 'SELECT 1' >/dev/null 2>&1; then
-              echo "TimescaleDB ready after ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "TimescaleDB did not become ready in time"
-          docker compose -f docker-compose.tsdb.yml logs
-          exit 1
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
 
-      - name: Wait for object store ready
-        run: |
-          for i in {1..30}; do
-            if [ "$(docker inspect --format '{{.State.Health.Status}}' \
-                 "$(docker compose -f docker-compose.tsdb.yml ps -q s3mock)" \
-                 2>/dev/null)" = "healthy" ]; then
-              echo "Object store ready after ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Object store did not become ready in time"
-          docker compose -f docker-compose.tsdb.yml logs s3mock
-          exit 1
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: uv python install
+
+      # --wait blocks on both services' healthchecks, replacing the old
+      # poll loops; scripts/check.sh already relies on it.
+      - name: Start backing services (TimescaleDB + object store)
+        run: docker compose -f docker-compose.tsdb.yml up -d --wait
+
+      - name: Install dependencies
+        run: uv sync --extra dev
 
       - name: Run e2e tests
-        run: uv run pytest tests/e2e/ -v --tb=short
+        run: uv run pytest tests/e2e/ -v --tb=short --durations=20
 
       - name: Dump service logs on failure
         if: failure()
@@ -84,7 +74,7 @@ jobs:
         run: docker compose -f docker-compose.tsdb.yml down -v
 
   build:
-    needs: check
+    needs: [lint-unit, e2e]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:

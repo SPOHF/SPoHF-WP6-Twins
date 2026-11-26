@@ -73,8 +73,8 @@ uv run pytest                  # Unit tests (pyproject's addopts skips tests/e2e
 uv run pytest tests/e2e/ -v    # E2E tests (starts from docker-compose.tsdb.yml)
 ```
 
-Run `./scripts/check.sh` before pushing. CI's `build` job has `needs: check`
-and `check` runs e2e, so an e2e failure blocks the image push — and `uv run
+Run `./scripts/check.sh` before pushing. CI's `build` job needs both the
+`lint-unit` and `e2e` jobs, so an e2e failure blocks the image push — and `uv run
 pytest` alone does not cover it. The e2e suite uses its own `wp6_blue_e2e` /
 `wp6_red_e2e` databases, created on first run, so it leaves local dev data
 alone and needs no dashboard running.

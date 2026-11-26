@@ -98,7 +98,7 @@ async def test_tsdb_device_is_exported_wide(red_pool):
     assert df.loc[0, "time"] == "2026-10-15 12:00:00+00:00"
 
 
-async def test_tsdb_export_pivots_across_timestamps_and_pages(red_pool):
+async def test_tsdb_export_pivots_across_timestamps_and_pages(red_pool, monkeypatch):
     """The streaming pivot: multiple timestamps interleaved with tags come
     out as one wide row per timestamp, and a page boundary mid-device does
     not split or drop rows. 5-min steps from 2026-10-15 stay inside one
@@ -106,6 +106,11 @@ async def test_tsdb_export_pivots_across_timestamps_and_pages(red_pool):
     collapses 24 local stamps onto existing UTC rows by design (the dedup
     index), so the expected row count is the number of distinct UTC
     instants, computed here rather than hard-coded."""
+    # Shrink the page so the test stays fast: what matters is crossing page
+    # boundaries mid-device, not the absolute row count. At the production
+    # page size this inserted 401k rows through the per-row upsert and alone
+    # took ~90s -- two thirds of the whole e2e suite in CI.
+    monkeypatch.setattr(export, "_TSDB_EXPORT_PAGE", 500)
     pool, store = red_pool
     n = 2 * export._TSDB_EXPORT_PAGE + 500  # crosses two page boundaries
     base = datetime(2026, 10, 15, 12, 0)  # naive local, Amsterdam CEST = UTC+2
