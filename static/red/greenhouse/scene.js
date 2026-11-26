@@ -54,7 +54,7 @@ const FPS_MOVING = 60, FPS_AMBIENT = 30, AMBIENT_IDLE_S = 10;
 export const LAYOUT = { L, Z0, GUTTER, LAMP_Y, ROW_PITCH, ZONE, MICRO };
 
 
-function seeded(seed) {
+export function seeded(seed) {
   let s = seed >>> 0;
   return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
 }
@@ -505,7 +505,9 @@ export class GreenhouseScene {
     this.leafMat = leafMat;
     this._part('crop').materials.push(stemMat, fruitMat);
     this.plantZs = zs;
-    this.fruits = fruits;  // in truss order: each truss's fruits are consecutive instances
+    // in truss order: each truss's fruits are perTruss consecutive instances
+    fruits.userData.perTruss = perTruss;
+    this.fruits = fruits;
   }
 
   _buildSubstrate() {

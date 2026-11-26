@@ -1174,5 +1174,7 @@ layerButtons();
 const params = new URLSearchParams(window.location.search);
 if (params.get('metric') in MICRO_HUE) ui.metric = params.get('metric');
 if (params.get('mode') === 'micro') select('microclimate');
+// a concept demo, fetched only when asked for
+if (params.has('wirescout')) import('./wirescout.js').then((m) => m.start(scene));
 loadDay(params.get('date'), params.get('t'));
 renderTomorrow();

@@ -1,0 +1,64 @@
+/* WireScout concept demo (/greenhouse?wirescout): loaded by wirescout.js only. */
+
+/* a detection's tag over its box; --ws-c is the class colour */
+.ws-tag { padding: 0.05rem 0.4rem; border: 1px solid var(--ws-c, var(--gh-line)); border-radius: 6px;
+          background: var(--gh-glass); color: var(--gh-ink); font-size: 0.68rem; font-weight: 600;
+          line-height: 1.3; white-space: nowrap; pointer-events: none; }
+
+/* a problem found (pest, fungus, disease): louder, and it pulses */
+.ws-alert { display: flex; flex-direction: column; align-items: flex-start; gap: 0.05rem;
+            padding: 0.25rem 0.55rem; border-width: 2px; background: rgba(120, 30, 10, 0.88);
+            font-size: 0.78rem; box-shadow: 0 0 0 0 var(--ws-c); animation: ws-alert 1.1s ease-out infinite; }
+.ws-alert strong { color: #fff; font-size: 0.86rem; letter-spacing: 0.02em; }
+.ws-alert span { color: #ffd6c2; font-weight: 500; }
+@keyframes ws-alert { 0% { box-shadow: 0 0 0 0 var(--ws-c); } 100% { box-shadow: 0 0 0 10px transparent; } }
+@media (prefers-reduced-motion: reduce) { .ws-alert { animation: none; } }
+
+/* the card: in place of the outdoor readouts while the demo runs */
+.gh-viewer.ws-on .gh-hud-left { display: none; }
+.ws-card { position: absolute; top: 0.8rem; left: 0.8rem; z-index: 4; width: min(20rem, calc(100% - 1.6rem));
+           max-height: calc(100% - 9.5rem); overflow-y: auto; padding: 0.6rem 0.75rem 0.55rem;
+           border: 1px solid var(--gh-line); border-radius: 12px; background: var(--gh-glass);
+           backdrop-filter: blur(8px); color: var(--gh-ink); font-size: 0.74rem; line-height: 1.35; }
+.ws-card button { width: auto; margin: 0; box-shadow: none; }
+.ws-head { display: flex; align-items: baseline; gap: 0.45rem; }
+.ws-head strong { font-size: 0.95rem; }
+.ws-head span { color: var(--gh-ink-2); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.ws-x { margin-left: auto !important; padding: 0 0.4rem; border: 1px solid var(--gh-line); border-radius: 6px;
+        background: transparent; color: var(--gh-ink); font-size: 0.9rem; line-height: 1.4; }
+.ws-x:hover { border-color: var(--gh-accent); }
+.ws-note { margin: 0.2rem 0 0.5rem; color: var(--gh-ink-2); font-size: 0.68rem; }
+.ws-status { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-bottom: 0.4rem;
+             font-variant-numeric: tabular-nums; }
+.ws-stage { padding: 0.05rem 0.45rem; border-radius: 999px; background: rgba(255, 255, 255, 0.1); font-weight: 600; }
+.ws-stage[data-stage="measuring"] { background: rgba(255, 233, 168, 0.22); }
+.ws-stage[data-stage="sending"] { background: rgba(110, 224, 122, 0.25); }
+.ws-stage[data-stage="charging"] { background: rgba(77, 255, 122, 0.18); }
+.ws-batt { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.5rem; font-variant-numeric: tabular-nums; }
+.ws-batt i { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+.ws-batt b { display: block; height: 100%; background: #4dff7a; transition: width 0.3s; }
+.ws-sub { color: var(--gh-ink-2); font-size: 0.68rem; margin-bottom: 0.15rem; }
+.ws-tally { display: flex; gap: 0.7rem; margin-bottom: 0.3rem; font-variant-numeric: tabular-nums; }
+.ws-tally i { display: inline-block; width: 0.55rem; height: 0.55rem; margin-right: 0.25rem; border-radius: 50%; }
+/* Pico colours a <ul> with the page's text colour (dark in light mode): set the card's own */
+.ws-problems { margin: 0 0 0.5rem; padding: 0; list-style: none; color: var(--gh-ink); }
+.ws-problems li { margin: 0 0 0.15rem; padding: 0.15rem 0.4rem; border-left: 3px solid #f47230; border-radius: 4px;
+                  background: rgba(120, 30, 10, 0.55); list-style: none; }
+.ws-problems li.ws-none { border-left-color: var(--gh-line); background: transparent; color: var(--gh-ink-2); }
+.ws-problems strong { color: #fff; }
+.ws-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.ws-foot span { color: var(--gh-ink-2); font-size: 0.64rem; font-style: italic; }
+.ws-chip { padding: 0.15rem 0.6rem; border: 1px solid var(--gh-line); border-radius: 999px;
+           background: transparent; color: var(--gh-ink); font-size: 0.7rem; }
+.ws-chip.is-on { border-color: var(--gh-accent); background: rgba(63, 167, 255, 0.2); }
+
+/* the panel: the temperature section, in place of the page's own panel */
+.gh-stage.ws-on > #gh-panel { display: none; }
+.ws-res { margin: 0.2rem 0 0.4rem; font-size: 0.78rem; }
+.ws-panel tr.is-now td { background: rgba(244, 114, 48, 0.14); font-weight: 600; }
+.ws-panel .ws-xs { grid-template-rows: 120px auto; }
+.ws-row h4 { display: flex; align-items: baseline; gap: 0.5rem; margin: 0.7rem 0 0.2rem; }
+.ws-live { display: none; color: #f47230; font-size: 0.72rem; font-weight: 600; }
+.ws-row.is-live .ws-live { display: inline; animation: ws-blink 1.4s ease-in-out infinite; }
+@keyframes ws-blink { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .ws-row.is-live .ws-live { animation: none; } }
