@@ -71,6 +71,9 @@ greenhouse:
     no_data: Geen LetsGrow-gegevens voor deze dag.
     no_forecast: De stralingsvoorspelling kon niet worden opgehaald.
     forecast_short: De voorspelling reikt nog niet tot morgen.
+    wire_not_installed: "Meerhoogtesensor {wire} staat in de rij maar is niet geïnstalleerd: zijn kolom blijft leeg."
+    wire_not_placed: "Geïnstalleerd maar niet in de rij geplaatst, dus niet getekend: {wires}."
+    no_wire_data: Geen metingen van de meerhoogtesensoren voor deze dag.
 
   pipe:
     lg_pipe_lower: Buisrail (ondernet)
@@ -146,6 +149,12 @@ greenhouse:
     pipes:
       title: Verwarmingsbuizen
       value: ⌀ {diameter_mm} mm, {length:g} m per m² vloer
+    microclimate:
+      title: Meerhoogtesensoren
+      runs: {label: De rij loopt, along_rows: langs de gewasrijen, across_rows: dwars op de gewasrijen}
+      wire_unit: m langs de rij
+      height: H{h}
+      height_unit: m boven de vloer
     crop_water:
       title: Gewaswater
       scale_area_m2: {label: Gewas op de weegschaal, unit: m²}
@@ -525,6 +534,29 @@ greenhouse:
       how: Uren op vol vermogen, opgeteld over de dag.
       source: "{lg}"
       read: Vergelijk met de lampuren die het lichtdoel nodig had.
+    microclimate:
+      title: Microklimaat langs de rij
+      how: >-
+        Drie meerhoogtesensoren hangen in één rij en meten elk temperatuur, luchtvochtigheid,
+        CO₂ en PAR op vijf hoogtes, van het substraat tot net boven het gewas. Het VPD
+        wordt gevormd uit de temperatuur en vochtigheid van elke afzonderlijke meting. Een
+        stap van 15 minuten is het gemiddelde van de metingen erin. Tussen de sensoren wordt
+        de kleur rechtlijnig geïnterpoleerd, langs de rij en in de hoogte apart: in kassen
+        groeit het temperatuurverschil tussen twee plekken ongeveer lineair met hun
+        afstand[^balendonck2014], en daarvoor is een rechte lijn de beste schatting. Buiten
+        de buitenste sensoren wordt niets getekend, en een vak naast een ontbrekende meting
+        wordt gearceerd in plaats van gevuld.
+      source: >-
+        De meerhoogtesensoren zelf, niet LetsGrow: ze melden vaker en eerder. Hun afstand
+        langs de rij en hun hoogtes zijn [ingesteld](cfg:microclimate), nog niet ter plekke
+        gemeten.
+      read: >-
+        De punten zijn metingen; de kleur ertussen is een hulpmiddel voor het oog, geen
+        gemeten veld. De kleuren beslaan de metingen van het getoonde moment en laten zo
+        zien waar de lucht op dat moment verschilt; ze beslaan nooit minder dan de
+        spreiding die de twin noemenswaardig vindt, zodat sensoren die binnen hun
+        nauwkeurigheid overeenkomen er hetzelfde uitzien. Vergelijk momenten via de
+        getallen in de legenda, niet via de kleuren.
     sensors:
       title: Wat er waar gemeten wordt
       how: >-
@@ -696,6 +728,7 @@ greenhouse:
       residual: Opgeslagen / onverklaard
     scope:
       spot: Op één plek gemeten
+      row: Gemeten langs één rij
       block: Hele blok
       outside: Buiten
       model: Berekend
@@ -795,6 +828,21 @@ greenhouse:
     cause:
       lamps: lampen
       sunrise: zonsopkomst
+    micro:
+      mode: Microklimaat
+      title: Microklimaat langs de rij
+      metric: {temp: Temperatuur, hum: Luchtvochtigheid, vpd: VPD, co2: CO₂, par: PAR}
+      no_reading: geen meting
+      at_point: "≈ {value} op {along} m langs de rij, {height} m hoog"
+      at_node: "{wire} H{h}: {value}, gemeten"
+      along: langs de rij, m
+      height: hoogte, m
+      coverage: "{wire}: {share} zoveel metingen als de meest complete meerhoogtesensor"
+      loading: Meerhoogtesensoren laden…
+      failed: "Meerhoogtesensoren niet beschikbaar: {error}"
+      no_step: Geen metingen van de meerhoogtesensoren om {time}.
+      hover: Beweeg over de doorsnede voor waarden tussen de sensoren.
+      measured_at: Gemeten om {time}
     sensors:
       legend_spot: "staat voor de plek in de gearceerde ring: de tweeling neemt aan dat het hele blok zich zo gedraagt."
       legend_block: instellingen werken overal tegelijk.

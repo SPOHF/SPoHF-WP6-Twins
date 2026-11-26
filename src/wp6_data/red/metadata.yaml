@@ -332,6 +332,20 @@ greenhouse:
     vent_open_pct: 10         # vents count as open above this
     dry_rh: 85                # below this, venting is not for humidity
     co2_lamp_floor_ppm: 600   # CO₂ in lamp hours below this flags light-use
+  # The multi-height wires as one vertical cross-section of the house (the
+  # page's microclimate mode). ASSUMED geometry, awaiting a site measurement:
+  # the wires hang in one row roughly 10-15 m apart, and the sensor heights are
+  # spread evenly from the substrate (H5) to just above the canopy (H1). The
+  # page interpolates between these points in metres, so retuning is a YAML
+  # edit. Which wires are installed still comes from upstream's map.
+  microclimate:
+    runs: along_rows          # the row of wires follows the crop rows
+    wires:                    # list order = order along the row
+      - {id: WS_01_02, at_m: 0}
+      - {id: WS_01_03, at_m: 12.5}
+      - {id: WS_01_01, at_m: 25}
+    heights_m: {1: 4.0, 2: 3.2, 3: 2.4, 4: 1.6, 5: 0.8}
+    metrics: [temp, hum, vpd, co2, par]
   # Where each number above comes from, as the /greenhouse page shows it next to
   # the value ("configured" popups): calibrated on red's data, literature,
   # assumed, the grower's own figure or rule, or a threshold the twin chose.
@@ -361,6 +375,9 @@ greenhouse:
     advice.vent_open_pct: twin
     advice.dry_rh: twin
     advice.co2_lamp_floor_ppm: twin
+    microclimate.runs: assumed
+    microclimate.wires: assumed
+    microclimate.heights_m: assumed
 
 sensor_defaults:
   temp:

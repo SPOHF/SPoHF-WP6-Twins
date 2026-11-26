@@ -73,6 +73,9 @@ greenhouse:
     no_data: No LetsGrow data for this day.
     no_forecast: The radiation forecast could not be fetched.
     forecast_short: The forecast does not cover tomorrow yet.
+    wire_not_installed: "Multi-height sensor {wire} is placed in the row but not installed: its column stays empty."
+    wire_not_placed: "Installed but not placed in the row, so not drawn: {wires}."
+    no_wire_data: No multi-height sensor readings for this day.
 
   pipe:
     lg_pipe_lower: Pipe rail (lower circuit)
@@ -150,6 +153,12 @@ greenhouse:
     pipes:
       title: Heating pipes
       value: ⌀ {diameter_mm} mm, {length:g} m per m² floor
+    microclimate:
+      title: Multi-height sensors
+      runs: {label: The row runs, along_rows: along the crop rows, across_rows: across the crop rows}
+      wire_unit: m along the row
+      height: H{h}
+      height_unit: m above the floor
     crop_water:
       title: Crop water
       scale_area_m2: {label: Crop on the scale, unit: m²}
@@ -525,6 +534,28 @@ greenhouse:
       how: Hours at full output summed over the day.
       source: "{lg}"
       read: Compare with the lamp-hours the light target needed.
+    microclimate:
+      title: Microclimate along the row
+      how: >-
+        Three multi-height sensors hang in one row, each measuring temperature, humidity,
+        CO₂ and PAR at five heights, from the substrate to just above the canopy. VPD is
+        formed from each reading's own temperature and humidity. A 15-minute step is the
+        mean of the readings in it. Between the sensors the colour is interpolated in
+        straight lines, along the row and up the canopy separately: in greenhouses, the
+        temperature difference between two places grows about linearly with their
+        distance[^balendonck2014], and for that a straight line is the best guess. Nothing
+        is drawn beyond the outer sensors, and a square next to a missing reading is
+        hatched instead of filled.
+      source: >-
+        The multi-height sensors themselves, not LetsGrow: they report more often and
+        arrive sooner. Their spacing along the row and their heights are
+        [configured](cfg:microclimate), not yet measured on site.
+      read: >-
+        The dots are measurements; the colour between them is a visual aid, not a measured
+        field. The colours span the readings of the moment shown, so they show where the
+        air differs right then; they never span less than the spread the twin counts as
+        notable, so sensors agreeing within their accuracy look alike. Compare moments by
+        the numbers on the key, not by the colours.
     sensors:
       title: What is measured where
       how: >-
@@ -700,6 +731,7 @@ greenhouse:
       residual: Stored / unexplained
     scope:
       spot: Measured at one spot
+      row: Measured along one row
       block: Whole block
       outside: Outside
       model: Calculated
@@ -799,6 +831,21 @@ greenhouse:
     cause:
       lamps: lamps
       sunrise: sunrise
+    micro:
+      mode: Microclimate
+      title: Microclimate along the row
+      metric: {temp: Temperature, hum: Humidity, vpd: VPD, co2: CO₂, par: PAR}
+      no_reading: no reading
+      at_point: "≈ {value} at {along} m along the row, {height} m high"
+      at_node: "{wire} H{h}: {value}, measured"
+      along: along the row, m
+      height: height, m
+      coverage: "{wire}: {share} as many readings as the best-reporting multi-height sensor"
+      loading: Loading the multi-height sensors…
+      failed: "Multi-height sensors unavailable: {error}"
+      no_step: No multi-height readings at {time}.
+      hover: Hover the section for values between the sensors.
+      measured_at: Measured at {time}
     sensors:
       legend_spot: "stands for the place in the shaded ring: the twin assumes the whole block behaves like it."
       legend_block: settings act everywhere at once.

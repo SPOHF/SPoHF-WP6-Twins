@@ -10,6 +10,7 @@ metric.
 
 - ``spot``: measured at one place in the block (the measuring box, the scale) —
   microclimates elsewhere in the block can differ;
+- ``row``: measured at several heights along one row (the multi-height sensors);
 - ``block``: an actuator's setting, the same for the whole block;
 - ``outside``: the weather station on the roof;
 - ``model``: calculated by the balance from the others;
@@ -87,11 +88,13 @@ ENTRIES: dict[str, tuple[str, list[tuple[str, list[str]]]]] = {
     "heat_mj": ("model", []),
     "lamp_h": ("block", [("lamps", _LAMP_TAGS)]),
     "sensors": ("spot", []),
+    "microclimate": ("row", []),
 }
 
 #: What each "configured" popup lists: the setting's path and its number format.
 #: Labels and units live in the catalogue (``greenhouse.cfg.<group>.<field>``);
-#: the ventilation curve, the lamps' power and the pipes add rows of their own.
+#: the ventilation curve, the lamps' power, the pipes and the wires' row add rows
+#: of their own.
 CONFIG_GROUPS: dict[str, list[tuple[str, str]]] = {
     "cover": [
         ("cover.transmission", ".0%"),
@@ -125,6 +128,7 @@ CONFIG_GROUPS: dict[str, list[tuple[str, str]]] = {
         ("advice.dry_rh", "g"),
         ("advice.co2_lamp_floor_ppm", "g"),
     ],
+    "microclimate": [],
 }
 PROVENANCE = ("calibrated", "literature", "assumed", "grower", "twin")
 
@@ -235,7 +239,8 @@ def _row(label: str, number: str, unit: str, source: str) -> dict[str, str]:
 
 
 def _extra_rows(group: str, cfg: GreenhouseConfig) -> list[dict[str, str]]:
-    """Rows that are not one setting each: the vent curve, the lamps' power, the pipes."""
+    """Rows that are not one setting each: the vent curve, the lamps' power, the pipes,
+    the multi-height sensors' row."""
     if group == "ventilation":
         v = cfg.ventilation
         return [
@@ -265,6 +270,34 @@ def _extra_rows(group: str, cfg: GreenhouseConfig) -> list[dict[str, str]]:
                 cfg.source_of("pipes"),
             )
             for p in cfg.pipes
+        ]
+    if group == "microclimate":
+        mc = cfg.microclimate
+        return [
+            _row(
+                t(f"{CFG}.microclimate.runs.label"),
+                t(f"{CFG}.microclimate.runs.{mc.runs}"),
+                "",
+                cfg.source_of("microclimate.runs"),
+            ),
+            *(
+                _row(
+                    w.id,
+                    i18n.number(w.at_m, "g"),
+                    t(f"{CFG}.microclimate.wire_unit"),
+                    cfg.source_of("microclimate.wires"),
+                )
+                for w in mc.wires
+            ),
+            *(
+                _row(
+                    t(f"{CFG}.microclimate.height", h=h),
+                    i18n.number(m, "g"),
+                    t(f"{CFG}.microclimate.height_unit"),
+                    cfg.source_of("microclimate.heights_m"),
+                )
+                for h, m in sorted(mc.heights_m.items())
+            ),
         ]
     return []
 

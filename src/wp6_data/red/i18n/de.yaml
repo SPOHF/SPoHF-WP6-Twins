@@ -71,6 +71,9 @@ greenhouse:
     no_data: Keine LetsGrow-Daten für diesen Tag.
     no_forecast: Die Strahlungsvorhersage konnte nicht abgerufen werden.
     forecast_short: Die Vorhersage reicht noch nicht bis morgen.
+    wire_not_installed: "Mehrhöhensensor {wire} ist in der Reihe eingeplant, aber nicht installiert: seine Spalte bleibt leer."
+    wire_not_placed: "Installiert, aber nicht in der Reihe platziert und daher nicht gezeichnet: {wires}."
+    no_wire_data: Keine Messwerte der Mehrhöhensensoren für diesen Tag.
 
   pipe:
     lg_pipe_lower: Rohrschiene (Untenheizung)
@@ -146,6 +149,12 @@ greenhouse:
     pipes:
       title: Heizungsrohre
       value: ⌀ {diameter_mm} mm, {length:g} m pro m² Grundfläche
+    microclimate:
+      title: Mehrhöhensensoren
+      runs: {label: Die Reihe verläuft, along_rows: entlang der Pflanzenreihen, across_rows: quer zu den Pflanzenreihen}
+      wire_unit: m entlang der Reihe
+      height: H{h}
+      height_unit: m über dem Boden
     crop_water:
       title: Wasser des Bestands
       scale_area_m2: {label: Bestand auf der Waage, unit: m²}
@@ -531,6 +540,29 @@ greenhouse:
       how: Stunden bei voller Leistung, über den Tag summiert.
       source: "{lg}"
       read: Vergleichen Sie mit den Lampenstunden, die das Lichtziel brauchte.
+    microclimate:
+      title: Mikroklima entlang der Reihe
+      how: >-
+        Drei Mehrhöhensensoren hängen in einer Reihe und messen jeweils Temperatur,
+        Luftfeuchte, CO₂ und PAR in fünf Höhen, vom Substrat bis knapp über den Bestand.
+        Das VPD wird aus Temperatur und Feuchte jeder einzelnen Messung gebildet. Ein
+        15-Minuten-Schritt ist der Mittelwert der Messungen darin. Zwischen den Sensoren
+        wird die Farbe geradlinig interpoliert, entlang der Reihe und in der Höhe getrennt:
+        In Gewächshäusern wächst der Temperaturunterschied zwischen zwei Orten etwa linear
+        mit ihrem Abstand[^balendonck2014], und dafür ist eine Gerade die beste Schätzung.
+        Jenseits der äußeren Sensoren wird nichts gezeichnet, und ein Feld neben einer
+        fehlenden Messung wird schraffiert statt gefüllt.
+      source: >-
+        Die Mehrhöhensensoren selbst, nicht LetsGrow: Sie melden häufiger und früher. Ihr
+        Abstand entlang der Reihe und ihre Höhen sind [konfiguriert](cfg:microclimate),
+        noch nicht vor Ort vermessen.
+      read: >-
+        Die Punkte sind Messungen; die Farbe dazwischen ist eine Sehhilfe, kein gemessenes
+        Feld. Die Farben umfassen die Messwerte des gezeigten Moments und zeigen so, wo
+        sich die Luft gerade unterscheidet; sie umfassen nie weniger als die Spanne, die
+        der Zwilling für nennenswert hält, sodass Sensoren, die im Rahmen ihrer
+        Genauigkeit übereinstimmen, gleich aussehen. Momente vergleicht man über die Zahlen
+        der Legende, nicht über die Farben.
     sensors:
       title: Was wo gemessen wird
       how: >-
@@ -706,6 +738,7 @@ greenhouse:
       residual: Gespeichert / ungeklärt
     scope:
       spot: An einem Ort gemessen
+      row: Entlang einer Reihe gemessen
       block: Ganzer Block
       outside: Außen
       model: Berechnet
@@ -805,6 +838,21 @@ greenhouse:
     cause:
       lamps: Lampen
       sunrise: Sonnenaufgang
+    micro:
+      mode: Mikroklima
+      title: Mikroklima entlang der Reihe
+      metric: {temp: Temperatur, hum: Luftfeuchte, vpd: VPD, co2: CO₂, par: PAR}
+      no_reading: kein Messwert
+      at_point: "≈ {value} bei {along} m entlang der Reihe, {height} m hoch"
+      at_node: "{wire} H{h}: {value}, gemessen"
+      along: entlang der Reihe, m
+      height: Höhe, m
+      coverage: "{wire}: {share} so viele Messwerte wie der vollständigste Mehrhöhensensor"
+      loading: Mehrhöhensensoren werden geladen…
+      failed: "Mehrhöhensensoren nicht verfügbar: {error}"
+      no_step: Keine Messwerte der Mehrhöhensensoren um {time}.
+      hover: Mit der Maus über den Schnitt fahren für Werte zwischen den Sensoren.
+      measured_at: Gemessen um {time}
     sensors:
       legend_spot: "steht für den Ort im schattierten Ring: Der Zwilling nimmt an, dass sich der ganze Block so verhält."
       legend_block: Einstellungen wirken überall zugleich.

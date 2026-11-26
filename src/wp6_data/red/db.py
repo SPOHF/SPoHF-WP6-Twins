@@ -186,13 +186,22 @@ def wire_physical_id(device_id: str) -> str:
     return re.sub(r"-h\d+$", "", device_id)
 
 
+# Measurements a wire sensor can only ever read above zero. A CO₂ sensor sends 0
+# when it has no reading (WS_01_01's, from November 2026: one height all day,
+# the others in short dropouts); no greenhouse air holds 0 ppm, outdoor air
+# alone is ~420. PAR is not listed: 0 is the dark, a real reading.
+WIRE_POSITIVE_ONLY = frozenset({"co2"})
+
+
 def unpivot_wire_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Flatten wide ``wire_sensors`` rows into tidy long records.
 
     Each input row carries up to 20 height-indexed value columns; this emits one
     record per populated ``(measurement, height)`` cell. Empty cells (``None``)
     are skipped, so a height that never reports simply produces no points rather
-    than a fake zero line. Each height becomes its own virtual ``device``.
+    than a fake zero line; so is a value a sensor sends for "no reading" (see
+    :data:`WIRE_POSITIVE_ONLY`). Each height becomes its own virtual ``device``.
+    The raw CSV export reads the wide rows directly and keeps such values.
 
     Returns records with keys: device, height, measurement, time, value.
     """
@@ -202,14 +211,17 @@ def unpivot_wire_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for height in WIRE_DEVICE_HEIGHTS:
             for measurement in wire_height_measurements(height):
                 value = row.get(wire_column(measurement, height))
-                if value is not None:
-                    records.append({
-                        "device": wire_device_id(physical_id, height),
-                        "height": height,
-                        "measurement": measurement,
-                        "time": row["received_at"],
-                        "value": float(value),
-                    })
+                if value is None:
+                    continue
+                if measurement in WIRE_POSITIVE_ONLY and float(value) <= 0:
+                    continue
+                records.append({
+                    "device": wire_device_id(physical_id, height),
+                    "height": height,
+                    "measurement": measurement,
+                    "time": row["received_at"],
+                    "value": float(value),
+                })
     return records
 
 

@@ -161,6 +161,16 @@ references:
       (106 ventilated sensors at crop height to find warm, cold and humid spots).
     url: https://www.wur.nl/en/research-results/show/a-better-greenhouse-climate-thanks-to-wireless-sensors.htm
     checked: record
+  balendonck2014:
+    label: Balendonck et al., wireless sensor network
+    cite: >-
+      Balendonck J., Sapounas A., van Os E.A., van der Schoor R., van Tuijl B.A.J., Keizer
+      L.C.P. Using a wireless sensor network to determine climate heterogeneity of a greenhouse
+      environment. Wageningen UR (slides of the Acta Horticulturae 1037 paper): 100 sensors per
+      trial in six crops; temperature variance grows linearly with distance (Var ≈ 0.034 +
+      0.0024·d, 10-100 m).
+    url: https://edepot.wur.nl/179522
+    checked: full  # the variogram slide is what the microclimate interpolation leans on
   fao56:
     label: Allen et al. 1998 (FAO-56)
     cite: >-
@@ -182,6 +192,7 @@ footnotes:
     wind: [vanthoor2011a]
     t_in: [rezvani2020, wur_wireless]
     sensors: [rezvani2020, wur_wireless]
+    microclimate: [balendonck2014]
     lamp_power: [katzin2021, kusuma2020]
     light_sum: [flinterman2015, marcelis2006]
     day_length: [velezramirez2014, dueck2007]

@@ -73,14 +73,14 @@ def predict_natural_dli_from_weather(
     the attenuation factor and calls it model error.
 
     Args:
-        model: Trained two-stage light model
+        model: Trained light model (one weather fit; see ``red.dli.model``)
         forecasts: List of daily weather forecasts
         at_plant_level: Predict at the plant-level (under-lamp) position
         attenuation: The canopy/roof ratio to carry it down by — one number,
             or one per date (see ``red.lamp.attenuation_by_date``). A date
             without one, or ``None``, uses the model's fitted ratio.
 
-    Passes the features stage 1 was *fitted* on. Earlier this handed
+    Passes the features the weather fit was *fitted* on. Earlier this handed
     ``total_radiation`` — summed **shortwave**, i.e. direct + diffuse — to the
     ``direct_radiation_sum`` slot, left diffuse at zero and let cloud cover fall
     back to a hardcoded 50%, so two of three weather features were wrong and the

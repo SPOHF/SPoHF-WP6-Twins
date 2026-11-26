@@ -8,6 +8,8 @@ the endpoints below. Everything physical is computed here, in
   logged, every heat and vapour flow, the crop's activity and the advice.
 - ``/greenhouse/api/whatif`` — the same day under other vent, screen or lamp
   settings, as changes against what ran.
+- ``/greenhouse/api/microclimate`` — one local day of the multi-height wires,
+  laid out as a cross-section of the row (the page's microclimate mode).
 - ``/greenhouse/api/tomorrow`` — tomorrow's light: OpenMeteo's radiation
   forecast, its day length, and the lamp-hours the light target needs.
 
@@ -36,6 +38,14 @@ from wp6_data.red import deps
 from wp6_data.red.greenhouse import advice as A
 from wp6_data.red.greenhouse import day as D
 from wp6_data.red.greenhouse import explain
+from wp6_data.red.greenhouse.microclimate import build_microclimate_day
+from wp6_data.red.multi_height.config import load_uniformity_config
+from wp6_data.red.multi_height.data import (
+    day_window_utc,
+    latest_reporting_date,
+    load_wire_readings,
+)
+from wp6_data.red.wires import wire_ids
 from wp6_data.shared import i18n, render_page
 from wp6_data.shared.auth import verify_session_user
 from wp6_data.shared.i18n import t, th
@@ -49,6 +59,8 @@ THREE = "https://cdn.jsdelivr.net/npm/three@0.170.0"
 
 # A past day never changes once LetsGrow has delivered it.
 _days: TTLCache = TTLCache(maxsize=64, ttl=6 * 3600)
+# The wires keep reporting through the day, so their days are kept briefly.
+_micro: TTLCache = TTLCache(maxsize=64, ttl=300)
 
 
 def _asset(name: str) -> str:
@@ -145,6 +157,7 @@ async def greenhouse_page() -> str:
           <div class="gh-hud gh-hud-right" id="gh-hud-in"></div>
           <div class="gh-dial" id="gh-dial"></div>
           <div class="gh-layers" id="gh-layers" aria-label="{th("greenhouse.page.layers")}"></div>
+          <div class="gh-micro" id="gh-micro" hidden></div>
           <div class="gh-timeline" id="gh-timeline"></div>
         </div>
         <aside class="gh-panel" id="gh-panel" aria-live="polite"></aside>
@@ -203,6 +216,29 @@ async def greenhouse_day(date_: str | None = Query(None, alias="date")) -> JSONR
         }
         _days[key] = payload
     return JSONResponse(_days[key])
+
+
+@router.get("/greenhouse/api/microclimate")
+async def greenhouse_microclimate(date_: str | None = Query(None, alias="date")) -> JSONResponse:
+    """The multi-height wires on one day (default: the newest day any wire reported)."""
+    if deps.db is None:
+        raise HTTPException(status_code=503, detail="database not connected")
+    tz = _tz()
+    installed = await wire_ids()
+    latest = await latest_reporting_date(installed, tz) or datetime.now(ZoneInfo(tz)).date()
+    day = _parse_day(date_, latest)
+    key = (day, latest, i18n.current())
+    if key not in _micro:
+        start, end = day_window_utc(day, tz, 0)
+        df = await load_wire_readings(start, end)
+        # read per request, like the uniformity page: retuning stays a YAML edit
+        spans = load_uniformity_config(deps._METADATA_PATH).notable_spread
+        payload = build_microclimate_day(
+            df, deps.greenhouse.microclimate, installed, day, tz, spans
+        )
+        payload["range"] = {"latest": latest.isoformat()}
+        _micro[key] = payload
+    return JSONResponse(_micro[key])
 
 
 @router.get("/greenhouse/api/whatif")

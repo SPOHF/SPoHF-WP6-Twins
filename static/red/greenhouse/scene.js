@@ -23,6 +23,16 @@ const X0 = -W / 2, Z0 = -L / 2;
 // it is drawn mid-house; the ring's radius is an illustration, not a measured
 // representativeness.
 const ZONE = { x: 1.6, z: 0, r: 4.5 };
+// Where the row of multi-height sensors is drawn: centred in a path four rows
+// from the measuring box (along the rows), or across the rows at MICRO.z. Like
+// ZONE, a drawing position: the site has not said where the row hangs. The
+// spacing and heights along it are the configured metres.
+// ``band`` is how far either side of the row the microclimate is drawn: the two
+// crop rows that flank it.
+const MICRO = { x: ZONE.x - 4 * ROW_PITCH, z: -6, band: 1.6 };
+// The fog around that row: particles per m³ of the band, their size (m) and
+// opacity. Dense enough to read as a volume, thin enough to see the crop in it.
+const FOG_PER_M3 = 34, FOG_SIZE = 0.75, FOG_OPACITY = 0.42;
 
 
 function seeded(seed) {
@@ -46,9 +56,16 @@ export class GreenhouseScene {
     this.onHover = onHover || (() => {});
     this.pickables = [];
     this.parts = {};          // component -> { materials:[...], objects:[...] }
-    this.layers = { vapour: true, labels: true, roof: true, flows: true, zone: true };
-    // shared by every material outside which the block is greyed: x, z, radius, on
-    this.zoneU = { value: new THREE.Vector4(ZONE.x, ZONE.z, ZONE.r, 1) };
+    this.layers = { vapour: true, labels: true, roof: true, flows: true };
+    // Which crop a view is about, shared by every crop material (see _focused):
+    // the measuring box's ring (x, z, radius, on while the box is selected) and
+    // the multi-height sensors' row (on, axis 0: along z / 1: along x, where it
+    // sits across, the band's half-width; where it starts along, its length).
+    this.focusU = {
+      uGhZone: { value: new THREE.Vector4(ZONE.x, ZONE.z, ZONE.r, 0) },
+      uGhMicro: { value: new THREE.Vector4(0, 0, 0, MICRO.band) },
+      uGhMicroSpan: { value: new THREE.Vector2(0, 1) },
+    };
     this.selected = null;
     this.clock = new THREE.Clock();
     this.state = { vent: 0, ventWindSide: 1, ventLee: 0, ventWind: 0, lamps: 0, screen: 0,
@@ -173,12 +190,14 @@ export class GreenhouseScene {
     return obj;
   }
 
-  // Grey the material out beyond the measured zone (when the layer is on): the
-  // crop there is not measured, only assumed to behave like the measured spot.
-  _zoned(mat) {
-    const zone = this.zoneU;
+  // A crop material that fades to a ghost when a view is about other crop: the
+  // crop beyond the measuring box's ring while the box is selected, the crop
+  // away from the multi-height sensors' row in microclimate mode. Otherwise it
+  // is drawn as it is. A fixed share of its pixels is kept rather than blended,
+  // which keeps depth right without sorting thousands of instanced leaves.
+  _focused(mat) {
     mat.onBeforeCompile = (shader) => {
-      shader.uniforms.uGhZone = zone;
+      Object.assign(shader.uniforms, this.focusU);
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vGhPos;')
         .replace('#include <project_vertex>', `#include <project_vertex>
@@ -188,13 +207,24 @@ export class GreenhouseScene {
           #endif
           vGhPos = (modelMatrix * ghP).xyz;`);
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vGhPos;\nuniform vec4 uGhZone;')
-        .replace('#include <opaque_fragment>', `#include <opaque_fragment>
-          float ghOut = smoothstep(uGhZone.z, uGhZone.z + 1.4, length(vGhPos.xz - uGhZone.xy)) * uGhZone.w;
-          float ghL = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(ghL * 0.7 + 0.012), ghOut * 0.9);`);
+        .replace('#include <common>', `#include <common>
+          varying vec3 vGhPos;
+          uniform vec4 uGhZone;
+          uniform vec4 uGhMicro;
+          uniform vec2 uGhMicroSpan;`)
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+          float ghKeep = 1.0 - uGhZone.w * smoothstep(uGhZone.z, uGhZone.z + 1.4, length(vGhPos.xz - uGhZone.xy));
+          if (uGhMicro.x > 0.5) {
+            float along = uGhMicro.y < 0.5 ? vGhPos.z : vGhPos.x;
+            float across = uGhMicro.y < 0.5 ? vGhPos.x : vGhPos.z;
+            float beyond = max(uGhMicroSpan.x - along, along - uGhMicroSpan.x - uGhMicroSpan.y);
+            ghKeep = min(ghKeep, (1.0 - smoothstep(uGhMicro.w * 0.6, uGhMicro.w, abs(across - uGhMicro.z)))
+                                 * (1.0 - smoothstep(0.0, 1.0, beyond)));
+          }
+          float ghN = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+          if (ghN > mix(0.15, 1.0, ghKeep)) discard;`);
     };
-    mat.customProgramCacheKey = () => 'gh-zone';
+    mat.customProgramCacheKey = () => 'gh-focus';
     return mat;
   }
 
@@ -257,11 +287,11 @@ export class GreenhouseScene {
     this.walls = walls;
     // floor: white ground cloth and a concrete main path
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, L),
-      this._zoned(new THREE.MeshStandardMaterial({ color: 0xe6e9e2, roughness: 0.95 })));
+      new THREE.MeshStandardMaterial({ color: 0xe6e9e2, roughness: 0.95 }));
     floor.rotation.x = -Math.PI / 2; floor.position.y = 0.01; floor.receiveShadow = true;
     g.add(floor);
     const path = new THREE.Mesh(new THREE.PlaneGeometry(W, 1.6),
-      this._zoned(new THREE.MeshStandardMaterial({ color: 0xb9bcbf, roughness: 0.9 })));
+      new THREE.MeshStandardMaterial({ color: 0xb9bcbf, roughness: 0.9 }));
     path.rotation.x = -Math.PI / 2; path.position.set(0, 0.015, Z0 + 0.8); path.receiveShadow = true;
     g.add(path);
     this.scene.add(g);
@@ -310,14 +340,14 @@ export class GreenhouseScene {
     for (let z = Z0 + 2.2; z < -Z0 - 0.6; z += PLANT_PITCH) zs.push(z);
     const nPlants = rows.length * zs.length;
     const rnd = seeded(42);
-    const leafMat = this._zoned(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, metalness: 0,
+    const leafMat = this._focused(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, metalness: 0,
       side: THREE.DoubleSide }));
     const perPlant = 11;
     const leaves = new THREE.InstancedMesh(this._leafGeometry(), leafMat, nPlants * perPlant);
-    const stemMat = this._zoned(new THREE.MeshStandardMaterial({ color: 0x5f7f33, roughness: 0.8 }));
+    const stemMat = this._focused(new THREE.MeshStandardMaterial({ color: 0x5f7f33, roughness: 0.8 }));
     const stems = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.011, 0.016, 3.5, 5), stemMat, nPlants);
     const fruitGeo = new THREE.IcosahedronGeometry(0.05, 1);
-    const fruitMat = this._zoned(new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.28, metalness: 0,
+    const fruitMat = this._focused(new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.28, metalness: 0,
       clearcoat: 0.6, clearcoatRoughness: 0.3 }));
     const trusses = 3, perTruss = 5;
     const fruits = new THREE.InstancedMesh(fruitGeo, fruitMat, nPlants * trusses * perTruss);
@@ -378,8 +408,8 @@ export class GreenhouseScene {
 
   _buildSubstrate() {
     const rows = this._rows();
-    const slabMat = this._zoned(new THREE.MeshStandardMaterial({ color: 0xf4f6f6, roughness: 0.6 }));
-    const gutterMat = this._zoned(new THREE.MeshStandardMaterial({ color: 0x9aa3ab, metalness: 0.6, roughness: 0.4 }));
+    const slabMat = new THREE.MeshStandardMaterial({ color: 0xf4f6f6, roughness: 0.6 });
+    const gutterMat = new THREE.MeshStandardMaterial({ color: 0x9aa3ab, metalness: 0.6, roughness: 0.4 });
     const len = -Z0 * 2 - 2.8;
     for (const x of rows) {
       const gut = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.06, len), gutterMat);
@@ -772,6 +802,8 @@ export class GreenhouseScene {
   // ---------------------------------------------------------------- public
   select(name) {
     this.selected = name;
+    // the measuring box speaks for its surroundings only: the rest fades
+    this.focusU.uGhZone.value.w = name === 'sensors' ? 1 : 0;
     this._highlight();
     if (name) for (const a of Object.values(this.flowArrows)) a.visible = false;
     else if (this._last) this.update(this._last);
@@ -781,6 +813,7 @@ export class GreenhouseScene {
       crop: [[-4, 3.2, -22], [-8, 2.2, -12]], substrate: [[-5, 1.6, -21], [-9, 0.8, -14]],
       weather: [[34, 8, -32], [22, 7, -22]], cover: [[44, 26, 40], [0, 4, 0]],
       sensors: [[ZONE.x + 8, 8.5, ZONE.z + 10], [ZONE.x, 1.2, ZONE.z - 0.5]],
+      ...(this.micro ? { microclimate: this.micro.view } : {}),
     };
     if (name && views[name]) this._fly(...views[name]);
   }
@@ -807,7 +840,155 @@ export class GreenhouseScene {
     if (name === 'labels') for (const l of Object.values(this.labels)) l.obj.visible = on;
     if (name === 'vapour') this.vapour.visible = on;
     if (name === 'flows') for (const a of Object.values(this.flowArrows)) a.visible = on;
-    if (name === 'zone') { this.zoneU.value.w = on ? 1 : 0; for (const o of this.zoneParts) o.visible = on; }
+  }
+
+  // ---------------------------------------------------------------- microclimate
+  // The multi-height sensors' row: a thin post per sensor string, a bead per
+  // height (the measured points, drawn over everything so they are never lost),
+  // and around the crop a coloured fog. Each fog particle takes the colour of
+  // the section (interpolated by microclimate.js) at its own place along the
+  // row and height, so the fog is that section spread through the two crop
+  // rows that flank the sensors. Where a reading is missing there is no fog.
+  buildMicroclimate(section, ax) {
+    if (this.micro) {
+      this.scene.remove(this.micro.group);
+      for (const l of this.micro.labels) l.obj.removeFromParent();
+      this.micro.fog.geometry.dispose();
+      this.pickables = this.pickables.filter((o) => o.userData.component !== 'microclimate');
+      delete this.parts.microclimate;
+    }
+    const along = section.runs === 'along_rows';
+    const x0 = ax.xs[0], span = ax.xs[ax.xs.length - 1] - x0;
+    const y0 = ax.ys[0], y1 = ax.ys[ax.ys.length - 1];
+    const at = (p, y, across = 0) => (along
+      ? new THREE.Vector3(MICRO.x + across, y, p - x0 - span / 2)
+      : new THREE.Vector3(p - x0 - span / 2, y, MICRO.z + across));
+    this.focusU.uGhMicro.value.y = along ? 0 : 1;
+    this.focusU.uGhMicro.value.z = along ? MICRO.x : MICRO.z;
+    this.focusU.uGhMicroSpan.value.set(-span / 2, span);
+
+    const group = new THREE.Group();
+    // the fog: particles spread evenly through the band, each remembering where
+    // it is in the section's own terms (metres along the row, metres up)
+    const n = Math.round(FOG_PER_M3 * span * (y1 - y0) * 2 * MICRO.band);
+    const rnd = seeded(23);
+    const pos = new Float32Array(n * 3), col = new Float32Array(n * 4);
+    const p = new Float32Array(n), y = new Float32Array(n), across = new Float32Array(n);
+    const edge = new Float32Array(n), drift = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      p[i] = x0 + rnd() * span;
+      y[i] = y0 + rnd() * (y1 - y0);
+      across[i] = (rnd() * 2 - 1) * MICRO.band;
+      // thinning towards the band's sides and its top and bottom: no hard surface
+      const side = 1 - THREE.MathUtils.smoothstep(Math.abs(across[i]), MICRO.band * 0.55, MICRO.band);
+      const yv = Math.min(y[i] - y0, y1 - y[i]);
+      edge[i] = side * THREE.MathUtils.smoothstep(yv, 0, 0.35) * 0.5 + side * 0.5;
+      drift[i * 2] = (rnd() - 0.5) * 0.12;     // m/s along the row
+      drift[i * 2 + 1] = (rnd() - 0.5) * 0.05; // m/s up or down
+      at(p[i], y[i], across[i]).toArray(pos, i * 3);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
+    const fog = new THREE.Points(geo, new THREE.PointsMaterial({
+      size: FOG_SIZE, map: this._sprite(), vertexColors: true, transparent: true, opacity: FOG_OPACITY,
+      depthWrite: false, toneMapped: false,
+    }));
+    fog.renderOrder = 5;
+    fog.frustumCulled = false;
+    group.add(fog);
+
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x30363d, roughness: 0.6 });
+    const beadGeo = new THREE.SphereGeometry(0.07, 16, 10);
+    const beads = [], labels = [];
+    section.wires.forEach((w) => {
+      const top = at(w.at_m, LAMP_Y), foot = at(w.at_m, 0.3);
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, LAMP_Y - 0.3, 6), postMat);
+      post.position.copy(top.clone().add(foot).multiplyScalar(0.5));
+      group.add(post);
+      beads.push(section.heights.map((h) => {
+        const bead = new THREE.Mesh(beadGeo, new THREE.MeshBasicMaterial({
+          color: 0x9c9c9c, depthTest: false, depthWrite: false, toneMapped: false, transparent: true,
+        }));
+        bead.position.copy(at(w.at_m, h.m));
+        bead.renderOrder = 12;
+        group.add(this._pickable(bead, 'microclimate'));
+        return bead;
+      }));
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'gh-pin gh-pin-wire';
+      el.textContent = w.id;
+      el.addEventListener('click', (ev) => { ev.stopPropagation(); this.onPick('microclimate'); });
+      const obj = new CSS2DObject(el);
+      obj.position.copy(at(w.at_m, y1 + 0.55));
+      obj.visible = false;
+      this.scene.add(obj);
+      labels.push({ obj, el });
+    });
+    group.visible = false;
+    this.scene.add(group);
+    // standing in the row's path past its end, looking down it between the
+    // two crop rows (a little to one side, so the nearest string's beads are
+    // not in the eye; the rest of the house is a ghost in this mode)
+    const eye = at(x0 + span + 6, 2.6, 0.6), ahead = at(x0 + span * 0.3, 1.9);
+    this.micro = {
+      group, fog, beads, labels, at, x0, span, y0, y1,
+      p, y, across, edge, drift, colourAt: null,
+      view: [eye.toArray(), ahead.toArray()],
+    };
+    this.setMicroclimate(this.microOn ?? false);
+  }
+
+  setMicroclimate(on) {
+    this.microOn = on;
+    // the measuring box's ring would compete with the row for the eye
+    for (const o of this.zoneParts) o.visible = !on;
+    if (!this.micro) return;
+    this.micro.group.visible = on;
+    this.focusU.uGhMicro.value.x = on ? 1 : 0;
+    for (const l of this.micro.labels) l.obj.visible = on;
+  }
+
+  // One step: ``colourAt(metres along, metres up)`` gives the section's
+  // [r, g, b] there (null: no reading); ``beads[wire][height]`` the measured.
+  updateMicroclimate(colourAt, beads) {
+    if (!this.micro) return;
+    this.micro.colourAt = colourAt;
+    this._colourFog();
+    this.micro.beads.forEach((col, wi) => col.forEach((bead, k) => {
+      const c = beads[wi]?.[k];
+      bead.material.color.setRGB(...(c ? c.map((v) => v / 255) : [0.36, 0.38, 0.42]), THREE.SRGBColorSpace);
+    }));
+  }
+
+  _colourFog() {
+    const m = this.micro;
+    if (!m?.colourAt) return;
+    const col = m.fog.geometry.attributes.color.array, c = new THREE.Color();
+    for (let i = 0; i < m.p.length; i++) {
+      const rgb = m.colourAt(m.p[i], m.y[i]);
+      if (rgb) c.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+      col[i * 4] = c.r; col[i * 4 + 1] = c.g; col[i * 4 + 2] = c.b;
+      col[i * 4 + 3] = rgb ? m.edge[i] : 0;
+    }
+    m.fog.geometry.attributes.color.needsUpdate = true;
+  }
+
+  // The fog drifts slowly within its band, taking the colour of where it goes.
+  _driftFog(dt) {
+    const m = this.micro;
+    if (!m || !m.group.visible || !m.colourAt) return;
+    const pos = m.fog.geometry.attributes.position.array, v = new THREE.Vector3();
+    for (let i = 0; i < m.p.length; i++) {
+      m.p[i] += m.drift[i * 2] * dt;
+      m.y[i] += m.drift[i * 2 + 1] * dt;
+      if (m.p[i] < m.x0) m.p[i] += m.span; else if (m.p[i] > m.x0 + m.span) m.p[i] -= m.span;
+      if (m.y[i] < m.y0 || m.y[i] > m.y1) { m.drift[i * 2 + 1] *= -1; m.y[i] = Math.min(m.y1, Math.max(m.y0, m.y[i])); }
+      m.at(m.p[i], m.y[i], m.across[i]).toArray(pos, i * 3);
+    }
+    m.fog.geometry.attributes.position.needsUpdate = true;
+    this._colourFog();
   }
 
   setLabel(name, text) {
@@ -896,6 +1077,7 @@ export class GreenhouseScene {
       if (fl.k >= 1) this._flight = null;
     }
     this.controls.update();
+    this._driftFog(dt);
     this.anemometer.rotation.y += dt * (0.5 + this.state.wind * 2.5);
 
     // vapour: rises with transpiration; leaves through the vents when open

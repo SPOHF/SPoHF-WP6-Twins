@@ -16,6 +16,7 @@ import pytest
 
 from wp6_data.red.db import (
     WIRE_DEVICE_HEIGHTS,
+    WIRE_POSITIVE_ONLY,
     WIRE_RADIATION_HEIGHT,
     WIRE_RADIATION_MEASUREMENT,
     WIRE_READING_COLUMNS,
@@ -124,6 +125,21 @@ class TestUnpivotWireRows:
         assert par_records[0]["height"] == 1
         # 1 PAR + 5 each for the three full measurements
         assert len(records) == 1 + 3 * len(WIRE_SENSOR_HEIGHTS)
+
+    def test_a_no_reading_zero_is_skipped_but_a_dark_zero_is_kept(self):
+        """A CO₂ sensor sends 0 for "no reading"; PAR reads 0 in the dark."""
+        row = _full_row()
+        height = WIRE_SENSOR_HEIGHTS[-1]
+        for measurement in WIRE_POSITIVE_ONLY:
+            row[f"{measurement}{height}"] = 0.0
+        row[f"par{height}"] = 0.0
+
+        records = unpivot_wire_rows([row])
+        at = {(r["measurement"], r["height"]): r["value"] for r in records}
+        for measurement in WIRE_POSITIVE_ONLY:
+            assert (measurement, height) not in at
+        assert at[("par", height)] == 0.0
+        assert len(records) == len(unpivot_wire_rows([_full_row()])) - len(WIRE_POSITIVE_ONLY)
 
     def test_values_are_cast_to_float(self):
         row = {"received_at": TS, "par1": "7.000"}

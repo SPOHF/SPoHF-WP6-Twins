@@ -267,7 +267,7 @@ def test_what_if_rejects_an_unknown_lamp_setting():
 # ------------------------------------------------------------------ explanations
 def test_every_explanation_says_how_from_what_and_how_to_read_it():
     notes = explain.catalogue(CFG)
-    scopes = {"spot", "block", "outside", "model", "rule"}
+    scopes = {"spot", "row", "block", "outside", "model", "rule"}
     for key, n in notes.items():
         assert {"title", "scope", "how", "source", "read"} <= set(n), key
         assert n["scope"] in scopes, key

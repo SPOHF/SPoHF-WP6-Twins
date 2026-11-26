@@ -6,6 +6,7 @@
 // and dates are written the language's way (Intl).
 
 import { GreenhouseScene } from './scene.js';
+import { axes, colourOf, css, drawSection, gradient, hatchCss, nodeXY, ramp, valueAt } from './microclimate.js';
 
 const root = document.getElementById('gh-app');
 const API = root.dataset.api;
@@ -36,7 +37,8 @@ const FLOW = {
 const C = { blue: '#257de0', orange: '#f47230', aqua: '#00b894', yellow: '#f2a600', magenta: '#ee7fac',
             violet: '#9887ef', grey: '#9c9c9c', night: '#1b2436' };
 
-const ui = { day: null, i: 0, playing: false, timer: null, selected: null, whatif: null };
+const ui = { day: null, i: 0, playing: false, timer: null, selected: null, whatif: null,
+             mode: 'house', metric: 'temp', micro: null, microKey: null };
 
 // ------------------------------------------------------------------ format
 const NF = {};
@@ -469,6 +471,187 @@ const METRIC = {
   transpiration: { now: (s) => `${num((s.transpiration ?? 0) * 1000)} ml/m²/h`, charts: () => COMPONENT.crop.charts().slice(0, 1) },
 };
 
+// ------------------------------------------------------------------ microclimate
+// The multi-height sensors' row: in the scene the crop along it takes the
+// colour of the air around it, in the panel a flat cross-section. Both come
+// from the same drawing (the scene samples it as a texture), so the two can
+// never disagree. Each metric in the hue the page already gives it.
+const MICRO_HUE = { temp: C.orange, hum: C.violet, vpd: C.aqua, co2: C.blue, par: C.yellow };
+const MICRO_DEC = { temp: 1, hum: 0, vpd: 2, co2: 0, par: 0 };
+const LUTS = Object.fromEntries(Object.entries(MICRO_HUE).map(([k, hex]) => [k, ramp(hex)]));
+const texCanvas = Object.assign(document.createElement('canvas'), { width: 400, height: 64 });
+const M = (key, p) => T(`micro.${key}`, p);
+
+const microStepIndex = () => (ui.micro && ui.day ? ui.micro.steps.indexOf(ui.day.steps[ui.i].t) : -1);
+function microValues() {
+  const si = microStepIndex();
+  return si >= 0 ? ui.micro.metrics[ui.metric].values[si] : null;
+}
+const microScale = () => {
+  const si = microStepIndex();
+  return si >= 0 ? ui.micro.metrics[ui.metric].scales[si] : null;
+};
+const microFmt = (x) => (x == null ? '–' : `${num(x, MICRO_DEC[ui.metric])} ${ui.micro.metrics[ui.metric].unit}`);
+
+function microLegend() {
+  const m = ui.micro.metrics[ui.metric], scale = microScale();
+  if (!scale) return `<span class="gh-muted">${esc(M('no_reading'))}</span>`;
+  return `<span class="gh-micro-legend"><span>${num(scale[0], MICRO_DEC[ui.metric])}</span>
+    <i class="gh-micro-ramp" style="background:${gradient(LUTS[ui.metric])}"></i>
+    <span>${num(scale[1], MICRO_DEC[ui.metric])} ${esc(m.unit)}</span>
+    <i class="gh-key" style="background:${hatchCss}"></i><span>${esc(M('no_reading'))}</span></span>`;
+}
+
+function renderMicroBar() {
+  const el = $('gh-micro');
+  if (!ui.micro) return;
+  el.innerHTML = `<div class="gh-micro-metrics" role="group" aria-label="${esc(M('mode'))}">${Object.keys(ui.micro.metrics)
+    .map((k) => `<button type="button" class="gh-chip${k === ui.metric ? ' is-on' : ''}" data-micro-metric="${k}" aria-pressed="${k === ui.metric}">${esc(M(`metric.${k}`))}</button>`)
+    .join('')}</div><span id="gh-micro-key">${microLegend()}</span>`;
+}
+
+function renderMicro() {
+  if (ui.mode !== 'micro' || !ui.micro || !ui.day) return;
+  const lut = LUTS[ui.metric], v = microValues(), scale = microScale();
+  drawSection(texCanvas, axes(ui.micro), v, lut, scale, { clear: true });
+  scene.updateMicroclimate(ui.micro.wires.map((w, wi) => ui.micro.heights.map((h, k) => colourOf(lut, v?.[wi]?.[k], scale))));
+  const key = $('gh-micro-key');
+  if (key) key.innerHTML = microLegend();
+}
+
+async function loadMicro(date) {
+  if (!ui.micro) $('gh-micro').innerHTML = `<span class="gh-muted">${esc(M('loading'))}</span>`;
+  try {
+    const r = await fetch(`${API}/microclimate${date ? `?date=${date}` : ''}`);
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const mc = await r.json();
+    if (ui.day && mc.date !== ui.day.date) return;  // the day moved on while this loaded
+    ui.micro = mc;
+    if (!(ui.metric in mc.metrics)) [ui.metric] = Object.keys(mc.metrics);
+    const key = JSON.stringify([mc.runs, mc.wires, mc.heights]);
+    if (key !== ui.microKey) {
+      ui.microKey = key;
+      scene.buildMicroclimate(mc, axes(mc), texCanvas);
+      if (ui.selected === 'microclimate') scene.select('microclimate');  // now it has somewhere to fly
+    }
+    renderMicroBar();
+    renderMicro();
+    if (ui.selected === 'microclimate') renderPanel();
+  } catch (e) {
+    $('gh-micro').innerHTML = `<span class="gh-muted">${esc(M('failed', { error: e.message }))}</span>`;
+  }
+}
+
+function setMetric(k) {
+  ui.metric = k;
+  renderMicroBar();
+  renderMicro();
+  if (ui.selected === 'microclimate') renderPanel();
+  if (ui.day) updateUrl();
+}
+
+function setMode(on) {
+  ui.mode = on ? 'micro' : 'house';
+  const chip = $('gh-mode');
+  chip.classList.toggle('is-on', on); chip.setAttribute('aria-pressed', String(on));
+  $('gh-micro').hidden = !on;
+  scene.setMicroclimate(on);
+  // the measuring box's ring would compete with the slice for the eye
+  const zoneChip = document.querySelector('[data-layer="zone"]');
+  scene.setLayer('zone', !on && zoneChip.classList.contains('is-on'));
+  if (on && ui.day && ui.micro?.date !== ui.day.date) loadMicro(ui.day.date);
+  else renderMicro();
+  if (!on && ui.selected === 'microclimate') select(null);
+  else if (on) select('microclimate');
+  if (ui.day) updateUrl();
+}
+
+$('gh-micro').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-micro-metric]');
+  if (b) setMetric(b.dataset.microMetric);
+});
+
+// The panel's cross-section: the same drawing as the slice, with the sensors
+// marked, and a readout under the pointer.
+function drawPanelSection() {
+  const cv = $('gh-xs-canvas');
+  if (!cv) return;
+  const mc = ui.micro, ax = axes(mc), v = microValues(), scale = microScale();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(cv.clientWidth * dpr); cv.height = Math.round(cv.clientHeight * dpr);
+  drawSection(cv, ax, v, LUTS[ui.metric], scale);
+  const ctx = cv.getContext('2d');
+  mc.wires.forEach((w, wi) => mc.heights.forEach((h, k) => {
+    const [x, y] = nodeXY(ax, mc, wi, k, cv.width, cv.height);
+    const c = colourOf(LUTS[ui.metric], v?.[wi]?.[k], scale);
+    ctx.beginPath();
+    ctx.arc(Math.min(cv.width - 5 * dpr, Math.max(5 * dpr, x)), Math.min(cv.height - 5 * dpr, Math.max(5 * dpr, y)), 4 * dpr, 0, 2 * Math.PI);
+    ctx.fillStyle = c ? css(c) : '#5c626c';
+    ctx.fill();
+    ctx.lineWidth = 1.5 * dpr; ctx.strokeStyle = '#fff'; ctx.stroke();
+  }));
+  const tipEl = $('gh-xs-tip');
+  const hide = () => { tipEl.hidden = true; };
+  cv.addEventListener('mouseleave', hide);
+  cv.addEventListener('mousemove', (e) => {
+    const r = cv.getBoundingClientRect();
+    const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+    const x0 = ax.xs[0], x1 = ax.xs.at(-1), y0 = ax.ys[0], y1 = ax.ys.at(-1);
+    const x = x0 + fx * (x1 - x0), y = y1 - fy * (y1 - y0);
+    let text = null;
+    mc.wires.forEach((w, wi) => mc.heights.forEach((h, k) => {
+      const [nx, ny] = nodeXY(ax, mc, wi, k, r.width, r.height);
+      if (Math.hypot(nx - (e.clientX - r.left), ny - (e.clientY - r.top)) < 8) {
+        text = M('at_node', { wire: w.id, h: h.h, value: microFmt(v?.[wi]?.[k]) });
+      }
+    }));
+    if (!text) {
+      const val = valueAt(ax, v, x, y);
+      text = val == null ? M('no_reading') : M('at_point', { value: microFmt(val), along: num(x - x0, 1), height: num(y, 1) });
+    }
+    tipEl.textContent = text;
+    tipEl.hidden = false;
+    tipEl.style.left = `${Math.min(r.width - tipEl.offsetWidth, Math.max(0, e.clientX - r.left - tipEl.offsetWidth / 2))}px`;
+    tipEl.style.top = `${e.clientY - r.top > r.height / 2 ? e.clientY - r.top - tipEl.offsetHeight - 10 : e.clientY - r.top + 14}px`;
+  });
+}
+
+function renderMicroPanel(close) {
+  const mc = ui.micro, n = NOTES.microclimate, step = ui.day.steps[ui.i];
+  if (!mc) {
+    $('gh-panel').innerHTML = `<div class="gh-panel-head"><h3>${esc(M('title'))}</h3>${close}</div><p class="gh-muted">${esc(M('loading'))}</p>`;
+    return;
+  }
+  const ax = axes(mc), m = mc.metrics[ui.metric], v = microValues(), scale = microScale();
+  const x0 = ax.xs[0], x1 = ax.xs.at(-1), y0 = ax.ys[0], y1 = ax.ys.at(-1);
+  const yLabels = mc.heights.map((h) => `<span style="top:${((y1 - h.m) / (y1 - y0)) * 100}%">H${h.h} · ${num(h.m, 1)} m</span>`).join('');
+  const xLabels = mc.wires.map((w) => `<span style="left:${((w.at_m - x0) / (x1 - x0)) * 100}%">${esc(w.id)}</span>`).join('');
+  const best = Math.max(...m.coverage);
+  const thin = mc.wires.map((w, wi) => [w, m.coverage[wi]]).filter(([, c]) => best > 0 && c < best * 0.95)
+    .map(([w, c]) => esc(M('coverage', { wire: w.id, share: pct(c / best) })));
+  const table = `<table class="gh-kv gh-xs-table"><thead><tr><th></th>${mc.wires.map((w) => `<th>${esc(w.id)}</th>`).join('')}</tr></thead><tbody>
+    ${mc.heights.map((h, k) => `<tr><td>H${h.h}</td>${mc.wires.map((w, wi) => {
+      const c = colourOf(LUTS[ui.metric], v?.[wi]?.[k], scale);
+      return `<td>${c ? `<i class="gh-key" style="background:${css(c)}"></i>` : ''}${microFmt(v?.[wi]?.[k])}</td>`;
+    }).join('')}</tr>`).join('')}</tbody></table>`;
+  $('gh-panel').innerHTML = `
+    <div class="gh-panel-head"><h3>${esc(M('title'))}</h3>${close}</div>
+    <p class="gh-metric-now"><strong>${esc(M(`metric.${ui.metric}`))}</strong> ${esc(T('panel.at', { time: step.t }))} <span class="gh-scope scope-${n.scope}">${T(`scope.${n.scope}`)}</span></p>
+    <div class="gh-xs">
+      <div class="gh-xs-y">${yLabels}</div>
+      <div class="gh-xs-plot"><canvas id="gh-xs-canvas" aria-label="${esc(M('title'))}"></canvas><div class="gh-xs-tip" id="gh-xs-tip" hidden></div></div>
+      <div></div><div class="gh-xs-x">${xLabels}</div>
+    </div>
+    <p class="gh-xs-key">${microLegend()}</p>
+    <p class="gh-muted">${esc(v ? M('hover') : M('no_step', { time: step.t }))}</p>
+    <h4>${esc(M('measured_at', { time: step.t }))}</h4>
+    ${table}
+    ${[...mc.notes.map(esc), ...thin].map((x) => `<p class="gh-muted">${x}</p>`).join('')}
+    ${noteHtml(n)}`;
+  $('gh-panel').querySelector('.gh-close').addEventListener('click', () => select(null));
+  drawPanelSection();
+}
+
 // ------------------------------------------------------------------ scene
 const scene = new GreenhouseScene($('gh-viewer'), {
   names: NAMES,
@@ -480,6 +663,7 @@ function layerButtons() {
   const el = $('gh-layers');
   const defs = ['zone', 'vapour', 'flows', 'labels', 'roof'];
   el.innerHTML = defs.map((k) => `<button type="button" class="gh-chip is-on" data-layer="${k}" aria-pressed="true">${esc(T(`layer.${k}`))}</button>`).join('')
+    + `<button type="button" class="gh-chip gh-chip-mode" id="gh-mode" aria-pressed="false">${esc(T('micro.mode'))}</button>`
     + `<button type="button" class="gh-chip" id="gh-inside">${esc(T('layer.inside'))}</button>`
     + `<button type="button" class="gh-chip" id="gh-reset">${esc(T('layer.overview'))}</button>`;
   el.querySelectorAll('[data-layer]').forEach((b) => b.addEventListener('click', () => {
@@ -488,6 +672,7 @@ function layerButtons() {
     scene.setLayer(b.dataset.layer, on);
   }));
   $('gh-reset').addEventListener('click', () => { select(null); scene.resetView(); });
+  $('gh-mode').addEventListener('click', () => setMode(ui.mode !== 'micro'));
   $('gh-inside').addEventListener('click', () => { select(null); scene.insideView(); });
 }
 
@@ -578,6 +763,7 @@ function setStep(i) {
   ui.i = i;
   const step = ui.day.steps[i];
   scene.update(step);
+  renderMicro();
   $('gh-slider').value = i;
   $('gh-clock').textContent = step.t;
   renderHud(step);
@@ -647,6 +833,7 @@ function renderPanel() {
       <p class="gh-muted">${esc(T('panel.click_hint'))}</p>`;
     return;
   }
+  if (name === 'microclimate') { renderMicroPanel(close); return; }
   if (name.startsWith('metric:')) {
     const key = name.slice(7), n = NOTES[key], m = METRIC[key];
     const charts = m.charts().map((c) => lineChart({ ...c, t: times(), marker: ui.i, height: 140 })).join('');
@@ -866,6 +1053,9 @@ function updateUrl() {
   const u = new URL(window.location.href);
   u.searchParams.set('date', ui.day.date);
   u.searchParams.set('t', ui.day.steps[ui.i].t);
+  if (ui.mode === 'micro') { u.searchParams.set('mode', 'micro'); u.searchParams.set('metric', ui.metric); } else {
+    u.searchParams.delete('mode'); u.searchParams.delete('metric');
+  }
   u.searchParams.delete('lang');  // the cookie remembers it
   window.history.replaceState(null, '', u);
 }
@@ -884,6 +1074,8 @@ async function loadDay(date, t) {
       return;
     }
     ui.day = d; ui.whatif = null;
+    if (ui.micro && ui.micro.date !== d.date) ui.micro = null;
+    if (ui.mode === 'micro') loadMicro(d.date);
     const input = $('gh-date');
     input.value = d.date;
     if (d.range.first) input.min = d.range.first;
@@ -925,5 +1117,7 @@ document.addEventListener('keydown', (e) => {
 
 layerButtons();
 const params = new URLSearchParams(window.location.search);
+if (params.get('metric') in MICRO_HUE) ui.metric = params.get('metric');
+if (params.get('mode') === 'micro') setMode(true);
 loadDay(params.get('date'), params.get('t'));
 renderTomorrow();

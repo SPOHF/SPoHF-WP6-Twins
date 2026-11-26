@@ -14,6 +14,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, model_validator
 
+from wp6_data.red.db import WIRE_SENSOR_HEIGHTS, WIRE_SENSOR_MEASUREMENTS
+
 #: Where a configured number comes from: fitted on red's own data, taken from
 #: the literature, assumed for want of either, the grower's own figure or rule,
 #: or a threshold the twin chose.
@@ -89,6 +91,46 @@ class Advice(BaseModel):
     co2_lamp_floor_ppm: float
 
 
+class MicroclimateWire(BaseModel):
+    id: str
+    #: metres along the row from the first wire
+    at_m: float
+
+
+#: What the microclimate section can colour: the quantities a wire reads at one
+#: instant. Height DLI and fungal wet-hours accumulate over the day, so a
+#: snapshot cross-section of them would not mean anything.
+MICROCLIMATE_METRICS = (*WIRE_SENSOR_MEASUREMENTS, "vpd")
+
+
+class Microclimate(BaseModel):
+    """The multi-height wires as one vertical cross-section of the house."""
+
+    runs: Literal["along_rows", "across_rows"]
+    #: in order along the row
+    wires: list[MicroclimateWire]
+    #: wire height index → metres above the floor
+    heights_m: dict[int, float]
+    metrics: list[str]
+
+    @model_validator(mode="after")
+    def _a_grid(self) -> Microclimate:
+        if len(self.wires) < 2:
+            raise ValueError("microclimate.wires needs at least two wires")
+        at = [w.at_m for w in self.wires]
+        if any(b <= a for a, b in zip(at, at[1:], strict=False)):
+            raise ValueError("microclimate.wires must be listed in increasing at_m")
+        if set(self.heights_m) != set(WIRE_SENSOR_HEIGHTS):
+            raise ValueError(f"microclimate.heights_m needs exactly heights {WIRE_SENSOR_HEIGHTS}")
+        metres = [self.heights_m[h] for h in sorted(self.heights_m)]
+        if any(b >= a for a, b in zip(metres, metres[1:], strict=False)):
+            raise ValueError("microclimate.heights_m must fall from H1 (top) downwards")
+        unknown = set(self.metrics) - set(MICROCLIMATE_METRICS)
+        if unknown or not self.metrics:
+            raise ValueError(f"microclimate.metrics must be among {MICROCLIMATE_METRICS}")
+        return self
+
+
 class GreenhouseConfig(BaseModel):
     devices: Devices
     cover: Cover
@@ -98,6 +140,7 @@ class GreenhouseConfig(BaseModel):
     scale_area_m2: float
     transpiration: Transpiration
     advice: Advice
+    microclimate: Microclimate
     #: dotted path (``cover.u_open``, or a whole block such as ``ventilation``)
     #: → where that number comes from
     provenance: dict[str, Provenance]
