@@ -12,6 +12,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // A glasshouse of 4 m spans, rows running north-south (along z).
 const SPAN = 4, NSPAN = 8, W = SPAN * NSPAN, L = 36;
@@ -36,6 +37,21 @@ const FOG_PER_M3 = 55, FOG_SIZE = 0.85, FOG_OPACITY = 0.9;
 // Share of a faded plant's pixels that stay: enough to see where it stands,
 // few enough that rows of faded crop between the eye and the subject stay clear.
 const GHOST_KEEP = 0.07;
+// The air's humidity drawn as haze: none at the low end of rh_in (%), densest
+// at the high end, where a line of sight HAZE_M metres long through the house
+// loses about two thirds of its view up to HAZE_MAX. A picture of humid air,
+// not a measured visibility.
+const HAZE_RH = [55, 95], HAZE_M = 14, HAZE_MAX = 0.6;
+const HAZE_COLOUR = new THREE.Color(0xd8e6f2), HAZE_LAMPS = new THREE.Color(0xff8cc6);
+// Plumes over the open vents: their height (m) at a fully open vent, and the
+// air exchange (m³/m²/s) at which they are drawn at full strength.
+const PLUME_H = 2.6, PLUME_AIR = 0.02;
+// Frames are drawn only when something changed. While the view moves at most
+// FPS_MOVING; while only the anemometer turns, FPS_AMBIENT, and that stops
+// AMBIENT_IDLE_S seconds after the last input or step.
+const FPS_MOVING = 60, FPS_AMBIENT = 30, AMBIENT_IDLE_S = 10;
+// The house's measures, for modules that add to the scene without copying them.
+export const LAYOUT = { L, Z0, GUTTER, LAMP_Y, ROW_PITCH, ZONE, MICRO };
 
 
 function seeded(seed) {
@@ -71,6 +87,20 @@ export class GreenhouseScene {
     };
     // the box's fade eases in and out (see _frame) rather than snapping
     this._zoneWanted = false;
+    // the house's humid air (see _hazed): its box, density per metre, colour
+    this.hazeU = {
+      uHzMin: { value: new THREE.Vector3(X0 + 0.1, 0.02, Z0 + 0.1) },
+      uHzMax: { value: new THREE.Vector3(-X0 - 0.1, SCREEN_Y, -Z0 - 0.1) },
+      uHzK: { value: 0 },
+      uHzColour: { value: HAZE_COLOUR.clone() },
+    };
+    this._dirty = true;
+    // per-frame callbacks (dt, now) of something that moves by itself; one
+    // returning true asks for a frame. Empty unless a module adds one.
+    this._tickers = [];
+    this._lastDraw = 0;
+    this._lastInput = performance.now();
+    this._reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     this.selected = null;
     this.clock = new THREE.Clock();
     this.state = { vent: 0, ventWindSide: 1, ventLee: 0, ventWind: 0, lamps: 0, screen: 0,
@@ -87,22 +117,33 @@ export class GreenhouseScene {
     this._buildVents();
     this._buildSensors();
     this._buildWeather();
-    this._buildVapour();
+    this._buildPlumes();
     this._buildFlows();
     this._buildLabels();
+    this._hazeAll();
     this._bindEvents();
     this._resize();
-    this.renderer.setAnimationLoop(() => this._frame());
+    this.renderer.setAnimationLoop((now) => this._frame(now));
   }
+
+  // Ask for one frame: the scene draws only when something changed.
+  requestRender() { this._dirty = true; }
+
+  addTicker(fn) { this._tickers.push(fn); }
+  removeTicker(fn) { this._tickers = this._tickers.filter((f) => f !== fn); this.requestRender(); }
 
   // ---------------------------------------------------------------- setup
   _initRenderer() {
     const r = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // fill cost grows with the square of this; 1.5 is sharp enough for soft shapes
+    r.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 0.55;
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFSoftShadowMap;
+    // only the sun moves the shadows, once a step (see update): not every frame
+    r.shadowMap.autoUpdate = false;
+    r.shadowMap.needsUpdate = true;
     this.container.appendChild(r.domElement);
     this.renderer = r;
 
@@ -121,6 +162,8 @@ export class GreenhouseScene {
     this.controls.maxPolarAngle = Math.PI * 0.49;
     this.controls.minDistance = 1;
     this.controls.maxDistance = 120;
+    // fires while dragging and while the damping coasts out
+    this.controls.addEventListener('change', () => this.requestRender());
 
     const pmrem = new THREE.PMREMGenerator(r);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -232,6 +275,57 @@ export class GreenhouseScene {
     };
     mat.customProgramCacheKey = () => 'gh-focus';
     return mat;
+  }
+
+  // The house's humid air as haze, in every lit material: each fragment mixes
+  // towards the haze colour by how much of its line of sight from the camera
+  // runs through the house below the screen. Depth comes for free (a plant a
+  // metre away gets a metre of haze, the far gable thirty), with no particles
+  // and nothing per frame. Mixed before tone mapping, so the bloom path (which
+  // tone maps later) and the direct path agree.
+  _hazed(mat) {
+    const before = mat.onBeforeCompile, key = mat.customProgramCacheKey;
+    mat.onBeforeCompile = (shader, renderer) => {
+      before.call(mat, shader, renderer);
+      Object.assign(shader.uniforms, this.hazeU);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vHzPos;')
+        .replace('#include <project_vertex>', `#include <project_vertex>
+          vec4 hzP = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            hzP = instanceMatrix * hzP;
+          #endif
+          vHzPos = (modelMatrix * hzP).xyz;`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+          varying vec3 vHzPos;
+          uniform vec3 uHzMin;
+          uniform vec3 uHzMax;
+          uniform float uHzK;
+          uniform vec3 uHzColour;`)
+        .replace('#include <tonemapping_fragment>', `if (uHzK > 0.0) {
+            // the camera-to-fragment segment clipped to the haze box (slab test)
+            vec3 rd = vHzPos - cameraPosition;
+            vec3 inv = 1.0 / (rd + vec3(1e-6));
+            vec3 t0 = (uHzMin - cameraPosition) * inv, t1 = (uHzMax - cameraPosition) * inv;
+            vec3 lo = min(t0, t1), hi = max(t0, t1);
+            float tn = max(max(lo.x, lo.y), max(lo.z, 0.0));
+            float tf = min(min(hi.x, hi.y), min(hi.z, 1.0));
+            float d = max(0.0, tf - tn) * length(rd);
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, uHzColour, ${HAZE_MAX.toFixed(3)} * (1.0 - exp(-uHzK * d)));
+          }
+          #include <tonemapping_fragment>`);
+    };
+    mat.customProgramCacheKey = () => `${key.call(mat)}|gh-haze`;
+    return mat;
+  }
+
+  // Every lit material in the house and around it (also the vents' other look,
+  // which may not be on any vent right now).
+  _hazeAll() {
+    const mats = new Set(Object.values(this.ventLook).flatMap((l) => [l.pane, l.frame]));
+    this.scene.traverse((o) => { if (o.material?.isMeshStandardMaterial) mats.add(o.material); });
+    for (const m of mats) this._hazed(m);
   }
 
   _buildStructure() {
@@ -353,8 +447,9 @@ export class GreenhouseScene {
     const stemMat = this._focused(new THREE.MeshStandardMaterial({ color: 0x5f7f33, roughness: 0.8 }));
     const stems = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.011, 0.016, 3.5, 5), stemMat, nPlants);
     const fruitGeo = new THREE.IcosahedronGeometry(0.05, 1);
-    const fruitMat = this._focused(new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.28, metalness: 0,
-      clearcoat: 0.6, clearcoatRoughness: 0.3 }));
+    // 16 000 fruits: a plain glossy material, and no shadows of their own (at
+    // 5 cm they cannot be seen, but they were the largest share of the shadow pass)
+    const fruitMat = this._focused(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.28, metalness: 0 }));
     const trusses = 3, perTruss = 5;
     const fruits = new THREE.InstancedMesh(fruitGeo, fruitMat, nPlants * trusses * perTruss);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
@@ -402,7 +497,7 @@ export class GreenhouseScene {
       }
     }
     for (const im of [leaves, stems, fruits]) {
-      im.castShadow = true; im.receiveShadow = true;
+      im.castShadow = im !== fruits; im.receiveShadow = true;
       if (im.instanceColor) im.instanceColor.needsUpdate = true;
       this._pickable(im, 'crop');
       this.scene.add(im);
@@ -410,6 +505,7 @@ export class GreenhouseScene {
     this.leafMat = leafMat;
     this._part('crop').materials.push(stemMat, fruitMat);
     this.plantZs = zs;
+    this.fruits = fruits;  // in truss order: each truss's fruits are consecutive instances
   }
 
   _buildSubstrate() {
@@ -600,6 +696,8 @@ export class GreenhouseScene {
       h.rotation.z = rot;
       tip.set(h.position.x + side * (wv - 0.05) * Math.cos(rot),
         h.position.y + side * (wv - 0.05) * Math.sin(rot), h.position.z);
+      (h.userData.tip ??= new THREE.Vector3()).copy(tip);   // where its plume rises
+      h.userData.open = THREE.MathUtils.clamp(pct / 100, 0, 1);
       d.subVectors(tip, anchor);
       const len = d.length();
       arm.position.copy(anchor);
@@ -678,24 +776,52 @@ export class GreenhouseScene {
     return t;
   }
 
-  _buildVapour() {
-    const n = 2200, rnd = seeded(11);
-    const pos = new Float32Array(n * 3), seed = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      pos[i * 3] = X0 + 0.5 + rnd() * (W - 1);
-      pos[i * 3 + 1] = 1.5 + rnd() * 4;
-      pos[i * 3 + 2] = Z0 + 1 + rnd() * (L - 2);
-      seed[i] = rnd();
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.vapourSeed = seed;
-    this.vapour = new THREE.Points(geo, new THREE.PointsMaterial({
-      size: 0.32, map: this._sprite(), color: 0xcfe7ff, transparent: true, opacity: 0.35,
-      depthWrite: false, blending: THREE.AdditiveBlending,
-    }));
-    this.vapour.renderOrder = 4;
-    this.scene.add(this.vapour);
+  // A plume, dense at its foot and fading upwards and to its sides.
+  _plumeTexture() {
+    const c = document.createElement('canvas'); c.width = 32; c.height = 64;
+    const x = c.getContext('2d');
+    const up = x.createLinearGradient(0, 64, 0, 0);
+    up.addColorStop(0, 'rgba(255,255,255,0.9)'); up.addColorStop(0.35, 'rgba(255,255,255,0.45)');
+    up.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = up; x.fillRect(0, 0, 32, 64);
+    x.globalCompositeOperation = 'destination-in';
+    const across = x.createLinearGradient(0, 0, 32, 0);
+    across.addColorStop(0, 'rgba(0,0,0,0)'); across.addColorStop(0.5, 'rgba(0,0,0,1)');
+    across.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = across; x.fillRect(0, 0, 32, 64);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+
+  // Over every open vent, the house's moist air going out: a plume as tall as
+  // the vent is open, as strong as the air exchange. Two crossed soft planes
+  // per vent, all in one instanced draw, moved once a step (see _setPlumes).
+  _buildPlumes() {
+    const a = new THREE.PlaneGeometry(1, 1), b = new THREE.PlaneGeometry(1, 1);
+    b.rotateY(Math.PI / 2);
+    const geo = mergeGeometries([a, b]);
+    geo.translate(0, 0.5, 0);                       // its foot at the vent's lower edge
+    const mat = new THREE.MeshBasicMaterial({ map: this._plumeTexture(), transparent: true, opacity: 0,
+      depthWrite: false, side: THREE.DoubleSide });
+    this.plumes = new THREE.InstancedMesh(geo, mat, this.vents.length);
+    this.plumes.frustumCulled = false;              // instances move; the bounds would go stale
+    this.plumes.renderOrder = 4;
+    this.scene.add(this.plumes);
+    this._setPlumes(0);
+  }
+
+  _setPlumes(airExchange) {
+    const strength = THREE.MathUtils.clamp((airExchange ?? 0) / PLUME_AIR, 0, 1);
+    const m = new THREE.Matrix4();
+    this.vents.forEach((h, i) => {
+      const { tip, open, wv } = h.userData;
+      const ht = strength > 0 ? PLUME_H * open : 0;
+      m.makeScale(wv, Math.max(1e-4, ht), 1.7).setPosition(tip.x, tip.y, tip.z);
+      this.plumes.setMatrixAt(i, m);
+    });
+    this.plumes.instanceMatrix.needsUpdate = true;
+    this.plumes.material.opacity = 0.15 + 0.45 * strength;
+    this.plumes.visible = this.layers.vapour && this.layers.roof && strength > 0;
   }
 
   _arrow(colour) {
@@ -768,15 +894,29 @@ export class GreenhouseScene {
       const hit = this._hit(e);
       this.onPick(hit);
     });
+    // hover picking: at most once a frame, and not while dragging the view
+    let pending = null;
     el.addEventListener('pointermove', (e) => {
-      const hit = this._hit(e);
-      if (hit !== this.hovered) {
-        this.hovered = hit;
-        el.style.cursor = hit ? 'pointer' : 'grab';
-        this._highlight();
-        this.onHover(hit);
-      }
+      if (e.buttons) return;
+      const queued = pending;
+      pending = e;
+      if (queued) return;
+      requestAnimationFrame(() => {
+        const hit = this._hit(pending);
+        pending = null;
+        if (hit !== this.hovered) {
+          this.hovered = hit;
+          el.style.cursor = hit ? 'pointer' : 'grab';
+          this._highlight();
+          this.onHover(hit);
+        }
+      });
     });
+    // any input keeps the ambient motion going (see _frame)
+    const touched = () => { this._lastInput = performance.now(); };
+    for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown']) {
+      this.container.addEventListener(ev, touched, { passive: true });
+    }
     this._ro = new ResizeObserver(() => this._resize());
     this._ro.observe(this.container);
   }
@@ -807,6 +947,7 @@ export class GreenhouseScene {
     for (const [name, l] of Object.entries(this.labels)) {
       l.el.classList.toggle('is-active', name === this.selected);
     }
+    this.requestRender();
   }
 
   _resize() {
@@ -818,11 +959,13 @@ export class GreenhouseScene {
     this.bloom.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.requestRender();                 // a resized canvas is a cleared one
   }
 
   // ---------------------------------------------------------------- public
   select(name) {
     this.selected = name;
+    this._lastInput = performance.now();
     this._highlight();
     if (name) for (const a of Object.values(this.flowArrows)) a.visible = false;
     else if (this._last) this.update(this._last);
@@ -863,17 +1006,22 @@ export class GreenhouseScene {
 
   setLayer(name, on) {
     this.layers[name] = on;
+    this.requestRender();
     if (name === 'roof') {
       this.roof.visible = on; this.walls.visible = on;
       for (const v of this.vents) { v.visible = on; v.userData.arm.visible = on; }
       for (const m of this.screens) m.visible = on && (this._last?.state.screen ?? 0) > 0.01;
+      this._setPlumes(this._last?.flows.air_exchange);
     }
     if (name === 'labels') {
       for (const l of Object.values(this.labels)) l.obj.visible = on && !this.microOn;
       for (const l of this.micro?.labels ?? []) l.obj.visible = on && this.microOn;
       if (this.micro) this.micro.pin.visible = on && !this.microOn;
     }
-    if (name === 'vapour') this.vapour.visible = on;
+    if (name === 'vapour') {
+      this.hazeU.uHzK.value = on ? this._hazeK ?? 0 : 0;
+      this._setPlumes(this._last?.flows.air_exchange);
+    }
     if (name === 'flows') for (const a of Object.values(this.flowArrows)) a.visible = on;
   }
 
@@ -909,7 +1057,7 @@ export class GreenhouseScene {
     const rnd = seeded(23);
     const pos = new Float32Array(n * 3), col = new Float32Array(n * 4);
     const p = new Float32Array(n), y = new Float32Array(n), across = new Float32Array(n);
-    const edge = new Float32Array(n), drift = new Float32Array(n * 2);
+    const edge = new Float32Array(n);
     for (let i = 0; i < n; i++) {
       p[i] = x0 + rnd() * span;
       y[i] = y0 + rnd() * (y1 - y0);
@@ -918,8 +1066,6 @@ export class GreenhouseScene {
       const side = 1 - THREE.MathUtils.smoothstep(Math.abs(across[i]), MICRO.band * 0.55, MICRO.band);
       const yv = Math.min(y[i] - y0, y1 - y[i]);
       edge[i] = side * THREE.MathUtils.smoothstep(yv, 0, 0.35) * 0.5 + side * 0.5;
-      drift[i * 2] = (rnd() - 0.5) * 0.12;     // m/s along the row
-      drift[i * 2 + 1] = (rnd() - 0.5) * 0.05; // m/s up or down
       at(p[i], y[i], across[i]).toArray(pos, i * 3);
     }
     const geo = new THREE.BufferGeometry();
@@ -933,7 +1079,7 @@ export class GreenhouseScene {
     fog.frustumCulled = false;
     group.add(fog);
 
-    const postMat = new THREE.MeshStandardMaterial({ color: 0x30363d, roughness: 0.6 });
+    const postMat = this._hazed(new THREE.MeshStandardMaterial({ color: 0x30363d, roughness: 0.6 }));
     const beadGeo = new THREE.SphereGeometry(0.07, 16, 10);
     const beads = [], labels = [];
     section.wires.forEach((w) => {
@@ -987,12 +1133,14 @@ export class GreenhouseScene {
       const side = along ? -d : d;
       return [at(x0 + span / 2, (y0 + y1) / 2 + 0.8, side).toArray(), mid.toArray()];
     };
-    this.micro = { group, fog, beads, labels, pin, at, x0, span, y0, y1, p, y, across, edge, drift, colourAt: null, view };
+    this.micro = { group, fog, beads, labels, pin, at, x0, span, y0, y1, p, y, edge, colourAt: null, view };
     this.setMicroclimate(this.microOn ?? false);
+    this.renderer.shadowMap.needsUpdate = true;
   }
 
   setMicroclimate(on) {
     this.microOn = on;
+    this.requestRender();
     // the other parts' pins would sit on top of the row
     for (const l of Object.values(this.labels)) l.obj.visible = !on && this.layers.labels;
     if (!this.micro) return;
@@ -1015,6 +1163,7 @@ export class GreenhouseScene {
   updateMicroclimate(colourAt, beads) {
     if (!this.micro) return;
     this.micro.colourAt = colourAt;
+    this.requestRender();
     this._colourFog();
     this.micro.beads.forEach((col, wi) => col.forEach((bead, k) => {
       const c = beads[wi]?.[k];
@@ -1035,22 +1184,6 @@ export class GreenhouseScene {
     m.fog.geometry.attributes.color.needsUpdate = true;
   }
 
-  // The fog drifts slowly within its band, taking the colour of where it goes.
-  _driftFog(dt) {
-    const m = this.micro;
-    if (!m || !m.fog.visible || !m.colourAt) return;
-    const pos = m.fog.geometry.attributes.position.array, v = new THREE.Vector3();
-    for (let i = 0; i < m.p.length; i++) {
-      m.p[i] += m.drift[i * 2] * dt;
-      m.y[i] += m.drift[i * 2 + 1] * dt;
-      if (m.p[i] < m.x0) m.p[i] += m.span; else if (m.p[i] > m.x0 + m.span) m.p[i] -= m.span;
-      if (m.y[i] < m.y0 || m.y[i] > m.y1) { m.drift[i * 2 + 1] *= -1; m.y[i] = Math.min(m.y1, Math.max(m.y0, m.y[i])); }
-      m.at(m.p[i], m.y[i], m.across[i]).toArray(pos, i * 3);
-    }
-    m.fog.geometry.attributes.position.needsUpdate = true;
-    this._colourFog();
-  }
-
   setLabel(name, text) {
     const l = this.labels[name];
     if (l) l.el.querySelector('.gh-pin-val').textContent = text ?? '';
@@ -1059,6 +1192,8 @@ export class GreenhouseScene {
   // One 15-minute step of the day.
   update(step) {
     this._last = step;
+    this._lastInput = performance.now();
+    this.requestRender();
     const s = step.state, f = step.flows;
     const el = step.sun_el ?? -20, az = step.sun_az ?? 180;
     const er = THREE.MathUtils.degToRad(el), ar = THREE.MathUtils.degToRad(az);
@@ -1068,6 +1203,10 @@ export class GreenhouseScene {
     const rad = s.radiation ?? 0;
     this.sun.position.copy(dir.clone().multiplyScalar(120));
     this.sun.intensity = el > 0 ? 0.4 + Math.min(3.2, rad / 220) : 0;
+    // a new shadow map only when the sun has moved; at night it lights nothing
+    const sunAt = `${el},${az}`;
+    if (el > 0 && sunAt !== this._sunAt) this.renderer.shadowMap.needsUpdate = true;
+    this._sunAt = sunAt;
     this.hemi.intensity = 0.06 + 0.55 * day;
     this.hemi.color.setHSL(0.6, 0.4, 0.35 + 0.4 * day);
     this.renderer.toneMappingExposure = 0.34 + 0.12 * day;
@@ -1084,9 +1223,11 @@ export class GreenhouseScene {
     this.ledMat.emissiveIntensity = lamps * 5.5;
     this.coneMat.opacity = lamps * (0.09 - 0.06 * day);
     this.lampLight.intensity = lamps * (3.4 - 2.6 * day);
-    // bloom is for the lamps' glow at night; by day it would only haze the scene
+    // bloom is for the lamps' glow at night; by day it would only haze the
+    // scene, so then the frame skips the composer altogether (see _render)
     this.bloom.strength = 0.08 + 0.55 * (1 - day);
     this.bloom.threshold = 0.82 + 0.15 * day;
+    this._bloomOn = lamps > 0.01 && day < 0.9;
 
     // pipes: colour by temperature above the air
     const tAir = s.t_in;
@@ -1112,6 +1253,17 @@ export class GreenhouseScene {
     this.state.wind = s.wind ?? 0;
     this.vane.rotation.y = -THREE.MathUtils.degToRad(s.wind_dir ?? 0);
 
+    // the air: haze as dense as the measured humidity, lit like the house
+    // (daylight, or the lamps' pink at night); plumes where it leaves
+    const humid = s.rh_in == null ? 0 : THREE.MathUtils.clamp((s.rh_in - HAZE_RH[0]) / (HAZE_RH[1] - HAZE_RH[0]), 0, 1);
+    this._hazeK = humid / HAZE_M;
+    this.hazeU.uHzK.value = this.layers.vapour ? this._hazeK : 0;
+    const glow = lamps * (1 - day);
+    this.hazeU.uHzColour.value.copy(HAZE_COLOUR).lerp(HAZE_LAMPS, 0.4 * glow)
+      .multiplyScalar(0.05 + 0.75 * day + 0.25 * glow);
+    this.plumes.material.color.copy(this.hazeU.uHzColour.value);
+    this._setPlumes(f.air_exchange);
+
     // crop: a touch more saturated when transpiring hard
     const act = THREE.MathUtils.clamp((this.state.transpiration - 0.03) / 0.4, 0, 1);
     this.leafMat.color.setRGB(0.92 + 0.08 * act, 1, 0.9 + 0.05 * act);
@@ -1126,7 +1278,9 @@ export class GreenhouseScene {
     this._setArrow(this.flowArrows.evaporation, f.evaporation, [12, RIDGE + 0.8, 4], [0.45, 1, 0]);
   }
 
-  _frame() {
+  // Called every display refresh; draws only when something changed, at most
+  // FPS_MOVING (or FPS_AMBIENT when only the anemometer turns).
+  _frame(now) {
     const dt = Math.min(0.05, this.clock.getDelta());
     if (this._flight) {
       const fl = this._flight;
@@ -1135,43 +1289,32 @@ export class GreenhouseScene {
       this.camera.position.lerpVectors(fl.p0, fl.p1, e);
       this.controls.target.lerpVectors(fl.t0, fl.t1, e);
       if (fl.k >= 1) this._flight = null;
+      this._dirty = true;
     }
     this.controls.update();
-    this._driftFog(dt);
     // the box's fade eases rather than snaps (alongside a flight)
-    const zw = this.focusU.uGhZone.value;
-    zw.w += ((this._zoneWanted ? 1 : 0) - zw.w) * Math.min(1, dt * 4);
-    this.anemometer.rotation.y += dt * (0.5 + this.state.wind * 2.5);
-
-    // vapour: rises with transpiration; leaves through the vents when open
-    if (this.vapour.visible) {
-      const pos = this.vapour.geometry.attributes.position.array;
-      const e = this.state.transpiration, open = this.state.vent;
-      const up = 0.15 + e * 3.2, out = 0.4 + this.state.airExchange * 260;
-      const live = Math.min(1, 0.12 + e * 2.2);
-      this.vapour.material.opacity = 0.12 + 0.45 * live;
-      const n = pos.length / 3;
-      for (let i = 0; i < n; i++) {
-        const k = i * 3, sd = this.vapourSeed[i];
-        if (sd > live) { pos[k + 1] = -50; continue; }
-        if (pos[k + 1] < 0) pos[k + 1] = 1.4 + sd * 2;
-        pos[k + 1] += dt * up * (0.6 + sd);
-        pos[k] += dt * Math.sin(sd * 40 + pos[k + 1]) * 0.15;
-        if (pos[k + 1] > GUTTER - 0.4) {
-          if (open > 0.03) {
-            // drift to the nearest ridge and out
-            const xm = X0 + Math.floor((pos[k] - X0) / SPAN) * SPAN + SPAN / 2;
-            pos[k] += (xm - pos[k]) * dt * 1.5;
-            pos[k + 1] += dt * out;
-            if (pos[k + 1] > RIDGE + 3 + sd * 3) pos[k + 1] = 1.4 + sd * 2;
-          } else if (pos[k + 1] > SCREEN_Y - 0.1) {
-            pos[k + 1] = 1.4 + sd * 2;            // closed house: it condenses and cycles
-          }
-        }
-      }
-      this.vapour.geometry.attributes.position.needsUpdate = true;
+    const zw = this.focusU.uGhZone.value, zt = this._zoneWanted ? 1 : 0;
+    if (zw.w !== zt) {
+      zw.w += (zt - zw.w) * Math.min(1, dt * 4);
+      if (Math.abs(zt - zw.w) < 0.003) zw.w = zt;
+      this._dirty = true;
     }
-    this.composer.render();
+    // the anemometer turns only while the weather station is looked at
+    for (const tick of this._tickers) if (tick(dt, now)) this._dirty = true;
+    const spin = this.selected === 'weather' && !this._reducedMotion
+      && now - this._lastInput < AMBIENT_IDLE_S * 1000;
+    if (!this._dirty && !spin) return;
+    // 2 ms slack: a 60 Hz display may tick a hair early
+    if (now - this._lastDraw < 1000 / (this._dirty ? FPS_MOVING : FPS_AMBIENT) - 2) return;
+    if (spin) this.anemometer.rotation.y += Math.min(0.1, (now - this._lastDraw) / 1000) * (0.5 + this.state.wind * 2.5);
+    this._lastDraw = now;
+    this._dirty = false;
+    this._render();
+  }
+
+  _render() {
+    if (this._bloomOn) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
   }
 
