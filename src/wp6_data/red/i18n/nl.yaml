@@ -211,7 +211,7 @@ greenhouse:
       read: >-
         Eén meetpunt voor het hele blok: bij de gevels, onder open ramen of boven de
         buisrail kan de lucht afwijken — dichte sensornetwerken in praktijkkassen vinden
-        warme, koude en vochtige plekken.[^rezvani2020][^wur_wireless]
+        warme, koude en vochtige plekken.[^rezvani2020][^balendonck2014]
     rh_in:
       title: Luchtvochtigheid in de kas
       how: >-
@@ -540,8 +540,8 @@ greenhouse:
         Alles wat de tweeling over lucht en gewas zegt, rust op die ene plek, terwijl de
         actuatoren overal werken. Bij gevels, onder open ramen, boven de buisrail of in een
         hoek kan het klimaat afwijken — dichte sensornetwerken in praktijkkassen vinden
-        warme, koude en vochtige plekken[^rezvani2020][^wur_wireless] — microklimaten die
-        deze gegevens niet zien. De ring in de weergave illustreert dat alleen; hoe ver één
+        warme, koude en vochtige plekken[^rezvani2020][^balendonck2014] — microklimaten die
+        deze gegevens niet zien. Het gekleurde gebied in de weergave illustreert dat alleen; hoe ver één
         box voor het blok spreekt, is niet bekend.
 
   advice:
@@ -654,6 +654,7 @@ greenhouse:
       series: LetsGrow-gegevensreeks
       series_note: elke 5 minuten vastgelegd
       module: LetsGrow-module
+      open_source: Bron openen ({host})
     term:
       calibrated: >-
         Door het team van de tweeling gefit op red's eigen LetsGrow-gegevens (2023–26), in
@@ -686,6 +687,7 @@ greenhouse:
       substrate: Steenwolmatten in hangende goten. Eén gootdeel hangt aan de weegschaal.
       weather: Het weerstation van LetsGrow op het dak.
       cover: "Het glazen dak en de gevels: wat er van de zon binnenkomt en welke warmte weglekt."
+      sensors: Eén meetbox en één weegschaal staan voor het hele blok, terwijl lampen, buizen, ramen en scherm overal werken. Klik op een waarde om te zien waar die gemeten wordt.
     flow:
       sun: Zon die binnen blijft
       lamps: Lampen
@@ -704,7 +706,6 @@ greenhouse:
       how: Zo wordt het berekend
       source: Waar de gegevens vandaan komen
       read: Zo lees je het
-      sources: Bronnen
     legend:
       sun: zon
       lamps_on: lampen aan
@@ -796,7 +797,7 @@ greenhouse:
       lamps: lampen
       sunrise: zonsopkomst
     sensors:
-      legend_spot: "staat voor de plek in de gearceerde ring: de tweeling neemt aan dat het hele blok zich zo gedraagt."
+      legend_spot: "staat voor het gebied dat zijn kleur houdt: de tweeling neemt aan dat het hele blok zich zo gedraagt."
       legend_block: instellingen werken overal tegelijk.
       toggle: Zet {chip} uit om de rest van het blok zonder grijs te zien.
       link: Waar elke sensor zit, en wat dat betekent →
