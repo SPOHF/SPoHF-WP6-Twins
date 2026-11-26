@@ -32,7 +32,10 @@ const ZONE = { x: 1.6, z: 0, r: 4.5 };
 const MICRO = { x: ZONE.x - 4 * ROW_PITCH, z: -6, band: 1.6 };
 // The fog around that row: particles per m³ of the band, their size (m) and
 // opacity. Dense enough to read as a volume, thin enough to see the crop in it.
-const FOG_PER_M3 = 34, FOG_SIZE = 0.75, FOG_OPACITY = 0.42;
+const FOG_PER_M3 = 55, FOG_SIZE = 0.85, FOG_OPACITY = 0.9;
+// Share of a faded plant's pixels that stay: enough to see where it stands,
+// few enough that rows of faded crop between the eye and the subject stay clear.
+const GHOST_KEEP = 0.07;
 
 
 function seeded(seed) {
@@ -60,11 +63,10 @@ export class GreenhouseScene {
     // Which crop a view is about, shared by every crop material (see _focused):
     // the measuring box's ring (x, z, radius, on while the box is selected) and
     // the multi-height sensors' row (on, axis 0: along z / 1: along x, where it
-    // sits across, the band's half-width; where it starts along, its length).
+    // sits across, the band's half-width).
     this.focusU = {
       uGhZone: { value: new THREE.Vector4(ZONE.x, ZONE.z, ZONE.r, 0) },
       uGhMicro: { value: new THREE.Vector4(0, 0, 0, MICRO.band) },
-      uGhMicroSpan: { value: new THREE.Vector2(0, 1) },
     };
     this.selected = null;
     this.clock = new THREE.Clock();
@@ -211,18 +213,17 @@ export class GreenhouseScene {
           varying vec3 vGhPos;
           uniform vec4 uGhZone;
           uniform vec4 uGhMicro;
-          uniform vec2 uGhMicroSpan;`)
+`)
         .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
           float ghKeep = 1.0 - uGhZone.w * smoothstep(uGhZone.z, uGhZone.z + 1.4, length(vGhPos.xz - uGhZone.xy));
+          // the sensors' two crop rows stay whole along their full length: past
+          // the outer sensors, without fog, they show the crop the fog is about
           if (uGhMicro.x > 0.5) {
-            float along = uGhMicro.y < 0.5 ? vGhPos.z : vGhPos.x;
             float across = uGhMicro.y < 0.5 ? vGhPos.x : vGhPos.z;
-            float beyond = max(uGhMicroSpan.x - along, along - uGhMicroSpan.x - uGhMicroSpan.y);
-            ghKeep = min(ghKeep, (1.0 - smoothstep(uGhMicro.w * 0.6, uGhMicro.w, abs(across - uGhMicro.z)))
-                                 * (1.0 - smoothstep(0.0, 1.0, beyond)));
+            ghKeep = min(ghKeep, 1.0 - smoothstep(uGhMicro.w * 0.6, uGhMicro.w, abs(across - uGhMicro.z)));
           }
           float ghN = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-          if (ghN > mix(0.15, 1.0, ghKeep)) discard;`);
+          if (ghN > mix(${GHOST_KEEP.toFixed(3)}, 1.0, ghKeep)) discard;`);
     };
     mat.customProgramCacheKey = () => 'gh-focus';
     return mat;
@@ -813,7 +814,7 @@ export class GreenhouseScene {
       crop: [[-4, 3.2, -22], [-8, 2.2, -12]], substrate: [[-5, 1.6, -21], [-9, 0.8, -14]],
       weather: [[34, 8, -32], [22, 7, -22]], cover: [[44, 26, 40], [0, 4, 0]],
       sensors: [[ZONE.x + 8, 8.5, ZONE.z + 10], [ZONE.x, 1.2, ZONE.z - 0.5]],
-      ...(this.micro ? { microclimate: this.micro.view } : {}),
+      ...(this.micro ? { microclimate: this.micro.view() } : {}),
     };
     if (name && views[name]) this._fly(...views[name]);
   }
@@ -837,7 +838,11 @@ export class GreenhouseScene {
       for (const v of this.vents) { v.visible = on; v.userData.arm.visible = on; }
       for (const m of this.screens) m.visible = on && (this._last?.state.screen ?? 0) > 0.01;
     }
-    if (name === 'labels') for (const l of Object.values(this.labels)) l.obj.visible = on;
+    if (name === 'labels') {
+      for (const l of Object.values(this.labels)) l.obj.visible = on && !this.microOn;
+      for (const l of this.micro?.labels ?? []) l.obj.visible = on && this.microOn;
+      if (this.micro) this.micro.pin.visible = on && !this.microOn;
+    }
     if (name === 'vapour') this.vapour.visible = on;
     if (name === 'flows') for (const a of Object.values(this.flowArrows)) a.visible = on;
   }
@@ -853,6 +858,7 @@ export class GreenhouseScene {
     if (this.micro) {
       this.scene.remove(this.micro.group);
       for (const l of this.micro.labels) l.obj.removeFromParent();
+      this.micro.pin.removeFromParent();
       this.micro.fog.geometry.dispose();
       this.pickables = this.pickables.filter((o) => o.userData.component !== 'microclimate');
       delete this.parts.microclimate;
@@ -865,7 +871,6 @@ export class GreenhouseScene {
       : new THREE.Vector3(p - x0 - span / 2, y, MICRO.z + across));
     this.focusU.uGhMicro.value.y = along ? 0 : 1;
     this.focusU.uGhMicro.value.z = along ? MICRO.x : MICRO.z;
-    this.focusU.uGhMicroSpan.value.set(-span / 2, span);
 
     const group = new THREE.Group();
     // the fog: particles spread evenly through the band, each remembering where
@@ -922,21 +927,36 @@ export class GreenhouseScene {
       el.addEventListener('click', (ev) => { ev.stopPropagation(); this.onPick('microclimate'); });
       const obj = new CSS2DObject(el);
       obj.position.copy(at(w.at_m, y1 + 0.55));
-      obj.visible = false;
       this.scene.add(obj);
       labels.push({ obj, el });
     });
-    group.visible = false;
+    // unselected, the row is one pin; selected, it opens into a label per string
+    const pinEl = document.createElement('button');
+    pinEl.type = 'button';
+    pinEl.className = 'gh-pin';
+    pinEl.dataset.component = 'microclimate';
+    pinEl.innerHTML = `<span class="gh-pin-name">${this.names.microclimate ?? 'microclimate'}</span>`;
+    pinEl.addEventListener('click', (ev) => { ev.stopPropagation(); this.onPick('microclimate'); });
+    const pin = new CSS2DObject(pinEl);
+    pin.position.copy(at(x0 + span / 2, y1 + 0.55));
+    this.scene.add(pin);
+    fog.visible = false;
     this.scene.add(group);
-    // standing in the row's path past its end, looking down it between the
-    // two crop rows (a little to one side, so the nearest string's beads are
-    // not in the eye; the rest of the house is a ghost in this mode)
-    const eye = at(x0 + span + 6, 2.6, 0.6), ahead = at(x0 + span * 0.3, 1.9);
-    this.micro = {
-      group, fog, beads, labels, at, x0, span, y0, y1,
-      p, y, across, edge, drift, colourAt: null,
-      view: [eye.toArray(), ahead.toArray()],
+    // Square on to the row from the side, far enough out to frame all of it:
+    // every line of sight then crosses the fog at one place along the row and
+    // one height, so it shows the section's colour there instead of averaging
+    // 25 m of it. From the side that puts the first sensor string on the left,
+    // as the panel's cross-section has it. The crop in between is a ghost.
+    const view = () => {
+      const hfov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * this.camera.aspect);
+      // a few metres past each end: the row's head and tail, solid and fog-free
+      const d = (span / 2 + 3.5) / Math.tan(hfov / 2);
+      const mid = at(x0 + span / 2, (y0 + y1) / 2);
+      // looking down -x, +z runs to the right; looking down -z, +x runs right
+      const side = along ? -d : d;
+      return [at(x0 + span / 2, (y0 + y1) / 2 + 0.8, side).toArray(), mid.toArray()];
     };
+    this.micro = { group, fog, beads, labels, pin, at, x0, span, y0, y1, p, y, across, edge, drift, colourAt: null, view };
     this.setMicroclimate(this.microOn ?? false);
   }
 
@@ -944,10 +964,21 @@ export class GreenhouseScene {
     this.microOn = on;
     // the measuring box's ring would compete with the row for the eye
     for (const o of this.zoneParts) o.visible = !on;
+    // the other parts' pins would sit on top of the row
+    for (const l of Object.values(this.labels)) l.obj.visible = !on && this.layers.labels;
     if (!this.micro) return;
-    this.micro.group.visible = on;
+    // the posts are always there; the fog and the colours only while selected
+    this.micro.fog.visible = on;
     this.focusU.uGhMicro.value.x = on ? 1 : 0;
-    for (const l of this.micro.labels) l.obj.visible = on;
+    for (const l of this.micro.labels) l.obj.visible = on && this.layers.labels;
+    this.micro.pin.visible = !on && this.layers.labels;
+    // measured points over everything while selected; in the house otherwise
+    for (const col of this.micro.beads) {
+      for (const b of col) {
+        b.material.depthTest = !on;
+        if (!on) b.material.color.setHex(0x9c9c9c);
+      }
+    }
   }
 
   // One step: ``colourAt(metres along, metres up)`` gives the section's
@@ -978,7 +1009,7 @@ export class GreenhouseScene {
   // The fog drifts slowly within its band, taking the colour of where it goes.
   _driftFog(dt) {
     const m = this.micro;
-    if (!m || !m.group.visible || !m.colourAt) return;
+    if (!m || !m.fog.visible || !m.colourAt) return;
     const pos = m.fog.geometry.attributes.position.array, v = new THREE.Vector3();
     for (let i = 0; i < m.p.length; i++) {
       m.p[i] += m.drift[i * 2] * dt;

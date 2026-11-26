@@ -117,6 +117,16 @@ def _json_script(element_id: str, data) -> str:
     return f'<script type="application/json" id="{element_id}">{body}</script>'
 
 
+def _micro_geometry(cfg) -> dict:
+    """Where the multi-height sensors hang, for the posts the scene always draws."""
+    mc = cfg.microclimate
+    return {
+        "runs": mc.runs,
+        "wires": [{"id": w.id, "at_m": w.at_m} for w in mc.wires],
+        "heights": [{"h": h, "m": mc.heights_m[h]} for h in sorted(mc.heights_m)],
+    }
+
+
 @router.get("/greenhouse", response_class=HTMLResponse)
 async def greenhouse_page() -> str:
     """The 3D greenhouse page; its data arrives from the JSON endpoints."""
@@ -134,6 +144,7 @@ async def greenhouse_page() -> str:
     {_json_script("gh-i18n", i18n.bundle("greenhouse.ui"))}
     {_json_script("gh-refs", explain.references())}
     {_json_script("gh-config", explain.configured(cfg))}
+    {_json_script("gh-micro-geom", _micro_geometry(cfg))}
     <div id="gh-app" class="gh" data-api="/greenhouse/api" data-lang="{i18n.current()}">
       <header class="gh-head">
         <div>

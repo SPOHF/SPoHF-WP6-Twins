@@ -543,9 +543,10 @@ greenhouse:
         mean of the readings in it. Between the sensors the colour is interpolated in
         straight lines, along the row and up the canopy separately: in greenhouses, the
         temperature difference between two places grows about linearly with their
-        distance[^balendonck2014], and for that a straight line is the best guess. Nothing
-        is drawn beyond the outer sensors, and a square next to a missing reading is
-        hatched instead of filled.
+        distance[^balendonck2014], and for that a straight line is the best guess. In the
+        house the result is a fog around the crop rows on either side of the sensors;
+        here it is shown flat. Nothing is drawn beyond the outer sensors, and next to a
+        missing reading there is no fog and the section is hatched.
       source: >-
         The multi-height sensors themselves, not LetsGrow: they report more often and
         arrive sooner. Their spacing along the row and their heights are
@@ -747,7 +748,6 @@ greenhouse:
       dark: dark
       humid: RH ≥ {rh}%
     layer:
-      zone: Measured area
       vapour: Vapour
       flows: Heat flows
       labels: Labels
@@ -833,6 +833,7 @@ greenhouse:
       sunrise: sunrise
     micro:
       mode: Microclimate
+      pin: Multi-height sensors
       title: Microclimate along the row
       metric: {temp: Temperature, hum: Humidity, vpd: VPD, co2: CO₂, par: PAR}
       no_reading: no reading
@@ -847,9 +848,9 @@ greenhouse:
       hover: Hover the section for values between the sensors.
       measured_at: Measured at {time}
     sensors:
-      legend_spot: "stands for the place in the shaded ring: the twin assumes the whole block behaves like it."
+      legend_spot: "stands for the place in the ring: the twin assumes the whole block behaves like it."
       legend_block: settings act everywhere at once.
-      toggle: Toggle {chip} to see the rest of the block without the grey.
+      fade: "While this is open, the crop beyond the ring fades: the box speaks only for its surroundings."
       link: Where each sensor is, and what that means →
     chart:
       lamps_on: lamps on, %

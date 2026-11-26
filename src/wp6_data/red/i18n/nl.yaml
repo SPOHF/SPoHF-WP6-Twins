@@ -543,9 +543,10 @@ greenhouse:
         stap van 15 minuten is het gemiddelde van de metingen erin. Tussen de sensoren wordt
         de kleur rechtlijnig geïnterpoleerd, langs de rij en in de hoogte apart: in kassen
         groeit het temperatuurverschil tussen twee plekken ongeveer lineair met hun
-        afstand[^balendonck2014], en daarvoor is een rechte lijn de beste schatting. Buiten
-        de buitenste sensoren wordt niets getekend, en een vak naast een ontbrekende meting
-        wordt gearceerd in plaats van gevuld.
+        afstand[^balendonck2014], en daarvoor is een rechte lijn de beste schatting. In de
+        kas is het resultaat een mist rond de gewasrijen aan weerszijden van de sensoren;
+        hier staat het plat. Buiten de buitenste sensoren wordt niets getekend, en naast
+        een ontbrekende meting is er geen mist en is de doorsnede gearceerd.
       source: >-
         De meerhoogtesensoren zelf, niet LetsGrow: ze melden vaker en eerder. Hun afstand
         langs de rij en hun hoogtes zijn [ingesteld](cfg:microclimate), nog niet ter plekke
@@ -744,7 +745,6 @@ greenhouse:
       dark: donker
       humid: RV ≥ {rh}%
     layer:
-      zone: Meetgebied
       vapour: Waterdamp
       flows: Warmtestromen
       labels: Labels
@@ -830,6 +830,7 @@ greenhouse:
       sunrise: zonsopkomst
     micro:
       mode: Microklimaat
+      pin: Meerhoogtesensoren
       title: Microklimaat langs de rij
       metric: {temp: Temperatuur, hum: Luchtvochtigheid, vpd: VPD, co2: CO₂, par: PAR}
       no_reading: geen meting
@@ -844,9 +845,9 @@ greenhouse:
       hover: Beweeg over de doorsnede voor waarden tussen de sensoren.
       measured_at: Gemeten om {time}
     sensors:
-      legend_spot: "staat voor de plek in de gearceerde ring: de tweeling neemt aan dat het hele blok zich zo gedraagt."
+      legend_spot: "staat voor de plek in de ring: de tweeling neemt aan dat het hele blok zich zo gedraagt."
       legend_block: instellingen werken overal tegelijk.
-      toggle: Zet {chip} uit om de rest van het blok zonder grijs te zien.
+      fade: "Zolang dit open is, vervaagt het gewas buiten de ring: de box spreekt alleen voor zijn omgeving."
       link: Waar elke sensor zit, en wat dat betekent →
     chart:
       lamps_on: lampen aan, %

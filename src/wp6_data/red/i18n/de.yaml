@@ -550,8 +550,10 @@ greenhouse:
         wird die Farbe geradlinig interpoliert, entlang der Reihe und in der Höhe getrennt:
         In Gewächshäusern wächst der Temperaturunterschied zwischen zwei Orten etwa linear
         mit ihrem Abstand[^balendonck2014], und dafür ist eine Gerade die beste Schätzung.
-        Jenseits der äußeren Sensoren wird nichts gezeichnet, und ein Feld neben einer
-        fehlenden Messung wird schraffiert statt gefüllt.
+        Im Haus ist das Ergebnis ein Nebel um die Pflanzenreihen beiderseits der Sensoren;
+        hier ist es flach dargestellt. Jenseits der äußeren Sensoren wird nichts
+        gezeichnet, und neben einer fehlenden Messung gibt es keinen Nebel und der Schnitt
+        ist schraffiert.
       source: >-
         Die Mehrhöhensensoren selbst, nicht LetsGrow: Sie melden häufiger und früher. Ihr
         Abstand entlang der Reihe und ihre Höhen sind [konfiguriert](cfg:microclimate),
@@ -754,7 +756,6 @@ greenhouse:
       dark: dunkel
       humid: rel. F. ≥ {rh}%
     layer:
-      zone: Messbereich
       vapour: Wasserdampf
       flows: Wärmeströme
       labels: Beschriftungen
@@ -840,6 +841,7 @@ greenhouse:
       sunrise: Sonnenaufgang
     micro:
       mode: Mikroklima
+      pin: Mehrhöhensensoren
       title: Mikroklima entlang der Reihe
       metric: {temp: Temperatur, hum: Luftfeuchte, vpd: VPD, co2: CO₂, par: PAR}
       no_reading: kein Messwert
@@ -854,9 +856,9 @@ greenhouse:
       hover: Mit der Maus über den Schnitt fahren für Werte zwischen den Sensoren.
       measured_at: Gemessen um {time}
     sensors:
-      legend_spot: "steht für den Ort im schattierten Ring: Der Zwilling nimmt an, dass sich der ganze Block so verhält."
+      legend_spot: "steht für den Ort im Ring: Der Zwilling nimmt an, dass sich der ganze Block so verhält."
       legend_block: Einstellungen wirken überall zugleich.
-      toggle: Schalten Sie {chip} aus, um den Rest des Blocks ohne Grau zu sehen.
+      fade: "Solange dies offen ist, verblasst der Bestand außerhalb des Rings: Die Box spricht nur für ihre Umgebung."
       link: Wo jeder Sensor sitzt und was das bedeutet →
     chart:
       lamps_on: Lampen an, %

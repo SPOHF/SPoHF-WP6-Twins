@@ -23,6 +23,7 @@ const T = (key, p = {}) => (I18N[key] ?? key).replace(/\{(\w+)\}/g, (m, k) => (k
 
 const COMPONENT_IDS = ['lamps', 'pipes', 'vents', 'screen', 'crop', 'substrate', 'weather', 'cover', 'sensors'];
 const NAMES = Object.fromEntries(COMPONENT_IDS.map((k) => [k, T(`comp.${k}`)]));
+NAMES.microclimate = T('micro.pin');
 
 // One colour per flow, the same in the panel and in the 3D arrows.
 const FLOW = {
@@ -438,7 +439,7 @@ const COMPONENT = {
     charts: () => [],
     extra: () => `<p class="gh-muted"><span class="gh-scope scope-spot">${T('scope.spot')}</span> ${esc(T('sensors.legend_spot'))}
       <span class="gh-scope scope-block">${T('scope.block')}</span> ${esc(T('sensors.legend_block'))}
-      ${esc(T('sensors.toggle', { chip: T('layer.zone') }))}</p>
+      ${esc(T('sensors.fade'))}</p>
       <p class="gh-muted"><button type="button" class="gh-link" data-note="sensors">${esc(T('sensors.link'))}</button></p>`,
   },
 };
@@ -472,14 +473,13 @@ const METRIC = {
 };
 
 // ------------------------------------------------------------------ microclimate
-// The multi-height sensors' row: in the scene the crop along it takes the
-// colour of the air around it, in the panel a flat cross-section. Both come
-// from the same drawing (the scene samples it as a texture), so the two can
-// never disagree. Each metric in the hue the page already gives it.
+// The multi-height sensors' row: in the scene a coloured fog around the crop
+// along it, in the panel a flat cross-section. Both take their colours from the
+// same interpolation (valueAt), so the two can never disagree. Each metric in
+// the hue the page already gives it.
 const MICRO_HUE = { temp: C.orange, hum: C.violet, vpd: C.aqua, co2: C.blue, par: C.yellow };
 const MICRO_DEC = { temp: 1, hum: 0, vpd: 2, co2: 0, par: 0 };
 const LUTS = Object.fromEntries(Object.entries(MICRO_HUE).map(([k, hex]) => [k, ramp(hex)]));
-const texCanvas = Object.assign(document.createElement('canvas'), { width: 400, height: 64 });
 const M = (key, p) => T(`micro.${key}`, p);
 
 const microStepIndex = () => (ui.micro && ui.day ? ui.micro.steps.indexOf(ui.day.steps[ui.i].t) : -1);
@@ -512,12 +512,17 @@ function renderMicroBar() {
 
 function renderMicro() {
   if (ui.mode !== 'micro' || !ui.micro || !ui.day) return;
-  const lut = LUTS[ui.metric], v = microValues(), scale = microScale();
-  drawSection(texCanvas, axes(ui.micro), v, lut, scale, { clear: true });
-  scene.updateMicroclimate(ui.micro.wires.map((w, wi) => ui.micro.heights.map((h, k) => colourOf(lut, v?.[wi]?.[k], scale))));
+  const lut = LUTS[ui.metric], v = microValues(), scale = microScale(), ax = axes(ui.micro);
+  scene.updateMicroclimate(
+    (along, up) => colourOf(lut, valueAt(ax, v, along, up), scale),
+    ui.micro.wires.map((w, wi) => ui.micro.heights.map((h, k) => colourOf(lut, v?.[wi]?.[k], scale))),
+  );
   const key = $('gh-micro-key');
   if (key) key.innerHTML = microLegend();
 }
+
+// What the scene's posts are built from: where the strings hang, not what they read.
+const microKey = (g) => JSON.stringify([g.runs, g.wires.map((w) => [w.id, w.at_m]), g.heights.map((h) => [h.h, h.m])]);
 
 async function loadMicro(date) {
   if (!ui.micro) $('gh-micro').innerHTML = `<span class="gh-muted">${esc(M('loading'))}</span>`;
@@ -528,10 +533,10 @@ async function loadMicro(date) {
     if (ui.day && mc.date !== ui.day.date) return;  // the day moved on while this loaded
     ui.micro = mc;
     if (!(ui.metric in mc.metrics)) [ui.metric] = Object.keys(mc.metrics);
-    const key = JSON.stringify([mc.runs, mc.wires, mc.heights]);
+    const key = microKey(mc);
     if (key !== ui.microKey) {
       ui.microKey = key;
-      scene.buildMicroclimate(mc, axes(mc), texCanvas);
+      scene.buildMicroclimate(mc, axes(mc));
       if (ui.selected === 'microclimate') scene.select('microclimate');  // now it has somewhere to fly
     }
     renderMicroBar();
@@ -550,19 +555,19 @@ function setMetric(k) {
   if (ui.day) updateUrl();
 }
 
+// Microclimate mode is the multi-height sensors being selected, the way the
+// measuring box can be: selecting them (a post, a bead, a label, the chip)
+// brings the fog and the panel, and anything that deselects them (the panel's
+// close, Escape, another part, empty space) ends it. ``select`` calls this.
 function setMode(on) {
+  if ((ui.mode === 'micro') === on) return;
   ui.mode = on ? 'micro' : 'house';
   const chip = $('gh-mode');
   chip.classList.toggle('is-on', on); chip.setAttribute('aria-pressed', String(on));
   $('gh-micro').hidden = !on;
   scene.setMicroclimate(on);
-  // the measuring box's ring would compete with the slice for the eye
-  const zoneChip = document.querySelector('[data-layer="zone"]');
-  scene.setLayer('zone', !on && zoneChip.classList.contains('is-on'));
   if (on && ui.day && ui.micro?.date !== ui.day.date) loadMicro(ui.day.date);
   else renderMicro();
-  if (!on && ui.selected === 'microclimate') select(null);
-  else if (on) select('microclimate');
   if (ui.day) updateUrl();
 }
 
@@ -661,7 +666,7 @@ const scene = new GreenhouseScene($('gh-viewer'), {
 
 function layerButtons() {
   const el = $('gh-layers');
-  const defs = ['zone', 'vapour', 'flows', 'labels', 'roof'];
+  const defs = ['vapour', 'flows', 'labels', 'roof'];
   el.innerHTML = defs.map((k) => `<button type="button" class="gh-chip is-on" data-layer="${k}" aria-pressed="true">${esc(T(`layer.${k}`))}</button>`).join('')
     + `<button type="button" class="gh-chip gh-chip-mode" id="gh-mode" aria-pressed="false">${esc(T('micro.mode'))}</button>`
     + `<button type="button" class="gh-chip" id="gh-inside">${esc(T('layer.inside'))}</button>`
@@ -672,7 +677,7 @@ function layerButtons() {
     scene.setLayer(b.dataset.layer, on);
   }));
   $('gh-reset').addEventListener('click', () => { select(null); scene.resetView(); });
-  $('gh-mode').addEventListener('click', () => setMode(ui.mode !== 'micro'));
+  $('gh-mode').addEventListener('click', () => select(ui.mode === 'micro' ? null : 'microclimate'));
   $('gh-inside').addEventListener('click', () => { select(null); scene.insideView(); });
 }
 
@@ -1035,6 +1040,8 @@ async function renderTomorrow() {
 function select(name) {
   ui.selected = name || null;
   closeNote();
+  // the HUD's metric charts sit beside the sensors; anything else leaves them
+  if (!ui.selected?.startsWith('metric:')) setMode(ui.selected === 'microclimate');
   const part = ui.selected && !ui.selected.startsWith('metric:') ? ui.selected : null;
   if (part || !ui.selected || scene.selected) scene.select(part);
   if (ui.day) { renderHud(ui.day.steps[ui.i]); renderPanel(); }
@@ -1116,8 +1123,15 @@ document.addEventListener('keydown', (e) => {
 });
 
 layerButtons();
+// The posts are part of the house from the start (from the configured row):
+// they are what one clicks to see the microclimate.
+{
+  const geom = JSON.parse($('gh-micro-geom').textContent);
+  ui.microKey = microKey(geom);
+  scene.buildMicroclimate(geom, axes(geom));
+}
 const params = new URLSearchParams(window.location.search);
 if (params.get('metric') in MICRO_HUE) ui.metric = params.get('metric');
-if (params.get('mode') === 'micro') setMode(true);
+if (params.get('mode') === 'micro') select('microclimate');
 loadDay(params.get('date'), params.get('t'));
 renderTomorrow();

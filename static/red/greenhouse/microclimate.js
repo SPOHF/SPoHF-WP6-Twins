@@ -1,6 +1,6 @@
 // The microclimate section: the multi-height sensors' readings, drawn as one
 // vertical cross-section along their row (the panel shows it flat; the scene
-// colours the crop along the row with it). The server sends only measurements (per step,
+// spreads it as a fog through the crop along the row). The server sends only measurements (per step,
 // per sensor, per height); this module fills the space between them for drawing
 // and nothing else — the page never states an interpolated number as measured.
 //
@@ -112,9 +112,8 @@ export function valueAt(ax, values, x, y) {
 // ------------------------------------------------------------------ drawing
 // The section into ``canvas`` (any size): left = first wire, top = highest
 // sensor. ``values`` is one step's [wire][height] grid, or null for a step
-// with no readings at all. Where a reading is missing the section is hatched,
-// or left transparent with ``clear`` (the scene's crop then keeps its colour).
-export function drawSection(canvas, ax, values, lut, scale, { clear = false } = {}) {
+// with no readings at all (drawn hatched throughout).
+export function drawSection(canvas, ax, values, lut, scale) {
   const W = canvas.width, H = canvas.height;
   const ctx = canvas.getContext('2d');
   const img = ctx.createImageData(W, H);
@@ -125,11 +124,9 @@ export function drawSection(canvas, ax, values, lut, scale, { clear = false } = 
     for (let px = 0; px < W; px++) {
       const x = x0 + ((px + 0.5) / W) * (x1 - x0);
       const v = valueAt(ax, values, x, y);
-      const c = colourOf(lut, v, scale);
-      const rgb = c || ((px + py) % 8 < 3 ? HATCH.light : HATCH.dark);
+      const rgb = colourOf(lut, v, scale) || ((px + py) % 8 < 3 ? HATCH.light : HATCH.dark);
       const o = (py * W + px) * 4;
-      img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2];
-      img.data[o + 3] = c || !clear ? 255 : 0;
+      img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2]; img.data[o + 3] = 255;
     }
   }
   ctx.putImageData(img, 0, 0);
