@@ -538,8 +538,8 @@ graph TB
         subgraph dli_layer["Light model (red.dli)"]
             dli_model["TwoStageLightModel
             [Component]
-            Two-stage Ridge: weather →
-            natural PAR → DLI; lamps measured"]:::component
+            One Ridge fit: weather → roof PAR,
+            × rolling canopy/roof ratio; lamps from LetsGrow"]:::component
             dli_parts["calculator | schedule
             aggregation | lamp
             [Components]
