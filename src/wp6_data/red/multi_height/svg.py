@@ -2,6 +2,7 @@
 
 import re
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 
 _RED_STATIC = Path(__file__).parent.parent / "static"
@@ -60,3 +61,30 @@ def parse_svg(svg_path: Path):
     }
 
     return canvas_w, canvas_h, sensor_boxes, sensor_bands
+
+
+### Side-section layout ###
+SECTION_LAYOUT_PATH = _RED_STATIC / "multi_height_section.svg"
+
+
+@dataclass(frozen=True)
+class SectionLayout:
+    """Geometry of the side section: canvas, the field's area, legend, node width."""
+
+    width: float
+    height: float
+    area: dict[str, float]
+    legend: dict[str, float]
+    node_width: float
+
+
+def parse_section_layout(svg_path: Path) -> SectionLayout:
+    _, _, width, height = parse_viewbox(svg_path)
+    rects = parse_svg_rects(svg_path)
+    return SectionLayout(
+        width=width,
+        height=height,
+        area=rects["plan"],
+        legend=rects["legend"],
+        node_width=rects["node"]["width"],
+    )

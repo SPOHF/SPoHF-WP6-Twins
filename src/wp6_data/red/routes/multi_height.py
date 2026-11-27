@@ -1,4 +1,5 @@
 import html
+import json
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
@@ -50,11 +51,36 @@ from ..multi_height.data import (
     compute_sensor_metrics,
     day_window_utc,
     filter_for_day,
+    latest_reading_time,
     latest_reporting_date,
     latest_wire_date,
     load_wire_readings,
 )
-from ..multi_height.svg import SVG_LAYOUT_PATH, parse_svg
+from ..multi_height.side_replay import (
+    build_frames,
+    choose_step,
+    frame_index_at,
+    frame_times,
+    resolve_window,
+    shared_scale,
+    stale_after,
+)
+from ..multi_height.side_section import (
+    DEFAULT_STYLE,
+    MEASUREMENT_STYLES,
+    PlacedNode,
+    latest_node_readings,
+    place_nodes,
+    render_replay_svg,
+    render_side_svg,
+)
+from ..multi_height.svg import (
+    SECTION_LAYOUT_PATH,
+    SVG_LAYOUT_PATH,
+    SectionLayout,
+    parse_section_layout,
+    parse_svg,
+)
 from ..multi_height.uniformity import build_uniformity_day
 from ..multi_height.uniformity_cells import (
     aggregate_phrase,
@@ -75,6 +101,7 @@ router = APIRouter(dependencies=[Depends(verify_session_user)])
 # Temperature leads the uniformity view: it is the metric most likely to differ
 # with where a wire hangs, so it is the one that shows the page working.
 DEFAULT_UNIFORMITY_METRIC = "temp"
+DEFAULT_SECTION_MEASUREMENT = "temp"
 
 MULTI_HEIGHT_VIEWS = [
     {
@@ -83,6 +110,13 @@ MULTI_HEIGHT_VIEWS = [
         "label": "Open view",
         "description": "Latest PAR and Daily Light Integral mapped onto the "
         "greenhouse layout at each sensor height.",
+    },
+    {
+        "href": "/multi_height/side-section",
+        "title": "Side Section of Wires",
+        "label": "Open view",
+        "description": "Latest PAR, temperature, humidity and CO₂ at every height of "
+        "every wire, as a cross-section of the greenhouse.",
     },
     {
         "href": "/multi_height/wire-trends",
@@ -319,6 +353,276 @@ def _wire_range_form(start_day: date, end_day: date, wire: str) -> str:
         <button type="submit">Update</button>
     </form>
     """
+
+
+async def _latest_section_nodes(
+    measurement: str,
+) -> tuple[list[PlacedNode], SectionLayout, str]:
+    """Each wire's latest ``measurement`` readings, placed in one row."""
+    timezone = deps.base_settings.display_timezone
+    wires = await wire_ids()
+
+    # Latest *available* data: open on the last day any wire reported, then take
+    # each wire's last reading of that day, so a lagging feed never blanks the page.
+    target_date = await latest_reporting_date(wires, timezone)
+    df = None
+    if target_date is not None:
+        start, end = day_window_utc(target_date, timezone, 0)
+        df = await load_wire_readings(start, end)
+
+    readings = latest_node_readings(df, wires, measurement) if df is not None else {}
+    layout = parse_section_layout(SECTION_LAYOUT_PATH)
+    return place_nodes(readings, layout), layout, timezone
+
+
+def _section_measurement_pills(base: str, measurement: str, extra: dict) -> str:
+    return pill_row(
+        base, "measurement",
+        [(m, WIRE_MEASUREMENT_LABELS[m][0]) for m in WIRE_SENSOR_MEASUREMENTS],
+        measurement, extra, label="Measurement",
+    )
+
+
+def _section_card(
+    nodes: list[PlacedNode], timezone: str, label: str, title: str, render, blurb: str,
+) -> str:
+    if not any(n.readings for n in nodes):
+        body = (
+            f'<p style="color:#6b7280;margin:0;">No wire has reported '
+            f"{html.escape(label.lower())} yet.</p>"
+        )
+        stamp = ""
+    else:
+        body = render()
+        latest = max(r.time for n in nodes for r in n.readings.values())
+        stamp = (
+            " Latest reading: "
+            f"{pd.Timestamp(latest).tz_convert(timezone):%Y-%m-%d %H:%M}."
+        )
+    return render_card(
+        f"{html.escape(label)} {title}", body,
+        description=blurb + " Wire positions are schematic; the real layout is not known."
+        + stamp,
+        card_class="card",
+    )
+
+
+REPLAY_JS = """<script>
+(function () {
+  var root = document.getElementById("replay");
+  if (!root) return;
+  var slider = root.querySelector("input[type=range]");
+  var label = root.querySelector(".replay-time");
+  var button = root.querySelector("button.replay-play");
+  var frames = JSON.parse(root.getAttribute("data-frames"));
+  var timer = null;
+  function show(i) {
+    document.querySelectorAll("g.rf").forEach(function (g) {
+      g.style.display = g.getAttribute("data-i") === String(i) ? "" : "none";
+    });
+    label.textContent = frames[i].label;
+    slider.value = i;
+    var url = new URL(window.location.href);
+    url.searchParams.set("at", frames[i].at);
+    window.history.replaceState(null, "", url);
+  }
+  function stop() {
+    if (timer) { clearInterval(timer); timer = null; }
+    button.textContent = "Play";
+  }
+  button.addEventListener("click", function () {
+    if (timer) { stop(); return; }
+    if (+slider.value >= frames.length - 1) show(0);
+    button.textContent = "Pause";
+    timer = setInterval(function () {
+      var next = +slider.value + 1;
+      if (next >= frames.length) { stop(); return; }
+      show(next);
+    }, 500);
+  });
+  slider.addEventListener("input", function () { stop(); show(+slider.value); });
+})();
+</script>"""
+
+
+def _parse_local_instant(value: str | None, timezone: str) -> datetime | None:
+    """A ``from``/``to``/``at`` value as UTC; wall-clock input is read in ``timezone``."""
+    if not value:
+        return None
+    try:
+        ts = pd.Timestamp(value)
+        if pd.isna(ts):
+            return None
+        ts = (
+            ts.tz_localize(timezone, ambiguous=True, nonexistent="shift_forward")
+            if ts.tzinfo is None
+            else ts
+        )
+        return ts.tz_convert("UTC").to_pydatetime()
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def _local_input(ts, timezone: str) -> str:
+    return f"{pd.Timestamp(ts).tz_convert(timezone):%Y-%m-%dT%H:%M}"
+
+
+def _replay_form(start: datetime, end: datetime, measurement: str, timezone: str) -> str:
+    return f"""
+    <form method="get" action="/multi_height/side-section"
+          style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:end;">
+        <input type="hidden" name="measurement" value="{html.escape(measurement)}">
+        <label>From<br><input type="datetime-local" name="from" required
+            value="{_local_input(start, timezone)}"></label>
+        <label>To<br><input type="datetime-local" name="to"
+            value="{_local_input(end, timezone)}"></label>
+        <button type="submit">Replay</button>
+        <a href="/multi_height/side-section?measurement={html.escape(measurement)}">Latest</a>
+    </form>
+    """
+
+
+def _replay_form_empty(measurement: str) -> str:
+    return f"""
+    <form method="get" action="/multi_height/side-section"
+          style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:end;">
+        <input type="hidden" name="measurement" value="{html.escape(measurement)}">
+        <label>Replay from<br><input type="datetime-local" name="from" required></label>
+        <label>To<br><input type="datetime-local" name="to"></label>
+        <button type="submit">Replay</button>
+    </form>
+    """
+
+
+async def _replay_card(
+    window: tuple[datetime, datetime],
+    at: datetime | None,
+    measurement: str,
+    wires: list[str],
+    timezone: str,
+) -> str:
+    start, end = window
+    label, unit = WIRE_MEASUREMENT_LABELS[measurement]
+    step = choose_step(end - start)
+    stale = stale_after(step)
+    times = frame_times(start, end, step)
+
+    # One query over the window (plus the look-back that feeds the first frames).
+    df = await load_wire_readings(
+        start - stale, end + timedelta(seconds=1),
+    )
+    frames = build_frames(df, wires, measurement, times, stale)
+    layout = parse_section_layout(SECTION_LAYOUT_PATH)
+    placed = [place_nodes(f.readings, layout) for f in frames]
+    if not any(f.readings[w] for f in frames for w in f.readings):
+        return render_card(
+            f"{html.escape(label)} side section replay",
+            f'<p style="color:#6b7280;margin:0;">No wire reported {html.escape(label.lower())} '
+            "in this window.</p>",
+            card_class="card",
+        )
+
+    style = MEASUREMENT_STYLES.get(measurement, DEFAULT_STYLE)
+    scale = shared_scale(placed, style)
+    selected = frame_index_at(times, at)
+    svg = render_replay_svg(placed, layout, measurement, label, unit, scale, selected)
+    meta = json.dumps([
+        {"label": f"{t.tz_convert(timezone):%Y-%m-%d %H:%M}", "at": _local_input(t, timezone)}
+        for t in times
+    ]).replace("<", "\\u003c")
+    controls = f"""
+    <div id="replay" data-frames='{html.escape(meta, quote=True)}'
+         style="display:flex;gap:1rem;align-items:center;margin:.5rem 0;">
+        <button type="button" class="replay-play">Play</button>
+        <input type="range" min="0" max="{len(times) - 1}" value="{selected}"
+               style="flex:1;" aria-label="Frame">
+        <strong class="replay-time" style="min-width:9rem;">
+            {times[selected].tz_convert(timezone):%Y-%m-%d %H:%M}</strong>
+    </div>
+    """
+    minutes = int(step.total_seconds() // 60)
+    blurb = (
+        f"{len(times)} frames, one every {minutes} min, each wire's last {label.lower()} "
+        f"at or before that moment. One colour scale for the whole window. Greyed boxes "
+        f"hold a reading older than {int(stale.total_seconds() // 60)} min; they are shown "
+        "but not used in the colours."
+    )
+    return render_card(
+        f"{html.escape(label)} side section replay",
+        controls + svg + REPLAY_JS,
+        description=blurb, card_class="card",
+    )
+
+
+@router.get("/multi_height/side-section", response_class=HTMLResponse)
+async def side_section_page(
+    config: Annotated[TwinConfig, Depends(get_twin_config)],
+    measurement: Annotated[str, Query(description="par, temp, hum or co2")] = (
+        DEFAULT_SECTION_MEASUREMENT
+    ),
+    from_: Annotated[
+        str | None,
+        Query(alias="from", description="Replay window start (local time); omit for latest"),
+    ] = None,
+    to: Annotated[
+        str | None, Query(description="Replay window end (local time); defaults to latest")
+    ] = None,
+    at: Annotated[
+        str | None, Query(description="Frame to open on (local time), for linking")
+    ] = None,
+):
+    """Latest values on every wire as a side section, or a replay of a window."""
+    if measurement not in WIRE_SENSOR_MEASUREMENTS:
+        measurement = DEFAULT_SECTION_MEASUREMENT
+    timezone = deps.base_settings.display_timezone
+    label, unit = WIRE_MEASUREMENT_LABELS[measurement]
+
+    window = None
+    start = _parse_local_instant(from_, timezone)
+    if start is not None:
+        wires = await wire_ids()
+        latest = await latest_reading_time(wires)
+        window = resolve_window(
+            start, _parse_local_instant(to, timezone),
+            None if latest is None else latest.to_pydatetime(),
+        )
+
+    if window is not None:
+        extra = {
+            "from": _local_input(window[0], timezone),
+            "to": _local_input(window[1], timezone),
+        }
+        form = _replay_form(window[0], window[1], measurement, timezone)
+        card = await _replay_card(
+            window, _parse_local_instant(at, timezone), measurement, wires, timezone,
+        )
+    else:
+        extra = {}
+        form = _replay_form_empty(measurement)
+        nodes, layout, timezone = await _latest_section_nodes(measurement)
+        card = _section_card(
+            nodes, timezone, label, "side section",
+            lambda: render_side_svg(nodes, layout, measurement, label, unit),
+            f"Each column is one wire with its latest {label.lower()}, H1 at the top "
+            "to H5 at the bottom. The colour between wires and heights is interpolated.",
+        )
+    measurement_pills = _section_measurement_pills(
+        "/multi_height/side-section", measurement, extra,
+    )
+
+    content = f"""
+    <a href="/multi_height" class="back-link">← Multi Height</a>
+    <h1>Side Section of Wires</h1>
+
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center;">
+        {measurement_pills}
+    </div>
+    {form}
+
+    {card}
+    """
+
+    return render_page(config.title, content)
 
 
 @router.get("/multi_height/wire-trends", response_class=HTMLResponse)

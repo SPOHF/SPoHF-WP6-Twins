@@ -30,8 +30,8 @@ async def load_wire_readings(start=None, end=None):
     return df.dropna(subset=["time", "device", "value"])
 
 
-def _latest_local_day(summary: dict, wires, timezone: str) -> date | None:
-    """Most recent local day any of ``wires`` reported, from a device summary."""
+def _latest_seen(summary: dict, wires) -> pd.Timestamp | None:
+    """Most recent UTC instant any of ``wires`` reported, from a device summary."""
     seens = [
         summary[device]["last_seen"]
         for wire in wires
@@ -41,8 +41,18 @@ def _latest_local_day(summary: dict, wires, timezone: str) -> date | None:
     if not seens:
         return None
     ts = pd.Timestamp(max(seens))
-    ts = ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
-    return ts.tz_convert(timezone).date()
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
+def _latest_local_day(summary: dict, wires, timezone: str) -> date | None:
+    """Most recent local day any of ``wires`` reported, from a device summary."""
+    ts = _latest_seen(summary, wires)
+    return None if ts is None else ts.tz_convert(timezone).date()
+
+
+async def latest_reading_time(wires) -> pd.Timestamp | None:
+    """Most recent instant (UTC) any of ``wires`` reported — one aggregate."""
+    return _latest_seen(await deps.db.get_wire_device_summary(), wires)
 
 
 async def latest_wire_date(wire: str, timezone: str) -> date | None:
