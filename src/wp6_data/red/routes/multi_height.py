@@ -54,7 +54,19 @@ from ..multi_height.data import (
     latest_wire_date,
     load_wire_readings,
 )
-from ..multi_height.svg import SVG_LAYOUT_PATH, parse_svg
+from ..multi_height.side_section import (
+    PlacedNode,
+    latest_node_readings,
+    place_nodes,
+    render_side_svg,
+)
+from ..multi_height.svg import (
+    SECTION_LAYOUT_PATH,
+    SVG_LAYOUT_PATH,
+    SectionLayout,
+    parse_section_layout,
+    parse_svg,
+)
 from ..multi_height.uniformity import build_uniformity_day
 from ..multi_height.uniformity_cells import (
     aggregate_phrase,
@@ -75,6 +87,7 @@ router = APIRouter(dependencies=[Depends(verify_session_user)])
 # Temperature leads the uniformity view: it is the metric most likely to differ
 # with where a wire hangs, so it is the one that shows the page working.
 DEFAULT_UNIFORMITY_METRIC = "temp"
+DEFAULT_SECTION_MEASUREMENT = "temp"
 
 MULTI_HEIGHT_VIEWS = [
     {
@@ -83,6 +96,13 @@ MULTI_HEIGHT_VIEWS = [
         "label": "Open view",
         "description": "Latest PAR and Daily Light Integral mapped onto the "
         "greenhouse layout at each sensor height.",
+    },
+    {
+        "href": "/multi_height/side-section",
+        "title": "Side Section of Wires",
+        "label": "Open view",
+        "description": "Latest PAR, temperature, humidity and CO₂ at every height of "
+        "every wire, as a cross-section of the greenhouse.",
     },
     {
         "href": "/multi_height/wire-trends",
@@ -319,6 +339,93 @@ def _wire_range_form(start_day: date, end_day: date, wire: str) -> str:
         <button type="submit">Update</button>
     </form>
     """
+
+
+async def _latest_section_nodes(
+    measurement: str,
+) -> tuple[list[PlacedNode], SectionLayout, str]:
+    """Each wire's latest ``measurement`` readings, placed in one row."""
+    timezone = deps.base_settings.display_timezone
+    wires = await wire_ids()
+
+    # Latest *available* data: open on the last day any wire reported, then take
+    # each wire's last reading of that day, so a lagging feed never blanks the page.
+    target_date = await latest_reporting_date(wires, timezone)
+    df = None
+    if target_date is not None:
+        start, end = day_window_utc(target_date, timezone, 0)
+        df = await load_wire_readings(start, end)
+
+    readings = latest_node_readings(df, wires, measurement) if df is not None else {}
+    layout = parse_section_layout(SECTION_LAYOUT_PATH)
+    return place_nodes(readings, layout), layout, timezone
+
+
+def _section_measurement_pills(base: str, measurement: str, extra: dict) -> str:
+    return pill_row(
+        base, "measurement",
+        [(m, WIRE_MEASUREMENT_LABELS[m][0]) for m in WIRE_SENSOR_MEASUREMENTS],
+        measurement, extra, label="Measurement",
+    )
+
+
+def _section_card(
+    nodes: list[PlacedNode], timezone: str, label: str, title: str, render, blurb: str,
+) -> str:
+    if not any(n.readings for n in nodes):
+        body = (
+            f'<p style="color:#6b7280;margin:0;">No wire has reported '
+            f"{html.escape(label.lower())} yet.</p>"
+        )
+        stamp = ""
+    else:
+        body = render()
+        latest = max(r.time for n in nodes for r in n.readings.values())
+        stamp = (
+            " Latest reading: "
+            f"{pd.Timestamp(latest).tz_convert(timezone):%Y-%m-%d %H:%M}."
+        )
+    return render_card(
+        f"{html.escape(label)} {title}", body,
+        description=blurb + " Wire positions are schematic; the real layout is not known."
+        + stamp,
+        card_class="card",
+    )
+
+
+@router.get("/multi_height/side-section", response_class=HTMLResponse)
+async def side_section_page(
+    config: Annotated[TwinConfig, Depends(get_twin_config)],
+    measurement: Annotated[str, Query(description="par, temp, hum or co2")] = (
+        DEFAULT_SECTION_MEASUREMENT
+    ),
+):
+    """Latest values on every wire as a side section, heights top to bottom."""
+    if measurement not in WIRE_SENSOR_MEASUREMENTS:
+        measurement = DEFAULT_SECTION_MEASUREMENT
+
+    nodes, layout, timezone = await _latest_section_nodes(measurement)
+    label, unit = WIRE_MEASUREMENT_LABELS[measurement]
+    measurement_pills = _section_measurement_pills("/multi_height/side-section", measurement, {})
+    card = _section_card(
+        nodes, timezone, label, "side section",
+        lambda: render_side_svg(nodes, layout, measurement, label, unit),
+        f"Each column is one wire with its latest {label.lower()}, H1 at the top "
+        "to H5 at the bottom. The colour between wires and heights is interpolated.",
+    )
+
+    content = f"""
+    <a href="/multi_height" class="back-link">← Multi Height</a>
+    <h1>Side Section of Wires</h1>
+
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center;">
+        {measurement_pills}
+    </div>
+
+    {card}
+    """
+
+    return render_page(config.title, content)
 
 
 @router.get("/multi_height/wire-trends", response_class=HTMLResponse)
